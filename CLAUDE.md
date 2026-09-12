@@ -129,7 +129,10 @@ disk: uploads land on a private disk and are served by a controller that re-runs
   sidebar builder and the role editor all read it.
 - Abilities used across modules: `view`, `view_any`, `create`, `edit`, `delete`, `restore`, `approve`,
   `reject`, `assign`, `print`, `export`, `import`, `upload`, `download`, `change_status`,
-  `view_financial`, `view_reports`, `view_logs`. A module declares only the abilities it needs.
+  `view_financial`, `view_reports`, `view_logs`, plus narrowly-scoped abilities a single module
+  declares for one guarded operation (today: `project_payments.link_invoice`, decision D43 — a
+  received payment is otherwise never editable). A module declares only the abilities it needs,
+  and a narrow ability must never be widened into a general `edit`.
 - `Gate::before` order: **(1)** deny if the ability's module is disabled (everyone, Super Admin
   included, except core modules), **(2)** allow everything for the `Super Admin` role, **(3)** fall
   through to spatie.

@@ -106,7 +106,15 @@ colour token such as `emerald`, `amber`, `rose`, `slate`), and exposes `static o
 | `ThemePreference` | `Light`, `Dark`, `System` |
 | `PanelType` | `Admin`, `Collaborator`, `Student`, `Teacher`, `Client` — plus `homeRoute(): string`, `routePrefix(): string` |
 | `ModuleGroup` | `System`, `SoftwareHouse`, `Hr`, `Finance`, `Collaborator`, `Institute`, `Website`, `Shared` |
-| `Ability` | `ViewAny`, `View`, `Create`, `Edit`, `Delete`, `Restore`, `Approve`, `Reject`, `Assign`, `Print`, `Export`, `Import`, `Upload`, `Download`, `ChangeStatus`, `ViewFinancial`, `ViewReports`, `ViewLogs` |
+| `Ability` | `ViewAny`, `View`, `Create`, `Edit`, `Delete`, `Restore`, `Approve`, `Reject`, `Assign`, `Print`, `Export`, `Import`, `Upload`, `Download`, `ChangeStatus`, `ViewFinancial`, `ViewReports`, `ViewLogs`, `LinkInvoice` |
+
+> **Amendment (BT-1, 2026-09-12).** `LinkInvoice` is a narrowly-scoped ability requested by the financial
+> spine §13.2 and registered by phase-10-12 §4.1 as `project_payments.link_invoice` — decision **D43**, the
+> single permitted mutation of a received payment. The enum case belongs here (Phase 1 owns the `Ability`
+> enum); the per-slug ability list and the Accountant-only grant belong to Phase 10. **The code change is a
+> one-line addition to `app/Enums/Ability.php` and lands with Phase 10**, not now — nothing in Phase 1 or 2
+> references it, and adding an unused case early would break the `PermissionRegistry` integrity test that
+> asserts every ability maps to a registered permission. A narrow ability is never widened into `edit`.
 | `LoginStatus` | `Success`, `Failed`, `Logout`, `Blocked` |
 | `RemainderPlacement` | `First`, `Last`, `Largest` — where `Money::distribute()` puts the rounding remainder (§3), so a split of money is never ambiguous. Follows the same `label()` / `color()` / `options()` contract as every other enum here. (F-4.11) |
 

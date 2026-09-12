@@ -89,7 +89,7 @@ the `contact` section type and the §17 routing (F-2.1).
 | INV-10 | A public view may read only settings whose registry definition has `public => true`. Requesting any other key from the `site.*` namespace throws. | `SiteSettings::get()`; FT-42 |
 | INV-11 | Every uploaded image is validated by **file content**, not by extension or the client's MIME header, stored outside any executable path, and served from the `public` disk only. | `MediaService::store()`; FT-33, FT-34 |
 | INV-12 | Statistic values are **decimal strings**, never floats, and a metric that cannot be resolved renders **nothing** - never `0`. | `StatisticsProvider`; FT-30, FT-31 |
-| INV-13 | Rich text is sanitized against an allowlist **on write and again on render**. A `<script>`, an `on*` attribute, a `javascript:` URL and an `<iframe>` from a non-allowlisted host never reach the public HTML. | `RichText::sanitize()`; FT-36, FT-37 |
+| INV-13 | Rich text is sanitized against an allowlist **on write and again on render**, by `RichText::sanitize($html, $profile)` and nothing else. A `<script>`, an `on*` attribute, a `javascript:` URL, a Blade construct and an `<iframe>` from a non-allowlisted host never reach the rendered HTML **under any profile** - a profile may widen the tag/attribute allowlist, never the common core of §6.6. | `RichText::sanitize()`; FT-36, FT-37 |
 | INV-14 | No CMS row is ever hard-deleted from the UI; every CMS table carries `deleted_at` except the two recorded exceptions in §2.14. | softDeletes + policies; FT-17 |
 | INV-15 | Disabling the `website_sections` module 403s the admin CMS for everyone (Super Admin included) but **never takes the public site down** - the last published snapshot keeps serving. **No public route carries `module:` or `can:`**; a content module may gate **its own** public routes through `site_module`, which **404s** (D26). | `module:` middleware on admin routes only, `site_module` on a content module's own public routes; FT-41 |
 | INV-16 | Every publish, unpublish, reorder, toggle, slug change and SEO change writes an `activity_log` row with old and new values, the actor, the IP and - where the act is discretionary - a reason. | `LogsActivityWithContext`; FT-43 |
@@ -594,7 +594,16 @@ permission at all (§9). No `*_portal.*` permission is added or changed by this 
 Phase 2 owns the registry. Phase 3 adds **one new group** (`website`) and **four keys to the existing
 `seo` group**. The `website` group is declared **exactly once, here** (F-6.3): Phase 4 declares no group of
 its own and contributes its 21 keys into this one, so the group carries **34 keys** in total - 13 from
-Phase 3 (§5.1a) and 21 from Phase 4 (§5.1b), with no key collisions. Every Phase 2 key this phase consumes (`company.name`, `company.tagline`,
+Phase 3 (§5.1a) and 21 from Phase 4 (§5.1b), with no key collisions.
+
+> **The count is 34, verified key by key (ND-9).** §5.1a lists 13 rows; §5.1b lists 21 rows; phase-04 §5
+> lists the same 21 key names, so the two contracts agree and nothing was lost in the merge.
+> `docs/design/resolutions.md` §2.4 reads "phase-03's 13 keys **and** phase-04's 22 keys merged (35 keys)" -
+> that **22 / 35 is one high and is the error**; the canonical figures are **13 + 21 = 34**. Do not "restore"
+> a 22nd Phase-4 key: there is no missing key to restore. A later phase that genuinely needs another
+> `website.*` key adds it here and in phase-04 §5 in the same edit, and bumps both totals together.
+
+Every Phase 2 key this phase consumes (`company.name`, `company.tagline`,
 `company.founded_year`, `company.copyright_text`, `branding.*`, `contact.*`, `social.*`,
 `seo.meta_title`, `seo.meta_description`, `seo.meta_keywords`, `seo.canonical_base_url`, `seo.og_image`,
 `seo.robots_indexable`, `seo.sitemap_enabled`, `seo.google_analytics_id`, `seo.google_tag_manager_id`,
@@ -817,7 +826,21 @@ App\Services\Cms\SeoService
   save(Model|string $target, array $data): SeoMeta
   completeness(SeoMeta $m): int                 // 0-100, drives the SEO screen meter
   auditRows(): Collection                       // every indexable target + its gaps, for the table and the CSV export
+  rules(string $prefix = 'seo'): array          // the ONE validation rule set for SEO input (D23)
 ```
+
+**`rules()` is the single SEO validation contract (D23, ND-13).** Because `seo_meta` is the only SEO store,
+its **validation** lives with it too: `rules()` returns the Laravel rule array for the six writable
+`seo_meta` columns, keyed under `$prefix` so it can be merged into any entity Form Request - and **each max
+is taken from §2.12's column width, not guessed**: `seo.title` `nullable|string|max:180`,
+`seo.meta_description` `nullable|string|max:320`, `seo.meta_keywords` `nullable|string|max:500`,
+`seo.canonical_url` `nullable|url|max:500`, `seo.robots` `nullable|Enum(RobotsDirective)`,
+`seo.og_image_media_id` `nullable|integer|exists:media_assets,id`. (A duplicated rule is also a *wrong*
+rule: the copy that ND-13 removed from phase-04 §6.11 said `max:255` against a `string(320)` column.)
+`<x-cms.seo-fields>` posts under that prefix and an entity Form Request does
+`array_merge($own, app(SeoService::class)->rules())` - it **never restates a `seo_meta` column's rule**
+(phase-04 §6.11 does exactly this). One store, one writer, one rule set: a Form Request that declares its
+own `meta_description` rule is how a second SEO write path starts, so there is none.
 
 **Fallback chain, applied per field** (the first non-empty wins):
 
@@ -868,9 +891,29 @@ while the site is down. **[D-W3-13]**
 | Concern | Rule |
 |---|---|
 | Icons | `resources/data/icons.php` returns an allowlisted Heroicons name list grouped for the picker. An `icon` field validates `in:` that list; `x-ui.icon` renders it. A custom icon is an `image` field with `ImageProfile::Icon`, never raw SVG markup |
-| Link fields | `url` must match `^(https?://|mailto:|tel:|/|#)` - `javascript:`, `data:` and `vbscript:` are rejected by validation **and** by `RichText` (INV-13). `open_new_tab` always emits `rel="noopener noreferrer"` |
-| Rich text | `App\Support\RichText::sanitize(string $html): string` is the **only** HTML sanitiser in the system (D25 - no phase ships a second one) and wraps `mews/purifier` with the `cms` profile: allowed tags `p br strong em u s h2 h3 h4 ul ol li blockquote a img figure figcaption table thead tbody tr th td hr span`; allowed attributes `href title target rel src alt width height class` (class restricted to a fixed allowlist); `<iframe>` allowed **only** for `www.youtube.com/embed`, `player.vimeo.com/video`, `www.google.com/maps/embed`. Sanitized on save **and** re-sanitized on render, because the DB is not a trust boundary |
+| Link fields | `url` must match `^(https?://|mailto:|tel:|/|#)` - `javascript:`, `data:` and `vbscript:` are rejected by validation **and** by `RichText` (INV-13). This is a rule about **link hrefs** and holds under every profile; the `material` profile's `data:` concession is for an `<img src>` of an allowlisted image type only, never for an `href` (see the map below). `open_new_tab` always emits `rel="noopener noreferrer"` |
+| Rich text | `App\Support\RichText::sanitize(string $html, string $profile = 'cms'): string` is the **only** HTML sanitiser in the system (D25 - no phase ships a second one, and no phase adds a `mews/purifier` profile of its own). See the profile map below |
 | Plain text fields | escaped by Blade as normal; no `{!! !!}` anywhere in `site/` except the two sanitized rich-text and map-embed outputs, which are grepped for by FT-37 |
+
+**The `RichText` profile map (ND-5).** `$profile` is a **name**, resolved through a closed `PROFILES`
+constant declared inside `RichText` itself; the caller's string is **never** forwarded to
+`mews/purifier` as a config key. An unrecognised name throws `UnknownRichTextProfileException`, so a later
+phase cannot invent a profile by passing one, and adding a third is an edit to this class (plus a reviewed
+addition to `config/purifier.php`, §13.4) treated as a security change. Two profiles are committed; there
+is no third, and there is still exactly **one** sanitiser class and **one** code path (D25).
+
+| Profile | Who uses it | Allowed on top of the common core |
+|---|---|---|
+| **`cms`** *(the default)* | every Phase 3 field (§2.2 `content`, §2.10 `answer`, pages, CTA blocks) and every Phase 4 rich-text field | tags `p br strong em u s h2 h3 h4 ul ol li blockquote a img figure figcaption table thead tbody tr th td hr span`; attributes `href title target rel src alt width height class` (`class` restricted to a fixed allowlist); `src` must be `https:` or site-relative; `<iframe>` allowed **only** for `www.youtube.com/embed`, `player.vimeo.com/video`, `www.google.com/maps/embed` (§12.2 Q3's map embed) |
+| **`material`** | phase-19-23's `PrintTemplateService` (`print_templates.body_html` / `custom_css`, INV-21-5, D52/D53) and its course-material HTML - the **wider document/layout set** those screens need | everything in `cms` **minus** the iframe hosts, **plus** tags `div h1 h5 h6 small b i sub sup`; **plus** attributes `style align`; `src` additionally accepts `data:` images (`image/png`, `image/jpeg`, `image/gif`, `image/webp` only) and relative paths; CSS in `style` and in a supplied stylesheet is sanitised - `@import`, `expression(` and any external `url()` are stripped |
+
+Common core, enforced for **both** profiles and not weakenable by a profile: `script`, `object`, `embed`,
+`link`, `meta`, `form`, `input`, `base` and `applet` are removed; every `on*` attribute is removed; every
+`javascript:` / `vbscript:` / `file:` URL is removed; every Blade and PHP construct (`{{`, `{!!`, `@php`,
+`@include`, `@extends`, `<?php`) is removed; any `<iframe>` not on the calling profile's host allowlist is
+removed. **One class, one code path, one security control - per-context allowlists, never per-phase
+sanitisers** (F-2.5, D25). Every profile sanitises on save **and** again on render, because the DB is not
+a trust boundary.
 
 ### 6.7 Public cache
 
@@ -1609,6 +1652,7 @@ status **and** that nothing was written (`assertDatabaseCount` before and after)
 | FT-43 | `test_every_cms_write_is_audited` | publish, unpublish, reorder, toggle, slug change, SEO change and a media delete each write an `activity_log` row with the module, the actor, the IP, the device and - for unpublish and revert - the reason; old and new values are recorded for the slug and the SEO change |
 | FT-48 | `test_authorization_matrix` | for each of the 18 seeded roles x the 9 route groups of §7: the expected status. Specifically - a user with `website_sections.edit` but not `change_status` gets 200 on update and **403 on publish** with `published_hash` unchanged; `seo.view` without `seo.edit` renders read-only and 403s the update; HR, Accountant, Receptionist, Teacher, Student, Client and Collaborator get 403 everywhere; a permission-less user gets 403 on all of them |
 | FT-36 | `test_rich_text_is_sanitized_on_write_and_on_render` | `<script>alert(1)</script>`, `<img onerror=...>`, `<a href="javascript:...">` and `<iframe src="https://evil.test">` are stripped on save; a row hand-written into the DB with a `<script>` tag still renders sanitized (the DB is not a trust boundary); a YouTube iframe survives |
+| FT-36b | `test_rich_text_profiles_are_a_closed_map` | **the `cms` profile** strips `<div>`, `style=`, `align=` and a `data:` image; **the `material` profile** keeps all four (a `data:image/png` survives, a `data:text/html` does not) yet still strips `<script>`, `on*`, `javascript:`, `{{ 7*7 }}`, `@php`, `<?php`, `@import`, `expression(` and an external `url()`; `sanitize($html, 'print')` - any name outside the committed map - throws `UnknownRichTextProfileException` and never reaches `mews/purifier`; a grep of `app/` and `config/` finds exactly one sanitiser class and exactly two purifier profiles (ND-5, D25) |
 | FT-37 | `test_no_unescaped_output_in_site_views` | a static scan of `resources/views/site/**` allows `{!! !!}` only on `RichText::sanitize()` output and the sanitized map embed; any other occurrence fails the test |
 | FT-49 | `test_maintenance_and_public_site_gates` | `maintenance_mode = true` -> `GET /` is 503 with the admin's message, `Retry-After` and `noindex`, while `/admin` is unaffected and a user holding `website_sections.view` sees the real site with the ribbon; `public_site_enabled = false` -> the holding page, 503, and `/admin` still fine; neither leaks a stack trace or a login form |
 | FT-50 | `test_install_and_rollback` | `migrate:fresh --seed` runs clean and the home page renders; every Phase 3 migration rolls back cleanly in reverse; re-running `WebsiteCmsSeeder` twice changes no row count and does not overwrite an edited heading; the generated columns, the three CHECK constraints and the two unique guards are asserted to exist (a silently skipped constraint fails CI, not production) |
@@ -1686,7 +1730,7 @@ status **and** that nothing was written (`assertDatabaseCount` before and after)
 | **Do not create** a per-entity SEO table or SEO columns - use `seo_meta` via `morphOne(SeoMeta::class, 'seoable')`, write only through `SeoService::save()`, register one `SitemapUrlProvider` per entity in `SitemapRegistry`, and use `seo_meta.og_image_media_id` for the OG image (**D23**) | §105 is one feature, not six |
 | **Do not create** a second media/image table or a second uploader - use `media_assets` + `MediaService` + `ImageProfile`. **Two media tiers (D24)**: `media_assets` + `MediaService` + `ImageProfile` is **mandatory for anything rendered on the public website**; a bare `*_path` column is allowed **only** for a private profile photo or document (`employees.photo_path`, `students.photo_path`, `collaborators.photo_path`, the teacher photo, `clients.logo_path`, `job_applications.cv_path`). A public section that wants to show client logos stores its own `website_section_media` ids and never reads `clients.logo_path` | one library, one derivative pipeline, one usage count |
 | **Do not create** `course_faqs` - use `faqs.faqable_type` / `faqable_id` with `faqable_type = App\Models\Institute\Course` (§90 course FAQs), written through `FaqService::save()` (§6.13) | the hook already exists |
-| **Do not create** a second HTML sanitiser - `App\Support\RichText::sanitize()` over `mews/purifier` is the only one, applied on write **and** on render (**D25**). No phase ships an `HtmlSanitizer` of its own | a duplicated security control is a security defect |
+| **Do not create** a second HTML sanitiser - `App\Support\RichText::sanitize(string $html, string $profile = 'cms'): string` over `mews/purifier` is the only one, applied on write **and** on render (**D25**). No phase ships an `HtmlSanitizer` of its own, and **no phase adds a purifier profile of its own**: a context that needs a wider tag set passes a profile name from §6.6's closed map (`cms`, `material`), and a third profile is an edit to `RichText` reviewed as a security change - never a second class, a second config profile or a post-hoc re-widening of the output | a duplicated security control is a security defect; one code path with per-context allowlists keeps the proof in one place (ND-5) |
 | Register every new public section as a `WebsiteSectionRegistry` type with a partial under `site/sections/`, and a `SectionDataProvider` when it needs data - **never** a hand-written route returning its own Blade page | otherwise §7's "enable, disable, reorder" stops being true for half the home page |
 | Register every public URL set with `SitemapRegistry` (`services`, `portfolio`, `blog`, `courses`, `careers`) and **never edit `SitemapService`** | §105 sitemap support, with the per-provider counts in `sitemap_generations.providers` |
 | Reuse `ContentStatus`, `CmsRevision`, `RichText::sanitize()`, `<x-site.image>`, `<x-site.section>`, `<x-cms.field>` and `PublicCache::bump()` (via an event + the existing listener) | a second publish model or a second cache strategy would make invalidation unprovable |
@@ -1699,7 +1743,7 @@ status **and** that nothing was written (`assertDatabaseCount` before and after)
 | Request | Why |
 |---|---|
 | `composer require intervention/image ^3` | already planned for Phase 3 in `DEVELOPMENT_LOG.md` §2; the derivative pipeline of §6.8 |
-| `composer require mews/purifier ^3.4` | `RichText::sanitize()` (INV-13); the only new trust-path dependency, with a `cms` profile committed in `config/purifier.php` |
+| `composer require mews/purifier ^3.4` | `RichText::sanitize()` (INV-13); the only new trust-path dependency. **Both** committed profiles live in `config/purifier.php` - `cms` (the default) and `material` (§6.6) - and `RichText` is the only class that may name one; later phases select a profile, they do not add one (D25, ND-5) |
 | `npm i sortablejs trix` | the one drag implementation (§8.2) and the rich-text editor |
 | `DEVELOPMENT_LOG.md` §4: **cite D19** - append-only tables (`cms_revisions`, `sitemap_generations`, `seo_meta`) carry no soft deletes. This contract claims **no** decision number of its own (Q1, F-10.1) | one category rule in `CLAUDE.md` §3 beats fifty local exceptions |
 | `DEVELOPMENT_LOG.md` §4: **cite D22** - public website content is published by snapshot (`content` -> `published_content`) and invalidated by a cache **version stamp**, because the database cache driver has no tag support | the two decisions every later CMS phase must inherit ([D-W3-7], [D-W3-14]) |
@@ -1726,3 +1770,18 @@ Applied from [`../design/resolutions.md`](../design/resolutions.md) §7 (apply m
 | F-6.7 | §8 gains the one-Website-sidebar-group rule ("content *about* the site under `/admin/website`, business entities the site renders at the top level", no route renames); §13.1 Sidebar row says Phase 4 appends to the same group |
 | F-9.1 | §2 preamble and §2.14 cite **D19** instead of claiming a local decision; §12.2 Q1 closed as answered by D19 |
 | F-10.1 | §13.4: D17 -> **cite D19**, D18 -> **cite D22**, plus a row citing **D23, D24, D25**. Cache/snapshot decision marked D22 at §2.15 and §6.7. No contract invents a number |
+
+---
+
+## Drift fixes (round 2)
+
+Applied from [`../design/consistency-audit-round-2.md`](../design/consistency-audit-round-2.md) §4. These
+close contradictions the convergence pass itself introduced. Nothing here weakens a guarantee: D25 still
+names **one** sanitiser class and D23 still names **one** SEO store - each simply gained the argument that
+makes the single implementation serve every caller that was about to fork it.
+
+| ND | Change made |
+|---|---|
+| ND-5 | §6.6's published signature becomes `App\Support\RichText::sanitize(string $html, string $profile = 'cms'): string`, and the section gains **the profile map**: a closed, class-level allowlist of exactly two committed profiles - `cms` (Phase 3 + Phase 4, unchanged from the previously committed allowlist) and `material` (the wider document/layout set phase-19-23's print templates and course-material HTML need: `div h1 h5 h6 small b i sub sup`, `style`, `align`, `data:` images, sanitised CSS). An unknown profile name throws `UnknownRichTextProfileException` and is never passed through as a purifier config key. A **common core** that no profile may weaken is stated explicitly (`script`/`object`/`embed`/`link`/`meta`/`form`/`input`/`base`, every `on*`, `javascript:`/`vbscript:`/`file:`, every Blade and PHP construct, every non-allowlisted `<iframe>`). INV-13 restated to bind under *any* profile; §13.3's "no second sanitiser" row extended with "**and no phase adds a purifier profile of its own**"; §13.4's `mews/purifier` row now commits both profiles; new test **FT-36b** asserts the two allowlists differ in exactly the intended way, that `material` still strips everything in the core, and that an unknown profile throws. **D25 is unchanged and unweakened** - one class, one code path, one security control, per-context allowlists |
+| ND-9 | §5 preamble keeps **34** and adds the verified derivation: §5.1a = 13 rows, §5.1b = 21 rows, phase-04 §5 = the same 21 key names (diffed name by name), so the two contracts agree and nothing was lost in the merge. It records that `resolutions.md` §2.4's "22 keys / 35 keys" is **one high and is the error**, and forbids "restoring" a non-existent 22nd key; a future `website.*` key is added to §5.1b and phase-04 §5 in one edit with both totals bumped together |
+| ND-13 *(phase-03 half)* | §6.5 publishes `SeoService::rules(string $prefix = 'seo'): array` - the **one** SEO validation rule set, with each `max` taken from §2.12's real column width (`title` 180, `meta_description` **320**, `meta_keywords` 500, `canonical_url` 500, `robots` = `RobotsDirective`, `og_image_media_id` = `exists:media_assets,id`). `<x-cms.seo-fields>` posts under that prefix and an entity Form Request merges `rules()` instead of restating a `seo_meta` column (D23). This is what phase-04 §6.11 now delegates to after dropping its own `meta_description max:255` - a duplicated rule that was also a *wrong* rule against a `string(320)` column |

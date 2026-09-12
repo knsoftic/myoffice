@@ -18,7 +18,7 @@ cited as **[D-FS-n]** and spine invariants as **INV-n**.
 | § | Contents |
 |---|---|
 | 1 | Goal, dependencies, **ownership**, **invariants**, build order |
-| 2 | Schema (4 new tables + 1 additive column), relationships |
+| 2 | Schema (4 new tables + 1 additive column + **3 guarded FK promotions**, §2.5a), relationships |
 | 3 | Enums |
 | 4 | PermissionRegistry additions (incl. the full §59 portal set) |
 | 5 | SettingsRegistry additions |
@@ -71,8 +71,8 @@ row, a wallet balance, a payment or a payout.
 
 | Owns | Must NOT create |
 |---|---|
-| **Phase 8**: `collaborators`, `collaborator_skills`, `collaborator_service`; `activity_log.collaborator_id`; enums §3.1; `CollaboratorService`, `CollaboratorCodeService`, `CollaboratorOnboardingService`, `CollaboratorPayoutAccountService`, `CollaboratorPortalMetricsService`, `CollaboratorActivityService`; the admin collaborator CRUD + approval queue + profile tabs; the payout-account screens; the commission-rule screen (the spine's §8.4, built here against the spine's service); the collaborator panel shell, sidebar, dashboard, profile and activity log | any of the spine's 15 tables; `ReferralService`; `CommissionRuleService`; `CollaboratorWalletService`; any balance computation (INV-26) |
-| **Phase 9**: `collaborator_referral_visits`; enums §3.2; `ReferralLinkService`, `ReferralTrackingService`, `ReferralAttributionResolver`, `CaptureReferral` middleware, `<x-site.referral-field>`, the `SyncReferralSnapshot` + `MarkReferralVisitConverted` listeners; the referral-visit register and conversion report; the manual-link and change-attribution screens | `collaborator_referrals` (the table **or** direct writes to it - everything goes through `ReferralService`, spine §13.1); any ledger, entitlement or wallet write |
+| **Phase 8**: `collaborators`, `collaborator_skills`, `collaborator_service`; `activity_log.collaborator_id`; §2.5a's guarded FK promotion on `contact_inquiries.collaborator_id`; enums §3.1; `CollaboratorService`, `CollaboratorCodeService`, `CollaboratorOnboardingService`, `CollaboratorPayoutAccountService`, `CollaboratorPortalMetricsService`, `CollaboratorActivityService`; the admin collaborator CRUD + approval queue + profile tabs; the payout-account screens; the commission-rule screen (the spine's §8.4, built here against the spine's service); the collaborator panel shell, sidebar, dashboard, profile and activity log | any of the spine's 15 tables; `ReferralService`; `CommissionRuleService`; `CollaboratorWalletService`; any balance computation (INV-26) |
+| **Phase 9**: `collaborator_referral_visits`; §2.5a's two guarded FK promotions (`contact_inquiries.referral_visit_id`, `leads.referral_visit_id`); enums §3.2; `ReferralLinkService`, `ReferralTrackingService`, `ReferralAttributionResolver`, `CaptureReferral` middleware, `<x-site.referral-field>`, the `SyncReferralSnapshot` + `MarkReferralVisitConverted` listeners; the referral-visit register and conversion report; the manual-link and change-attribution screens | `collaborator_referrals` (the table **or** direct writes to it - everything goes through `ReferralService`, spine §13.1); any ledger, entitlement or wallet write |
 
 ### 1.4 Build order [D-P8-1]
 
@@ -108,7 +108,7 @@ existing machinery, never by duplicating a table:
 | INV-R3 | A staff member's explicit manual selection always outranks every captured candidate, and when the two disagree the losing candidate is preserved as a **superseded** referral row with its reason (spine §2.8) - written by the spine's published `ReferralService::recordLosingCandidate()`, never by this phase (F-4.4). | `ReferralAttributionResolver` + `ReferralService::attach()` + `ReferralService::recordLosingCandidate()`; FT-R03, FT-R04 |
 | INV-R4 | Changing an attribution **supersedes, never mutates**, requires `collaborator_referrals.edit` + a mandatory reason, stores old and new, writes an audit row, and **never re-points a ledger row** (spine §6.6 row 3, INV-18). | spine `ReferralService::change()`; FT-R10, FT-R11 |
 | INV-R5 | At most one `active` referral per subject exists, for the life of the database. | spine `uq_cr_student_current` / `uq_cr_project_current` / `uq_cr_client_current` / `uq_cr_lead_current`; FT-R02 |
-| INV-R6 | A referral visit that has converted, or that any `collaborator_referrals.referral_visit_id` **or `leads.referral_visit_id`** points at, is **never pruned**. | `PruneReferralVisits` exclusion + FT-R15 |
+| INV-R6 | A referral visit is **never pruned while it is still evidence**: not when `converted_at` is set, not while **any** column anywhere in the database that references `collaborator_referral_visits.id` still points at it, and not when its collaborator has a ledger entry sourced through it. The rule is stated over **every** referencing column, never a list of two (RD-3); the six that exist today are `collaborator_referrals.referral_visit_id` (spine §2.8), `leads.referral_visit_id` (phase-05 §2.1), `contact_inquiries.referral_visit_id` (**phase-04 §2.20** rule 4), `course_inquiries.referral_visit_id` (phase-14-17 §2.11), `student_applications.referral_visit_id` (phase-14-17 §2.13) and `students.referral_visit_id` (phase-14-17 §2.14). | `PruneReferralVisits::REFERENCING_COLUMNS` exclusions (§10.4) + the `information_schema` cross-check + FT-R15 |
 
 ---
 
@@ -277,7 +277,48 @@ the reverse `hasMany` from `Collaborator`; `hasMany` `CollaboratorReferral` via 
 |---|---|---|
 | `add_collaborator_id_to_activity_log_table` | `activity_log.collaborator_id` bigint unsigned nullable, FK `collaborators.id` `nullOnDelete`, `INDEX (collaborator_id, created_at)` | §60 demands a per-collaborator activity log. D13 contracts **one** audit store, so §60 must be a filtered view over `activity_log` - and the filter has to be an indexed column, because the rows that matter most (commission created, commission approved, payout paid) have a **null causer** (the engine, the scheduler) and a subject the collaborator does not own. Scoping by causer alone would silently drop them |
 
-No other column on another phase's table is written here; everything else is a request in §13.
+No other column on another phase's table is written here; everything else is a request in §13 - except the
+three FK **constraints** of §2.5a, which earlier phases explicitly defer to these phases.
+
+### 2.5a Guarded FK promotions on earlier phases' deferred columns (RD-3)
+
+Phases 4 and 5 ship three referral columns **before** the tables they point at exist, as
+`unsignedBigInteger`, nullable and indexed, with the constraint deliberately deferred to the owning phase
+(phase-04 §2.20 and its §2.1 deferred-FK list; phase-05 §2.1). phase-04 §13's **Phase 8-9 block** and
+phase-05 §13.1 ask these phases to promote them. **Honoured here** - nothing else about those tables is
+touched:
+
+| Migration | Phase | Promotion | Asked by |
+|---|---|---|---|
+| `add_collaborator_fk_to_contact_inquiries_table` | **8** | `contact_inquiries.collaborator_id` -> FK `collaborators.id`, `nullOnDelete` | phase-04 §13 Phase 8-9 block (ND-3) |
+| `add_referral_visit_fk_to_contact_inquiries_table` | **9** | `contact_inquiries.referral_visit_id` -> FK `collaborator_referral_visits.id`, `nullOnDelete` | phase-04 §13 Phase 8-9 block (ND-3) |
+| `add_referral_visit_fk_to_leads_table` | **9** | `leads.referral_visit_id` -> FK `collaborator_referral_visits.id`, `nullOnDelete` | phase-05 §13.1 (F-3.5) - the same ask in the same pattern, recorded here so it is not lost twice |
+
+Rules, identical for all three:
+
+1. **Guarded both ways and loud when it skips**: `Schema::hasTable()` on the owning table *and* on the
+   target, plus a column check, in the spirit of [D-FS-1] and §2.3's `services` guard - so `migrate` and
+   `migrate:fresh` are legal whatever order Phase 4/5 land in, and a skip is logged rather than silent.
+2. **The constraint only.** The migration creates, renames, widens, backfills and indexes **nothing**:
+   phase-04 §2.20 and phase-05 §2.1 already declare all three columns nullable **and indexed**, and the
+   `tests/Support/index-manifest.php` rows for the two `contact_inquiries` columns exist from day one
+   (phase-04 §13, **D60**).
+3. **Idempotent**, and reversible the safe way: it checks for an existing constraint of that name first, so
+   a re-run is a no-op; `down()` drops the **FK and nothing else** - never the column, never the index.
+4. **Pre-existing orphans are nulled by a reported pre-pass, never deleted**, because MariaDB refuses an FK
+   over a dangling value (errno 1452). Both `contact_inquiries` columns and `leads.referral_visit_id` are
+   display snapshots under **D37**, re-derivable by `collaborators:sync-referral-snapshots`, so nulling an
+   already-dangling pointer loses no fact - but the count is **logged and printed**, because a silent repair
+   of attribution data is what INV-R1 forbids. No inquiry, lead or visit row is ever deleted.
+5. **Order**: migration 1 ships with Phase 8's set (after `collaborators`), migrations 2-3 with Phase 9's
+   (after `collaborator_referral_visits`), and all three before the first `referrals:prune-visits` run. The
+   sweep does not depend on them: §10.4's exclusions guard a column whether or not its constraint is in
+   place yet.
+
+**Not promoted here, by design**: `students.referral_visit_id`, `student_applications.referral_visit_id` and
+`course_inquiries.referral_visit_id`. Those tables are created **after** Phase 9, so each declares its own
+guarded FK in its own migration (phase-14-17 §2.11 / §2.13 / §2.14); three more migrations here would be
+permanent no-ops. INV-R6 still covers all three columns - retention is a sweep guarantee, not an FK one.
 
 ### 2.6 Tables this phase **references but never creates**
 
@@ -528,8 +569,19 @@ final class ReferralAttributionResolver
    It writes `status = superseded`, `effective_from = effective_to = today`,
    `superseded_by_id` = the winner, `commission_eligible = false`, `change_reason` = the override reason
    (mandatory), `changed_by` = the actor, and the losing candidate's own visit evidence from `$ctx`.
-   `uq_cr_superseded_by` means only one loser may point at a given winner, which is exactly the
-   one-submission case.
+   **Several rows may legitimately point at one winner, and nothing stops them (ND-12, RD-7).**
+   `uq_cr_superseded_by` **no longer exists**: `collaborator_referrals.superseded_by_id` carries the plain,
+   deliberately **non-unique** `idx_cr_superseded_by` (spine §2.8), because a single winner supersedes
+   `ReferralService::change()`'s previously `active` row **plus one row per losing candidate** recorded here -
+   and a unique index would raise 1062 on the second of those perfectly legal writes and destroy the
+   attribution evidence this table exists to keep. `superseded_by_id` is a **navigation pointer**
+   (this row -> the row that replaced it), not a guarantee, so this ladder must **never** encode
+   "one loser per winner": a submission that resolves two or three losing candidates writes two or three
+   superseded rows sharing the same `superseded_by_id`. The **only** uniqueness that binds is
+   `uq_cr_student_current` / `uq_cr_project_current` / `uq_cr_client_current` / `uq_cr_lead_current` over the
+   generated `current_guard` column - at most one `active` referral per subject (INV-R5, INV-18, FT-R02) -
+   and a superseded row has `current_guard = NULL`, so it leaves the active slot free however many siblings
+   it has.
 8. **Effective dating**: `referral_date = effective_from = min(today, the subject's business date)`,
    floored at the winning visit's `first_seen_at` date when the winner came from a visit - so a
    back-dated admission credits the partner from the admission date, never from before the click, and
@@ -931,7 +983,7 @@ forbidden columns from the response body.
 | `CollaboratorObserver::created` | creates the `collaborator_wallets` row **in the same transaction** (spine §1.2, §6.6 row 17, INV-C3); a no-op with a logged warning when the spine is not yet migrated (§1.4) |
 | `CollaboratorObserver::updating` | throws `ImmutableCollaboratorCodeException` on `collaborator_code`; routes a `referral_code` change through `CollaboratorCodeService` (INV-C1, INV-C2) |
 | `SeedInitialCommissionRules` (on `CollaboratorApproved`) | calls the spine's `CommissionRuleService::createVersion()` for both scopes when the setting and the module allow |
-| `SyncReferralSnapshot` (on `ReferralAttached` / `ReferralChanged` / `ReferralRevoked`) | the **only** writer of the subject snapshot columns - `students.collaborator_id`, `.referral_code`, `.referral_source`, `.referral_date`, `.referral_visit_id`; `student_admissions` / `course_inquiries` / `contact_inquiries` / `projects` equivalents; and on the CRM side `leads.referral_code_captured` + `.referral_visit_id` and `clients.referral_code_captured` + `.referral_recorded_at` (F-3.4, F-3.5 - **neither `leads` nor `clients` carries a `collaborator_id`**) - INV-R1; also writes the §60 `student_referral` / `project_referral` activity rows |
+| `SyncReferralSnapshot` (on `ReferralAttached` / `ReferralChanged` / `ReferralRevoked`) | the **only** writer of the subject snapshot columns - `students.collaborator_id`, `.referral_code`, `.referral_source`, `.referral_date`, `.referral_visit_id`; `student_admissions` / `course_inquiries` / `contact_inquiries` (the three columns defined at **phase-04 §2.20**, ND-3) / `projects` equivalents; and on the CRM side `leads.referral_code_captured` + `.referral_visit_id` and `clients.referral_code_captured` + `.referral_recorded_at` (F-3.4, F-3.5 - **neither `leads` nor `clients` carries a `collaborator_id`**) - INV-R1; also writes the §60 `student_referral` / `project_referral` activity rows |
 | `MarkReferralVisitConverted` (on `ReferralAttached` / `ReferralChanged`) | stamps the winning visit's conversion columns, idempotently |
 | `ClearReferralCookie` (on `ReferralAttached`) | forgets the session key and queues cookie expiry so one click cannot attribute two subjects by accident |
 | `SuspendCollaboratorSessions` (on `CollaboratorStatusChanged`) | mirrors `CollaboratorStatus::canLogin()` onto `users.status` and deletes the user's `sessions` rows |
@@ -954,8 +1006,36 @@ not a system notification, and §97 does not ask for it.
 | `collaborators:backfill-wallets` | on demand (§1.4) | idempotent `firstOrCreate` of a wallet for every collaborator; reports how many were missing |
 | `collaborators:seed-initial-rules` | on demand (§1.4) | creates the first rule version for approved collaborators that have none; skips anyone who already has a version |
 | `collaborators:sync-referral-snapshots` | daily 02:30 | re-derives every subject snapshot column from `collaborator_referrals` (the truth) and reports every repair - a cache-repair job in the spine's spirit, never a writer of attribution |
-| `referrals:prune-visits` | weekly | deletes `collaborator_referral_visits` older than `collaborator.referral_visit_retention_days` (§5, default 365 - F-13.12), **excluding** any row with `converted_at`, any row referenced by `collaborator_referrals.referral_visit_id` **or by `leads.referral_visit_id`** (F-3.5), and any row whose collaborator has a ledger entry sourced through it (INV-R6) |
+| `referrals:prune-visits` | weekly | deletes `collaborator_referral_visits` older than `collaborator.referral_visit_retention_days` (§5, default 365 - F-13.12), **excluding** any row with `converted_at`, any row that **any** referencing column still points at - all six of INV-R6, enumerated in `PruneReferralVisits::REFERENCING_COLUMNS` and not in this sentence (RD-3) - and any row whose collaborator has a ledger entry sourced through it (INV-R6) |
 | `collaborators:flag-pending` | daily 08:00 | notifies approvers about `pending` records older than `collaborator.pending_application_alert_days` |
+
+**The prune sweep's referencing-column manifest (INV-R6, RD-3).** Enumerating two referencing columns in a
+sentence is how the third becomes prunable, so the exclusion list is data, declared once:
+
+```php
+// PruneReferralVisits - the class INV-R6 names; `referrals:prune-visits` only invokes it
+public const REFERENCING_COLUMNS = [
+    'collaborator_referrals' => 'referral_visit_id',   // spine §2.8
+    'leads'                  => 'referral_visit_id',   // phase-05 §2.1 (F-3.5)
+    'contact_inquiries'      => 'referral_visit_id',   // phase-04 §2.20 rule 4 (ND-3)
+    'course_inquiries'       => 'referral_visit_id',   // phase-14-17 §2.11 (F-3.14)
+    'student_applications'   => 'referral_visit_id',   // phase-14-17 §2.13
+    'students'               => 'referral_visit_id',   // phase-14-17 §2.14
+];
+```
+
+1. **One `NOT EXISTS` per entry**, built from the constant, in the single delete statement - never a
+   hand-written pair of joins and never a PHP loop over candidate rows.
+2. An entry whose table does not exist yet is **skipped with a logged warning** (`Schema::hasTable()`, the
+   same [D-FS-1] spirit as §2.3's `services` guard), because phases 14-17 land after Phase 9. A table that
+   **does** exist is always guarded, whether or not its deferred FK has been promoted yet (§2.5a), so no
+   visit is orphanable in the window between Phase 4/5 declaring the column and Phase 8/9 promoting the
+   constraint.
+3. **The database is not the guard.** Every one of these FKs is `nullOnDelete`, so a delete would *succeed*
+   and quietly null the pointer rather than refuse - which is exactly how click evidence disappears. The
+   command's own exclusion is the guarantee; the constraint only keeps the pointer honest.
+4. Adding a seventh referencing column anywhere in the system means adding a line here. FT-R15 asserts the
+   constant against `information_schema`, so forgetting fails CI rather than production.
 
 ---
 
@@ -1007,7 +1087,7 @@ financial proof.
 | FT-C25 | `test_money_columns_need_view_financial` | an admin with `collaborators.view_any` but not `.view_financial` receives an index response containing no lifetime-earned and no available-balance key |
 | FT-C26 | `test_activity_log_shows_the_eleven_events_scoped` | each of §60's eleven events appears in the collaborator's feed with IP and device; a commission created by the engine (null causer) **does** appear, proving `activity_log.collaborator_id` is the filter; another collaborator's rows never appear; staff-written reasons about the collaborator are absent from their own feed |
 | FT-C27 | `test_module_gating_hides_without_deleting` | disabling `collaborators` 403s the panel and the admin routes for Super Admin too, hides the sidebar items, and leaves row counts in `collaborators`, `collaborator_skills`, `collaborator_service` and every spine table identical before and after disable + re-enable |
-| FT-C28 | `test_migrations_roll_back_cleanly` | each Phase 8/9 migration runs forward and back on a database holding rows (CHECKs and the `collaborator_service` guard included); `migrate:fresh --seed` is clean; the `services`-guarded migration is a no-op when the table is absent |
+| FT-C28 | `test_migrations_roll_back_cleanly` | each Phase 8/9 migration runs forward and back on a database holding rows (CHECKs and the `collaborator_service` guard included); `migrate:fresh --seed` is clean; the `services`-guarded migration is a no-op when the table is absent; and each of **§2.5a**'s three FK-promotion migrations is a no-op when its target table or column is absent, is idempotent on a re-run, drops **only** the constraint on `down()` (the column and its index survive), and **reports** the orphan pre-pass count instead of repairing silently (RD-3) |
 | FT-C29 | `test_activity_feed_renders_only_allowlisted_properties` | a staff-written `referral.decided` row carrying `override_reason`, a `status_changed` row carrying `reason`, and a row carrying an extra `properties` key not named by `CollaboratorActivityEvent::visibleProperties()` all appear in the collaborator's feed **with those keys absent from the response body** (not null, not blank); adding a new key to an event's `properties` without adding it to `visibleProperties()` keeps it invisible (F-12.7) |
 
 ### 11.4 Referral capture, precedence, tracking (Phase 9)
@@ -1016,7 +1096,7 @@ financial proof.
 |---|---|---|
 | FT-R01 | `test_referral_url_capture_records_a_visit_and_sets_the_carriers` | `GET /admission?ref=COL-1024` writes one visit (`outcome = captured`, landing path, device, `expires_at = now + 30d`), sets `session('referral.visit_token')`, and queues an encrypted `httpOnly` `ref_attr` cookie; a second hit with the same token and code increments `visits_count` instead of writing a row; `/courses/php-basics?ref=` and `/contact?ref=` behave identically |
 | FT-R02 | `test_admission_attaches_the_captured_collaborator` | submitting the admission form with only the cookie creates exactly one `active` `collaborator_referrals` row with `referral_source = referral_link`, the code snapshotted, `referral_visit_id` set, `effective_from` = the admission date clamped to today; the visit is `converted`; a second submission cannot create a second active referral (`uq_cr_student_current`) |
-| FT-R03 | `test_staff_selection_outranks_every_captured_candidate` | with a cookie naming A, a receptionist picking B produces **B** active (`manual_selection`) and **A** as a `superseded` row with `effective_to = today`, `superseded_by_id` = B's row, the override reason and `changed_by`; the activity row carries the full `referral_decision` JSON of §6.3 |
+| FT-R03 | `test_staff_selection_outranks_every_captured_candidate` | with a cookie naming A, a receptionist picking B produces **B** active (`manual_selection`) and **A** as a `superseded` row with `effective_to = today`, `superseded_by_id` = B's row, the override reason and `changed_by`; the activity row carries the full `referral_decision` JSON of §6.3. **A submission resolving two different losing candidates writes two superseded rows sharing the same `superseded_by_id`** and neither insert fails - `idx_cr_superseded_by` is non-unique (ND-12, RD-7) - while a second `active` referral on the subject is still refused by `uq_cr_student_current` |
 | FT-R04 | `test_override_requires_a_reason` | with `referral_override_reason_required = true` the same submission without `referral_override_reason` fails validation and writes **nothing**; with the setting false it succeeds and still records both candidates |
 | FT-R05 | `test_a_forged_hidden_field_cannot_attribute` | posting `referral_visit_token` = a random ULID, an expired token, another visitor's token paired with a mismatched session, or a raw **code** in the token field attributes nobody; a tampered cookie fails Laravel's decryption and is ignored; the form still submits successfully with no referral |
 | FT-R06 | `test_precedence_ladder_matrix` | all six ranks exercised in every combination: each rank wins only when every higher rank is absent; the resolved `referral_source` matches §6.3; an ineligible collaborator at one rank falls through to the next instead of attributing |
@@ -1028,7 +1108,7 @@ financial proof.
 | FT-R12 | `test_payment_dates_decide_who_earns_after_a_change` | a receipt dated before the switch earns for **A** even when keyed in after it; one dated on or after `effective_from` earns for **B**; attribution cannot be back-dated (the service always starts the new row today) |
 | FT-R13 | `test_revoke_stops_future_commission_and_keeps_history` | `revoke` sets `revoked`, `effective_to = today`, `commission_eligible = false`; a later payment skips with `referral_not_commission_eligible`; every earlier entry, wallet figure and statement line is unchanged |
 | FT-R14 | `test_manual_linking_for_every_subject` | student, project, client and lead each attach with `collaborator_referrals.create`; a second active attach on the same subject violates the spine's unique guard and surfaces as a domain error naming the existing collaborator, not a 500; a `suspended` collaborator cannot be selected at all |
-| FT-R15 | `test_visit_pruning_never_destroys_evidence` | `referrals:prune-visits` deletes an old unconverted visit and **refuses** to delete a converted one, one referenced by `collaborator_referrals.referral_visit_id`, or one behind a ledger row (INV-R6) |
+| FT-R15 | `test_visit_pruning_never_destroys_evidence` | `referrals:prune-visits` deletes an old unconverted visit and **refuses** to delete a converted one, one behind a ledger row, or one still pointed at by **any** of INV-R6's referencing columns - **six separate cases**, one per column (`collaborator_referrals`, `leads`, `contact_inquiries`, `course_inquiries`, `student_applications`, `students`), each leaving the visit row byte-identical (RD-3). Also: `PruneReferralVisits::REFERENCING_COLUMNS` **equals** the set of columns that reference `collaborator_referral_visits.id` in `information_schema.KEY_COLUMN_USAGE` for every listed table that exists, so a **seventh** referencing column added by a later phase fails CI instead of silently becoming prunable (the constant may be a superset while a deferred FK is unpromoted, never a subset); an entry whose table is absent is skipped with a logged warning and never widens the delete; and because every one of these FKs is `nullOnDelete`, the test asserts the guard is the command's own exclusion - a delete forced past it nulls the pointer instead of being refused |
 | FT-R16 | `test_referral_validate_endpoint_leaks_nothing` | a valid code returns `{valid: true, code, collaborator_name}`; an unknown code and an inactive collaborator's code both return `{valid: false}` with **identical** bodies (no existence oracle); no id, email, phone, status or rate in any response; the 11th request in a minute is 429 |
 | FT-R17 | `test_project_override_is_surfaced_on_a_change` | changing a project's collaborator while `projects.commission_type` is set renders the override on step 2 and, when *Clear override* is ticked, writes an audited edit of the project row requiring `projects.edit`; untouched, B inherits the override and the screen said so |
 | FT-R18 | `test_conversion_report_totals_match_the_register` | clicks, attributable clicks and conversions in the report equal the filtered register counts; the dead-code panel lists exactly the codes with visits and no collaborator; CSV and PDF exports match the screen |
@@ -1081,9 +1161,9 @@ Stated as `table.column - why`, plus the behavioural asks.
 |---|---|
 | `students.collaborator_id` FK nullable `nullOnDelete`, `.referral_code` string(32), `.referral_source` string(32), `.referral_date` date, `.referral_visit_id` FK nullable - **Phase 15** | §37 names all four verbatim; §66 names "referred by collaborator" and "referral code". Display snapshot only - the engine resolves `collaborator_referrals` on the payment date |
 | `student_admissions.collaborator_id`, `.referral_code`, `.referral_visit_id` - **Phase 15** | §69's admission record lists the collaborator; it is also the spine's default commission document grain |
-| `course_inquiries.collaborator_id`, `.referral_code`, `.referral_visit_id` - **Phase 14-17** | §86 lists *referral* as an inquiry source; the referral must survive inquiry -> admission, and `collaborator_referrals` has no inquiry subject. **`referral_visit_id` is satisfied**: phase-14-17 §2.11 adds it nullable + indexed with the deferred guarded FK (F-3.14) |
-| `contact_inquiries.collaborator_id`, `.referral_code`, `.referral_visit_id` - **Phase 4** | §17's public form is the client / project-inquiry entry point of §38. **Phase 4 owns `contact_inquiries`** (F-2.1, resolutions §2.1); Phase 3 owns only the `contact` *section* rendering, so the ask is addressed to Phase 4 |
-| `leads.referral_visit_id` FK nullable `nullOnDelete` + `.referral_code_captured` string(32) - **Phase 5** | §18's lead source *Referral*; `collaborator_referrals.lead_id` already exists in the spine. Phase 5's design wins (F-3.5): the evidence id is kept, the code snapshot is named `referral_code_captured`, and **there is no `leads.collaborator_id`** - a lead's attribution is resolved through `collaborator_referrals`, never through a column on `leads` (D37) |
+| `course_inquiries.collaborator_id`, `.referral_code`, `.referral_visit_id` - **Phase 14-17** | §86 lists *referral* as an inquiry source; the referral must survive inquiry -> admission, and `collaborator_referrals` has no inquiry subject. **`referral_visit_id` is satisfied**: phase-14-17 §2.11 adds it nullable + indexed with the deferred guarded FK (F-3.14), declared in that phase's own migration because its table arrives after Phase 9 (§2.5a); INV-R6 and §10.4 still exclude it from the prune sweep (RD-3) |
+| `contact_inquiries.collaborator_id` FK nullable `nullOnDelete`, `.referral_code` string(32), `.referral_visit_id` FK nullable `nullOnDelete` - **Phase 4, defined at phase-04 §2.20** | §17's public form is the client / project-inquiry entry point of §38. **Phase 4 owns `contact_inquiries`** (F-2.1, resolutions §2.1); Phase 3 owns only the `contact` *section* rendering, so the ask is addressed to Phase 4. The ask **stands, and is now defined rather than assumed**: **phase-04 §2.20 is the owner that declares all three columns** - nullable, indexed, with deferred guarded FKs in the same pattern as `job_applications.employee_id` - and phase-04 §13 carries the Phase 8-9 block that records them (ND-3). All three are **display snapshots under D37**: written only by `SyncReferralSnapshot` (§10.2), **read by no engine and used by no access scope** - the attribution behind a routed inquiry is resolved through `collaborator_referrals` on the payment date, exactly as for `leads` and `clients` (F-3.4, F-3.5). **The two things phase-04 §13 asks back are now granted, not assumed (RD-3)**: the deferred FKs are promoted by §2.5a's guarded Phase 8 / Phase 9 migrations, and phase-04 §2.20 rule 4's retention guarantee is carried by **INV-R6 + §10.4**, which exclude `contact_inquiries.referral_visit_id` along with every other column referencing `collaborator_referral_visits.id` |
+| `leads.referral_visit_id` FK nullable `nullOnDelete` + `.referral_code_captured` string(32) - **Phase 5** | §18's lead source *Referral*; `collaborator_referrals.lead_id` already exists in the spine. Phase 5's design wins (F-3.5): the evidence id is kept, the code snapshot is named `referral_code_captured`, and **there is no `leads.collaborator_id`** - a lead's attribution is resolved through `collaborator_referrals`, never through a column on `leads` (D37). Phase 5 defers the constraint to Phase 9: the promotion is **§2.5a**'s third migration and the prune guard is INV-R6 + §10.4 (RD-3) |
 | `clients.referral_code_captured` string(32) + `.referral_recorded_at` - **Phase 5** | §45's client-side attribution; `collaborator_referrals.client_id` already exists. Phase 5's design wins (F-3.4): **no `clients.collaborator_id`** - the snapshot is the captured code plus the timestamp, and every scope and engine read goes through `collaborator_referrals` (D37) |
 | `projects.collaborator_id`, `.referral_code`, `.referral_date` - **Phase 6** | §20 "referred by collaborator", §45 names the three fields. The three commission-override columns are already requested by the spine §13.1 |
 
@@ -1137,3 +1217,28 @@ Applied from `docs/design/resolutions.md` §3 (apply-map row for this file) plus
 | F-13.2 / F-2.8 *(ownership map §2.1)* | §1.2 and §13.2: the `files` **table** reference deleted - §59's `collaborator_portal.files_upload` / `files_download` resolve to Phase 6's **`attachments`** rows owned by the collaborator, gated by `attachments.visibility`; no `files` table is ever created. |
 
 **Noted, not applied as worded:** F-12.7 asks for the allowlist to be added to "its §13.2". `CollaboratorActivityEvent` is declared by this contract (§3.1) and §13.2 here lists only asks to *other* phases, so the allowlist was declared at §3.1 and §13.2 records that there is no ask. No guarantee changed.
+
+---
+
+## Drift fixes (round 2)
+
+Applied from `docs/design/consistency-audit-round-2.md` §4. These close contradictions the convergence
+pass itself created; no money guarantee was weakened and nothing outside the listed items was touched.
+
+| ND | Change made |
+|---|---|
+| ND-3 | §13.1's `contact_inquiries.collaborator_id` / `.referral_code` / `.referral_visit_id` ask is **kept** and now names **phase-04 §2.20** as the owner that defines all three (nullable, indexed, deferred guarded FKs, plus a phase-04 §13 Phase 8-9 block), so the retarget from Phase 3 no longer leaves three columns referenced but never declared. The row restates that all three are **display snapshots under D37** - written only by `SyncReferralSnapshot`, **read by no engine and used by no access scope** - and §10.2's `SyncReferralSnapshot` row cites phase-04 §2.20 for the same three columns. |
+
+---
+
+## Drift fixes (round 3)
+
+Applied from [`../design/consistency-audit-round-3.md`](../design/consistency-audit-round-3.md) §3, items
+**RD-3** and **RD-7**. Nothing outside those two items was touched; no attribution guarantee was relaxed, no
+evidence row became deletable, and the [financial spine](../design/finance-commission-spine.md) stays
+authoritative on money.
+
+| RD | Change made |
+|---|---|
+| RD-3 | **The retention guard is now stated over every referencing column, and the FK promotions phase-04 asks for exist.** INV-R6 is restated as "never pruned while it is still evidence" - `converted_at`, a ledger entry sourced through the visit, or **any** column referencing `collaborator_referral_visits.id` - and names the six that exist today (`collaborator_referrals`, `leads`, **`contact_inquiries`** (phase-04 §2.20 rule 4), `course_inquiries`, `student_applications`, `students`) instead of two. §10.4's `referrals:prune-visits` row drops its two-column sentence and defers to a new published constant, and a note under the table declares `PruneReferralVisits::REFERENCING_COLUMNS` (table => column, with the owning contract cited per line), one `NOT EXISTS` per entry in the single delete, `Schema::hasTable()` skips logged for tables that arrive after Phase 9, the point that **`nullOnDelete` means the database is not the guard** (a delete would succeed and null the pointer), and the rule that a seventh column means a seventh line. **FT-R15** now asserts six separate refusals, one per column, plus the constant against `information_schema.KEY_COLUMN_USAGE` (superset allowed while a deferred FK is unpromoted, subset never), so forgetting a future column fails CI. New **§2.5a** honours phase-04 §13's two guarded FK-promotion migrations - `contact_inquiries.collaborator_id` -> `collaborators.id` (Phase 8) and `contact_inquiries.referral_visit_id` -> `collaborator_referral_visits.id` (Phase 9) - and records the identical, so-far-unhonoured phase-05 §13.1 ask for `leads.referral_visit_id` as the third, with five rules: guarded both ways and loud on a skip, **constraint only** (no column, no backfill, no index - phase-04 / phase-05 already index them, D60), idempotent with a `down()` that drops only the FK, a **reported** orphan-nulling pre-pass (D37 snapshots, re-derivable; never a deleted row; never a silent repair, INV-R1), and the ordering. §2.5a also records what is **not** promoted here and why (the three phase-14-17 columns declare their own FK, since their tables arrive after Phase 9). §1.3's ownership cells, §2.5's closing line, the Contents row for §2, **FT-C28** and the three §13.1 rows (`contact_inquiries`, `leads`, `course_inquiries`) were updated in lockstep. |
+| RD-7 | **§6.3 modifier 7 no longer leans on an index that was removed.** The sentence "`uq_cr_superseded_by` means only one loser may point at a given winner" is replaced by its opposite: that index does not exist, `collaborator_referrals.superseded_by_id` carries the plain, deliberately non-unique `idx_cr_superseded_by` (spine §2.8, ND-12), one winner legitimately supersedes `change()`'s predecessor **plus one row per losing candidate**, a unique index there would raise 1062 on a legal write and destroy attribution evidence, and the column is a **navigation pointer, not a guarantee** - so this resolver's ladder must never encode "one loser per winner". The "one active referral per subject" guarantee is attributed **solely** to `uq_cr_student_current` / `uq_cr_project_current` / `uq_cr_client_current` / `uq_cr_lead_current` over the generated `current_guard` column (INV-R5, INV-18, FT-R02), with the reason it is unaffected: a superseded row has `current_guard = NULL` and leaves the active slot free. **FT-R03** gains the matching assertion - two losing candidates write two superseded rows sharing one `superseded_by_id`, neither insert fails, and a second `active` referral is still refused. |

@@ -606,7 +606,10 @@ Ability presets are Phase 1 §4: `READ`, `CRUD`, `CRUD_FULL`, `APPROVE`, `STATUS
 
 No module is created for `invoice_items` (read inside `invoices.view`), for `finance_reversals` (an un-doing
 is a status act on its parent — §4.3) or for the gateway abstraction (no permission surface for an
-unimplemented driver). Following the spine precedent, **no new `Ability` case is invented**.
+unimplemented driver). **Phase 13 invents no `Ability` case of its own.** The one narrow ability its
+apply / unapply routes need — **`project_payments.link_invoice`** — is declared by the **spine** §4.1 on the
+spine's own `project_payments` slug, together with the `Ability::LinkInvoice` request to Phase 1 (spine
+§13.2); Phase 13 only cites and consumes it (ND-1, §6.3 rule 5a, §7.1).
 
 ### 4.2 Abilities added to Phase 1 slugs (additive only)
 
@@ -617,7 +620,7 @@ unimplemented driver). Following the spine precedent, **no new `Ability` case is
 | `income` | `CRUD_FULL` + `STATUS` + `FILES` + `MONEY` + `REPORTS` + `LOGS` | no approval workflow — §29 does not ask for one |
 | `payment_methods` | `CRUD` + `STATUS` + `LOGS` | no `MONEY`, no `export`. Gateway credentials are reachable only through `payment_methods.edit` and are never rendered |
 | `payments` | `READ` + `print` + `export` + `MONEY` + `REPORTS` + `LOGS` | the umbrella money-in module, and **only** for the cross-source register of §8.13 / §7.5 (`module:payments`). Every project-payment route — admin **and** client — carries **`module:project_payments`** instead (F-6.1, spine §7.2 / §7.6); `payments` never gates a project-payment screen |
-| `project_payments` *(spine slug)* | the spine set **+ `view_reports`** | the income, P&L and aging reports read this table; without the ability they cannot be permissioned honestly |
+| `project_payments` *(spine slug)* | the spine set (which already includes **`link_invoice`**, spine §4.1) **+ `view_reports`** | the income, P&L and aging reports read this table; without `view_reports` they cannot be permissioned honestly. **`link_invoice` is the spine's addition, not Phase 13's**, and it is the only ability the §7.1 apply / unapply routes check beside `invoices.edit`; there is **no `project_payments.edit`** in the registry and Phase 13 does not ask for one (ND-1) |
 | `student_fee_payments` *(spine slug)* | the spine set **+ `view_reports`** | the income report fee lines |
 | `reports` *(Phase 1, Shared)* | unchanged (`REPORTS`) | the finance report **hub** lives here; each individual report additionally demands its source module `view_reports` **and** `view_financial` (§7.6) |
 
@@ -652,7 +655,7 @@ enforceable rather than aspirational:
 | 2 | **Reaching a screen and seeing an amount are two different permissions.** Every money column in this phase is additionally gated by its module `view_financial`: a user with `invoices.view_any` but not `invoices.view_financial` gets the register with number, client, dates and status and **no** subtotal, tax, total, paid or balance column | `App\Support\FinanceVisibility::for(User $user, string $module): FinanceFieldSet` with `may(string $field): bool` and `columns(): array`; every finance controller builds its SELECT list from it and passes the set to the view |
 | 3 | **A withheld column is absent from the response body, never rendered blank** — the rule the spine sets for the collaborator panel (§8.11) | the Blade iterates `$fields->columns()`; CSV and PDF build their header row from the same set; F13-30 asserts the label and the figure are absent from the HTML, the CSV and the JSON |
 | 4 | **Reports are double-gated**: the hub needs `reports.view_reports`; each report needs its source module `view_reports` **and** `view_financial` (§7.6). An Institute Manager holding `reports.view_reports` still cannot open the P&L | stacked `can:` middleware driven by `FinanceReportType::permissions()` |
-| 5 | **If the business does want a PM to see project receipts**, the answer is a role edit — grant `project_payments.view_any` + `project_payments.view_financial` (read-only, never `create`) — and the PM-scoped query rule of §9 then applies automatically. No code change, no new permission | §9 `ProjectManagerScope` |
+| 5 | **If the business does want a PM to see project receipts**, the answer is a role edit — grant `project_payments.view_any` + `project_payments.view_financial` (read-only: never `create`, never `change_status`, and never **`link_invoice`**, which belongs with `invoices.edit` on the accounting side) — and the PM-scoped query rule of §9 then applies automatically. No code change, no new permission | §9 `ProjectManagerScope`, §6.3 rule 5a |
 | 6 | **Segregation of duties on approval**: `ExpensePolicy::approve()` returns false when `expense.created_by === $user->id` unless `finance.expense_self_approval_allowed` is true — mirroring the spine rule that a payout approver may not be its creator (spine §9, Accountant row) | policy + setting, default **false** |
 | 7 | **Gateway credentials and the encrypted method config are never exposed** by any ability, `view_financial` included; the field renders masked with a "replace" toggle and the activity diff logs `[encrypted]` | `payment_methods` form, following Phase 2 §3 `SettingsService` |
 
@@ -749,8 +752,9 @@ invoice link is invisible to the engine: the commission base comes from the proj
 | 1 | **A payment belongs to at most one invoice.** The link is the spine column `project_payments.invoice_id`; there is no allocation pivot and a single receipt is **never** split across two invoices. A client paying two invoices with one transfer is receipted twice, one row per invoice, each with its own `idempotency_key` |
 | 2 | **An invoice may hold many payments** (§31 partial payment): `invoices hasMany ProjectPayment`. `paid_amount` is the cache of §2.8 and nothing else |
 | 3 | **Allocation is never automatic.** No FIFO sweep, no "apply the oldest open invoice" — deciding which claim a rupee settles is a money decision and belongs to a human. The modal *suggests* the oldest outstanding invoice of that client and shows its balance; the link is still an explicit selection, and `NULL` (an advance) is always offered |
-| 4 | **An advance is applied by `applyPayment()`** — the **single concession to spine INV-8, granted as decision D43**: `project_payments.invoice_id` may move NULL → value → NULL, by `InvoiceService` alone, while the payment is not `voided`, reason mandatory and audited (§107), gated by `project_payments.edit` **and** `invoices.edit`, with zero commission effect (no ledger read and no ledger write). A deliberate, audited, one-way act: a conditional `UPDATE project_payments SET invoice_id = :invoice WHERE id = :payment AND invoice_id IS NULL` that must affect exactly **1** row (a second concurrent apply affects 0 and fails with a named error), followed by `recomputeFromPayments()`. It requires `invoices.edit` **and** `project_payments.edit` (the pair D43 names), a mandatory reason, and writes an activity row with old (`null`) and new value. `is_advance` is left exactly as the spine wrote it, as the historical fact that the money arrived before the claim existed |
-| 5 | **`unapplyPayment()`** is the mirror: `UPDATE ... SET invoice_id = NULL WHERE id = :payment AND invoice_id = :invoice`, same permissions (`invoices.edit` + `project_payments.edit`), same mandatory reason, refused when the invoice is `cancelled` or the payment is `voided`. Both directions are the **only** mutations of the column, both live in `InvoiceService`, and both are covered by **D43** — nobody may later "tighten" INV-8 back over them |
+| 4 | **An advance is applied by `applyPayment()`** — the **single concession to spine INV-8, granted as decision D43**: `project_payments.invoice_id` may move NULL → value → NULL, by `InvoiceService` alone, while the payment is not `voided`, reason mandatory and audited (§107), gated by **`project_payments.link_invoice`** **and** `invoices.edit`, with zero commission effect (no ledger read and no ledger write). A deliberate, audited, one-way act: a conditional `UPDATE project_payments SET invoice_id = :invoice WHERE id = :payment AND invoice_id IS NULL` that must affect exactly **1** row (a second concurrent apply affects 0 and fails with a named error), followed by `recomputeFromPayments()`. It requires `invoices.edit` **and** `project_payments.link_invoice` (the pair D43 names, as resolved in spine §1.4 guard 4 — **not** `project_payments.edit`), a mandatory reason, and writes an activity row with old (`null`) and new value. `is_advance` is left exactly as the spine wrote it, as the historical fact that the money arrived before the claim existed |
+| 5 | **`unapplyPayment()`** is the mirror: `UPDATE ... SET invoice_id = NULL WHERE id = :payment AND invoice_id = :invoice`, same permissions (`invoices.edit` + `project_payments.link_invoice`), same mandatory reason, refused when the invoice is `cancelled` or the payment is `voided`. Both directions are the **only** mutations of the column, both live in `InvoiceService`, and both are covered by **D43** — nobody may later "tighten" INV-8 back over them |
+| 5a | **The ability is `project_payments.link_invoice`, never `project_payments.edit` (ND-1).** `project_payments` carries **no `edit` ability** and never will: the spine withholds it for ever on both payment tables (INV-8, INV-5), so an earlier draft of these two rules gated them on a permission no registry declares — and an unseeded name inside a `can:` middleware is a route **no role can reach**, which would have left `invoices.paid_amount` permanently wrong for every advance. The spine therefore declares one dedicated, narrow ability, `project_payments.link_invoice` (spine §4.1), in no Phase 1 preset and on no other slug. **It grants no other mutation of any kind:** holding it does not permit changing an amount, `paid_on`, payment method, reference, status, `collaborator_id`, `collaborator_referral_id` or any commission column; it does not permit creating, refunding, voiding or deleting a payment; it grants nothing whatsoever on `student_fee_payments`; and being outside `MONEY` it does not by itself reveal an amount. `RoleSeeder` gives it to **Accountant** only (the role that already holds `invoices.edit`), and the route, the policy and `InvoiceService` all demand the **pair** — one without the other is a 403 |
 | 6 | **Over-allocation is allowed, never blocked.** A receipt larger than the balance is recorded in full (the money physically arrived): `balance_amount` goes negative and the invoice reads `paid`, with the credit visible in the register and in the aging report. Validation never refuses money; the modal warns, naming the excess |
 | 7 | **Invoice linkage has zero commission effect.** Applying, unapplying or over-applying never creates, moves or reverses a ledger row, because the engine keys off the payment, the project and the milestone. A test asserts the ledger is byte-identical across an apply / unapply cycle (F13-13) |
 | 8 | **A voided payment keeps its `invoice_id`** so the document trail survives; §2.8 excludes it from `paid_amount` |
@@ -876,11 +880,12 @@ B  Expenses (cash, approved)         = §6.7.2 total, by category
      ... of which Salaries           = the reserved `salaries` category, i.e. one row per paid
                                        payroll run written by RecordPayrollExpense (§6.4.2, D44)
    Net profit before collaborator commission = A - B
-C  Collaborator commission (cost)    = the spine's payouts-paid total for the period
-                                       (CollaboratorWalletService::payoutsPaidTotal, spine §6.2)
+C  Collaborator commission (cost)    = the spine's company-wide payouts-paid total for the period
+                                       CollaboratorWalletService::payoutsPaidTotal(null, $range)
+                                       (spine §6.2 — a null collaborator means company-wide)
    Net profit                        = A - B - C
    Memo (not in either line): commission accrued in the period
-                                      = CollaboratorStatementService::commissionAccruedTotal
+                                       CollaboratorStatementService::commissionAccruedTotal(null, $range)
 ```
 
 Rules: the comparison column is `DateRange::previous()`; **commission is never an expense row** — it
@@ -899,12 +904,21 @@ salary cost row is ever typed by hand (§6.4.2, §12.1 R-4, **D44**).
 business; it is never income."* If the client ever means money received *from* a collaborator, it becomes an
 `incomes` category row — `incomes` already carries categories, so that needs no schema change.
 
-**Open point on the two spine signatures (F-4.8).** Blocks C and the memo are **company-wide** figures for
-the period. F-4.8 publishes `CollaboratorWalletService::payoutsPaidTotal(Collaborator $c, ?DateRange $r = null): string`
-and `CollaboratorStatementService::commissionAccruedTotal(Collaborator $c, ?DateRange $r = null): string`,
-which are **per-collaborator**. Phase 13 must not close that gap by summing payouts, allocations or ledger
-rows itself (spine INV-26, FT-42), so the company-wide variant has to come from the spine as well; it is
-recorded as a request in §13.1 rather than guessed here.
+**The two spine signatures — closed (F-4.8, ND-6).** Blocks C and the memo are **company-wide** figures for
+the period, and the spine now publishes exactly that form beside the per-collaborator one:
+`CollaboratorWalletService::payoutsPaidTotal(?Collaborator $c, ?DateRange $r = null): string` and
+`CollaboratorStatementService::commissionAccruedTotal(?Collaborator $c, ?DateRange $r = null): string`, where
+**`$c = null` means company-wide** (spine §6.2, defined at spine §6.5.1 as the same canonical SQL with the
+`collaborator_id` predicate dropped — one query, never a loop). Phase 13 therefore calls
+`payoutsPaidTotal(null, $range)` for block C and `commissionAccruedTotal(null, $range)` for the memo, passing
+the report's `DateRange`, and **still sums nothing itself**: no `SUM()` over `collaborator_payouts`,
+`collaborator_payout_allocations` or the ledger exists anywhere in this phase (spine INV-26, FT-42, test 37).
+Two properties of those methods matter to this report and are part of the spine's contract, not assumptions
+made here: the company-wide figure is **exactly** the sum of the per-collaborator figures to the paisa
+(spine FT-42), and the range is mandatory when the collaborator is null — a company-wide all-time payout
+total is never what a P&L period means, and the call throws rather than return one. The first argument has no
+default, so `null` is always written out at the call site and "every collaborator" can never be an omitted
+parameter. Nothing is left open: §13.1 records the request as **satisfied**.
 
 **6.7.4 Receivables aging (§99).** Per client, with an invoice drill-down. Population: invoices where
 `status IN (sent, partial, overdue)` and `balance_amount > 0` — `draft` and `cancelled` are excluded by
@@ -982,9 +996,20 @@ routes carry their own `panel:*`. `module:*` is stated where it differs from the
 | GET `/admin/invoices/{invoice}/pdf` | `admin.invoices.pdf` | `can:invoices.print`, `can:invoices.view_financial` |
 | GET `/admin/invoices/{invoice}/print` | `admin.invoices.print` | `can:invoices.print`, `can:invoices.view_financial` |
 | POST `/admin/invoices/{invoice}/payments` | `admin.invoices.payments.store` | `can:project_payments.create`, `throttle:20,1` — delegates to the spine `PaymentService` (§6.2) |
-| POST `/admin/invoices/{invoice}/payments/{payment}/apply` | `admin.invoices.payments.apply` | `can:invoices.edit`, `can:project_payments.edit` (the **D43** pair) |
-| DELETE `/admin/invoices/{invoice}/payments/{payment}/apply` | `admin.invoices.payments.unapply` | `can:invoices.edit`, `can:project_payments.edit` (the **D43** pair) |
+| POST `/admin/invoices/{invoice}/payments/{payment}/apply` | `admin.invoices.payments.apply` | `can:invoices.edit`, **`can:project_payments.link_invoice`** (the **D43** pair) |
+| DELETE `/admin/invoices/{invoice}/payments/{payment}/apply` | `admin.invoices.payments.unapply` | `can:invoices.edit`, **`can:project_payments.link_invoice`** (the **D43** pair) |
 | GET `/admin/invoices/export/{format}` | `admin.invoices.export` | `can:invoices.export`, `can:invoices.view_financial` |
+
+**The two apply / unapply rows, exactly (ND-1).** The ability is **`project_payments.link_invoice`** —
+declared by the spine §4.1 on the `project_payments` slug, narrow enough to authorise nothing but the
+`invoice_id` move of §6.3 rules 4-5, and **granted to no preset**. It replaces the earlier
+`can:project_payments.edit`, which named a permission **no registry declares** — `project_payments` carries
+no `edit` ability and never will (spine INV-8 / INV-5, §4.1) — and an unseeded permission inside a `can:`
+middleware is not a grant but a closed door. Both routes demand the **pair**: `invoices.edit` without
+`link_invoice`, or `link_invoice` without `invoices.edit`, is a 403 (test 53). No separate
+`module:project_payments` entry is needed on these two invoice routes: Phase 1's `Gate::before` step 1
+already denies `project_payments.link_invoice` whenever the `project_payments` module is disabled — for Super
+Admin too — so the module switch covers them without a second middleware (F-6.1, D20).
 
 ### 7.2 Admin — expenses
 
@@ -1152,7 +1177,9 @@ zero, amber when negative/overpaid), `x-ui.tabs`, `x-ui.table`, `x-ui.badge`, `x
   amount · refunded · **net** · commission state badge (from the spine column, shown only with
   `collaborator_commissions.view_financial`) · actions (view, print receipt, refund, void, unapply). Below
   it, **"Unapplied credits for this client"** listing `project_payments` with `invoice_id IS NULL`, each with
-  an Apply action (mandatory reason) — the §6.3 rule 4 path.
+  an Apply action (mandatory reason) — the §6.3 rule 4 path. **Apply and unapply render only for a holder of
+  `invoices.edit` *and* `project_payments.link_invoice`** (§6.3 rule 5a), and the route re-checks the pair —
+  hiding the button is not the control (`CLAUDE.md` §1.7).
 - **Delivery** — `sent_at`, `sent_count`, `last_sent_to`, `viewed_at`, the reminder history, the public-link
   state with Copy link and Rotate link (behind confirm, stating that existing links stop working).
 - **Activity** — the `activity_log` rows for this invoice: created, issued (old/new number), edited
@@ -1516,9 +1543,12 @@ so Phase 13 can never be the reason the commission spine drifts.
 36. `test_expense_report_excludes_non_approved_and_states_it` — `pending`, `rejected` and `voided` rows are
     absent from the totals and the excluded-pending line names their count and amount.
 37. `test_profit_and_loss_blocks_and_bottom_lines` — `A - B` and `A - B - C` both asserted; block C comes
-    from `CollaboratorWalletService::payoutsPaidTotal()` and the memo from
-    `CollaboratorStatementService::commissionAccruedTotal()`; a test asserts the report class contains no
-    `SUM(` over the ledger, the allocations or the payouts (the spine FT-42 rule).
+    from **`CollaboratorWalletService::payoutsPaidTotal(null, $range)`** and the memo from
+    **`CollaboratorStatementService::commissionAccruedTotal(null, $range)`** — the company-wide form, a null
+    collaborator (ND-6) — and with three collaborators in the fixture block C equals the sum of the three
+    per-collaborator calls **to the paisa**; a test asserts the report class contains no
+    `SUM(` over the ledger, the allocations or the payouts and no loop over collaborators (the spine FT-42
+    rule).
 38. `test_receivables_aging_buckets_and_credits` — invoices at 0, 15, 45, 75 and 120 days overdue land in
     `current`, `d1_30`, `d31_60`, `d61_90`, `d90_plus`; drafts and cancelled invoices never appear; a
     client's unapplied credits reduce `net_exposure`; the bucket sums equal the outstanding total.
@@ -1579,6 +1609,15 @@ so Phase 13 can never be the reason the commission spine drifts.
     `migrate:fresh --seed` is clean; the guarded `add_finance_foreign_keys_to_payment_tables` migration is a
     no-op when `project_payments` is absent and adds the three FKs exactly once when it is present, and is
     safe to run twice.
+53. `test_apply_and_unapply_require_the_d43_pair_and_nothing_more` (ND-1) — the registry contains
+    **`project_payments.link_invoice`** and **no `project_payments.edit`**; a user with
+    `invoices.edit` + `project_payments.link_invoice` applies and unapplies an advance (200, one activity row
+    each with old / new `invoice_id` and the mandatory reason); the same user holding only one of the two is
+    **403** on both routes with the payment row byte-identical afterwards; a seeded Accountant holds the pair
+    and no other seeded non-admin role does; and `link_invoice` alone buys nothing else — the same user is
+    refused when attempting to change `amount`, `paid_on`, `payment_method_id`, `reference_no`, `status`,
+    `collaborator_id` or any commission column (the spine's model guard throws), when creating, refunding,
+    voiding or deleting a payment, and on every `student_fee_payments` write. Pairs with spine FT-52.
 
 ---
 
@@ -1589,7 +1628,7 @@ so Phase 13 can never be the reason the commission spine drifts.
 | # | Risk | Mitigation / why it is accepted |
 |---|---|---|
 | R-1 | **`invoices.paid_amount` is a cache, and a cache can drift.** A developer who writes `$invoice->increment('paid_amount')` breaks the one fact a client argues about. | One canonical SQL (§2.8), one writer (`recomputePaid()`), a nightly `invoices:reconcile-balances` that reports rather than hides drift, and tests 21 and 45. The alternative — summing payments in every query — is slower and still needs the same definition in one place. |
-| R-2 | **Phase 13 writes a spine column** (`project_payments.invoice_id`) on apply / unapply, which the spine otherwise treats as append-only (INV-8). | It is a one-way, conditional, audited UPDATE of a **document link**, never of a money column, never of a value date, and with zero commission effect (test 24). The concession is **granted and numbered: D43** — the single exception to INV-8, by `InvoiceService` alone, only while the payment is not `voided`, reason mandatory and audited, gated by `project_payments.edit` + `invoices.edit`. Without it, an advance received before an invoice exists could never be attached, which is a real and common business event; nobody may later "tighten" INV-8 back over it. |
+| R-2 | **Phase 13 writes a spine column** (`project_payments.invoice_id`) on apply / unapply, which the spine otherwise treats as append-only (INV-8). | It is a one-way, conditional, audited UPDATE of a **document link**, never of a money column, never of a value date, and with zero commission effect (test 24). The concession is **granted and numbered: D43** — the single exception to INV-8, by `InvoiceService` alone, only while the payment is not `voided`, reason mandatory and audited, gated by **`project_payments.link_invoice` + `invoices.edit`** (the narrow ability of spine §4.1; `project_payments` still has **no `edit`**, ND-1). Without it, an advance received before an invoice exists could never be attached, which is a real and common business event; nobody may later "tighten" INV-8 back over it. |
 | R-3 | **"Overdue" is a derived status stored in a column.** A status column plus a clock means a row can be stale between midnight and the 01:05 job. | `recomputeStatus()` is a pure function re-run on every money write, by the job in both directions, and by the reconcile command; every screen that matters (aging, register) also filters on `due_date`, so a stale status can delay a badge but never a figure. |
 | R-4 | **Commission could be double counted in the P&L** if an accountant also records a collaborator payout as an expense. | Commission is structurally absent from `expenses`; it reaches the P&L only through block C read from the spine services (§6.7.3), labelled "Collaborator commission (cost)", and the screen carries the standing note. A hard block would need a reserved category the requirement never asks for; raised as Q6. **Salaries are the mirror risk and are closed differently:** the one `approved` expense per paid payroll run (§6.4.2, **D44**) is unique on (`source_type`, `source_id`) and lands in the reserved, undeletable `salaries` category, so payroll appears in block B **exactly once** and is never both derived and hand-typed. |
 | R-5 | **The income report is cash-basis**, so a business expecting accrual revenue (invoiced, not yet collected) will read a lower number than their accountant does. | Stated on every screen in `meta`, receivables aging carries the accrual view, and Q1 asks the client. Changing basis later is a new report, not a redesign — the sources and date columns are already named. |
@@ -1626,13 +1665,14 @@ so Phase 13 can never be the reason the commission spine drifts.
 
 | Request | Why |
 |---|---|
-| **`project_payments.invoice_id` settable NULL → value → NULL by `InvoiceService` alone — GRANTED as D43**: the spine INV-8 lifecycle whitelist is now `notes` / `reference_no` / `receipt_path` / **`invoice_id`**, with four guards (only `InvoiceService`; only while the payment is not `voided`; reason mandatory and audited per §107; gated by `project_payments.edit` **and** `invoices.edit`) and zero commission effect | §6.3 rules 4 and 5. It is a document link, not money. Without this concession an advance received before its invoice existed could never be attached, and `invoices.paid_amount` could never be right. It is the **single** concession to INV-8 and no other spine money column moves |
+| **`project_payments.invoice_id` settable NULL → value → NULL by `InvoiceService` alone — GRANTED as D43**: the spine INV-8 lifecycle whitelist is now `notes` / `reference_no` / `receipt_path` / **`invoice_id`**, with four guards (only `InvoiceService`; only while the payment is not `voided`; reason mandatory and audited per §107; gated by **`project_payments.link_invoice`** **and** `invoices.edit`) and zero commission effect | §6.3 rules 4, 5 and 5a. It is a document link, not money. Without this concession an advance received before its invoice existed could never be attached, and `invoices.paid_amount` could never be right. It is the **single** concession to INV-8 and no other spine money column moves |
+| **`project_payments.link_invoice` — the ability that gates it (spine §4.1, ND-1), plus Phase 1's `Ability::LinkInvoice` case and the Accountant-only `RoleSeeder` grant (spine §13.2)**. Phase 13 requests **no `edit` ability on any money module** and asks for none on `project_payments` | §7.1's two routes and §6.3 rule 5a. The earlier wording gated them on `project_payments.edit`, which the registry does not declare and never will — leaving both routes unreachable for every role and `invoices.paid_amount` permanently wrong for advances. The narrow ability authorises the `invoice_id` move and **nothing else** |
 | **`PaymentReversalRejected` event — satisfied**: the spine §10.1 and phase-10-12 §10.1 now publish it (`afterCommit`), together with the listener that rolls `refunded_amount` back (F-4.9) | §10.2: when an approver rejects a refund the invoice caches must follow in the same request; `RecomputeInvoiceOnPaymentChange` now has all four legs and recomputes on this one too |
 | `projects.client_id` (Phase 6) | the Form Request asserts `invoice.client_id = project.client_id`, so an invoice can never bill the wrong client for a project |
 | `projects.project_manager_id` — **a `users.id`** (Phase 6 §2.1, D32) | the `ProjectManagerScope` of §9 compares it to `$user->id`; Phase 13 never translates it through `employees` (F-3.11) |
 | **`project_milestones.name`**, **`project_milestones.amount` decimal(15,2)** (Phase 6 — already requested by the spine §13.1) | "insert line from milestone" in the builder, and `invoice_items.project_milestone_id`. The column is `name`: phase-06 §2.4 never had a `title` (F-3.10) |
 | `clients.id`, `.name`, `.company`, `.email`, `.phone`, `.address`, `.tax_number` / NTN, `.user_id` nullable (Phase 5); a client with an invoice must not be force-deletable | the invoice billing block, the email recipient default, `restrictOnDelete` on `invoices.client_id`, and the D2 case of a client with no login that makes the signed link necessary |
-| **`CollaboratorWalletService::payoutsPaidTotal()` and `CollaboratorStatementService::commissionAccruedTotal()` — published by the spine** (F-4.8, spine §6.2 / phase-10-12 §6.3), both derived from the spine §6.5.1 canonical SQL. The canonical signatures take a collaborator first: `payoutsPaidTotal(Collaborator $c, ?DateRange $r = null): string` / `commissionAccruedTotal(Collaborator $c, ?DateRange $r = null): string`. **Still open:** P&L block C and its memo are **company-wide** period totals, so the spine must also publish the all-collaborator form (a nullable `Collaborator`, or a sibling method) | P&L block C and the commission memo (§6.7.3). Phase 13 must never sum payouts, allocations or ledger rows itself (spine INV-26, FT-42), so it cannot close the company-wide gap locally — it is named here rather than guessed |
+| **`CollaboratorWalletService::payoutsPaidTotal()` and `CollaboratorStatementService::commissionAccruedTotal()` — published by the spine and now SATISFIED including the company-wide form** (F-4.8, ND-6; spine §6.2 / §6.5.1, mirrored at phase-10-12 §6.3). The canonical signatures are `payoutsPaidTotal(?Collaborator $c, ?DateRange $r = null): string` and `commissionAccruedTotal(?Collaborator $c, ?DateRange $r = null): string`, where **a null collaborator means company-wide**: the same §6.5.1 canonical SQL with the `collaborator_id` predicate dropped, one query, exactly equal to the sum of the per-collaborator figures (spine FT-42), and the `DateRange` is mandatory when the collaborator is null | P&L block C and the commission memo (§6.7.3) call `payoutsPaidTotal(null, $range)` / `commissionAccruedTotal(null, $range)`. Phase 13 still never sums payouts, allocations or ledger rows itself (spine INV-26, FT-42) — the company-wide gap is closed **in the spine**, where the canonical SQL lives, not guessed here |
 | `App\Support\Money` — **satisfied by phase-01 §3** (F-4.11), whose canonical surface already includes **`roundTo($amount, int $nearest)`** (half-up to the nearest 1 / 5 / 10) and a `mul()` that accepts a 4-dp quantity, bcmath only, intermediate scale 6, final half-up at 2, strings in and out | §2.7 steps 1 and 11; this phase adds no `Money` method of its own |
 | `student_fees.fee_type` + `student_fee_payments` read access (Phases 10/18) | the income report fee breakdown (§6.7.1) |
 | `App\Support\PermissionRegistry` (Phase 1): the one module slug of §4.1, the ability additions of §4.2 — including **`view_reports` on the spine slugs `project_payments` and `student_fee_payments`** — and `client_portal.invoices` | the registry is the only place permission names exist (D4) |
@@ -1658,7 +1698,7 @@ so Phase 13 can never be the reason the commission spine drifts.
 | `DEVELOPMENT_LOG.md` §4 — **D40**: `invoices.paid_amount` / `refunded_amount` / `balance_amount` are a cache of one canonical SQL derived from `project_payments`; nothing may increment them | spine §1.3, R-1 |
 | `DEVELOPMENT_LOG.md` §4 — **D41**: `finance_reversals` is the append-only expense / other-income counterpart of the spine `payment_reversals`; the two are never merged and never confused, and neither is ever deleted | §2.6 |
 | `DEVELOPMENT_LOG.md` §4 — **D42**: an invoice number is assigned once at issue, never to a draft and never reused; a cancelled invoice keeps its number | §2.9 |
-| `DEVELOPMENT_LOG.md` §4 — **D43**: the single concession to spine INV-8 — `project_payments.invoice_id` may move NULL → value → NULL, by `InvoiceService` alone, reason mandatory, audited, gated by `project_payments.edit` + `invoices.edit`, with zero commission effect | §6.3 rules 4-5, R-2 |
+| `DEVELOPMENT_LOG.md` §4 — **D43**: the single concession to spine INV-8 — `project_payments.invoice_id` may move NULL → value → NULL, by `InvoiceService` alone, reason mandatory, audited, with zero commission effect, gated by the narrow ability **`project_payments.link_invoice`** + `invoices.edit` (**not** `project_payments.edit`, which does not exist — spine §1.4 guard 4 / §4.1, ND-1). This wording and spine §13.3's are identical and are what the owner pastes | §6.3 rules 4-5 and 5a, §7.1, R-2 |
 | `DEVELOPMENT_LOG.md` §4 — **D44**: one `approved` expense row per **paid** payroll run (`expenses.source_type` / `source_id`, unique), written by `RecordPayrollExpense` on phase-07's `PayrollRunPaid`, so §99's P&L includes salaries exactly once | §2.6, §6.4.2, §6.7.3 |
 | This phase **cites D19** for the two tables without `deleted_at` (and **D16** for `finance_reversals` as money history) and **D32** for `projects.project_manager_id` being a `users.id`; it claims no number of its own. All five numbers above are already allocated in `docs/design/resolutions.md` §4 — the owner pastes them into the log | F-9.1, F-3.11, F-10.1 |
 | `CLAUDE.md` §5 — add "a finance document number is assigned inside the transaction that issues the document, through `DocumentNumberService`, and is never reused" and "money columns are gated by `view_financial` and a withheld column is absent from the response, never blank" | §2.9, §4.5 |
@@ -1678,9 +1718,9 @@ Applied from [`../design/resolutions.md`](../design/resolutions.md) §3 / §7 (a
 | F-3.10 | `project_milestones.title` → **`project_milestones.name`** in all three places: §1.2 dependency row, §8.2 "insert from milestone", §13.1 request row. |
 | F-3.11 | §9 `ProjectManagerScope` compares `projects.project_manager_id` to **`$user->id`** (a `users.id`, D32), not `$user->employee_id`; §1.2 and §13.1 say so too. |
 | F-4.2 | §6.5 step 2 now states the **one DTO form** `refund(StudentFeePayment\|ProjectPayment $p, RefundData $data): PaymentReversal` with a named-argument example; no positional form of the call exists. |
-| F-4.8 | §6.7.3 and §13.1 cite the spine's published `payoutsPaidTotal()` / `commissionAccruedTotal()`. **Partially deferred:** the canonical signatures are per-collaborator while P&L block C and its memo are company-wide, so the all-collaborator form is recorded as an open request instead of being guessed — Phase 13 still sums nothing itself (INV-26). |
+| F-4.8 | §6.7.3 and §13.1 cite the spine's published `payoutsPaidTotal()` / `commissionAccruedTotal()`. **Partially deferred:** the canonical signatures are per-collaborator while P&L block C and its memo are company-wide, so the all-collaborator form is recorded as an open request instead of being guessed — Phase 13 still sums nothing itself (INV-26). **Superseded by ND-6 below:** the spine now publishes the company-wide form (`?Collaborator`, null = company-wide) and §6.7.3 / §13.1 call it; nothing is deferred any more. |
 | F-4.9 | `PaymentReversalRejected` marked **satisfied** in §13.1; §10.2 no longer calls it "requested" — all four legs are spine events and the invoice caches recompute on the rejection. |
-| F-4.10 | **D43 cited** in §6.3 rules 4 and 5, §12.1 R-2 and §13.1 (granted, not requested), with the four guards spelled out. The permission pair on apply / unapply is now the pair D43 names — `invoices.edit` **and** `project_payments.edit` — replacing `project_payments.change_status` in §6.3 and in the two §7.1 routes. |
+| F-4.10 | **D43 cited** in §6.3 rules 4 and 5, §12.1 R-2 and §13.1 (granted, not requested), with the four guards spelled out. The permission pair on apply / unapply is now the pair D43 names — `invoices.edit` **and** `project_payments.edit` — replacing `project_payments.change_status` in §6.3 and in the two §7.1 routes. **Superseded by ND-1 below:** `project_payments.edit` is declared by no registry and never will be, so the pair is now `invoices.edit` **+ `project_payments.link_invoice`** (spine §4.1). |
 | F-4.11 | §13.1's `Money` request replaced with "**satisfied by phase-01 §3**"; `roundTo()` and the 4-dp `mul()` are part of that canonical surface. |
 | F-4.14 | §6.9 ships the three artefacts four later phases assume: `App\Support\ReportResult` (readonly `{rows, groups, totals, meta}`), `App\Services\Reporting\ReportExporter::export(ReportResult, ExportFormat): StreamedResponse` (always streamed, never `->get()`), and `resources/views/layouts/print.blade.php`; §6.7 states that `FinanceReportService::report()` returns the DTO and §6.7.5 uses the canonical signature. |
 | F-6.1 | §4.2's `payments` row restated: `payments` is the umbrella **only** for the cross-source register of §7.5 / §8.13; every project-payment route, admin and client, carries `module:project_payments`. `project_payments.view_reports` stays on the `project_payments` slug. |
@@ -1691,3 +1731,18 @@ Applied from [`../design/resolutions.md`](../design/resolutions.md) §3 / §7 (a
 | F-12.6 | §9's `ProjectManagerScope` now covers **`expenses`** as well as `invoices` and `project_payments`, with `project_id IS NULL` rows invisible to a project-scoped user. |
 | F-13.3 | §6.7.3 block C is labelled **"Collaborator commission (cost)"** with the legend line "payments *to* collaborators; §29's phrase is a cost, never income"; no schema change. |
 | F-10.1 (§4.2) | §13.3 renumbered: **D40** (paid-amount cache), **D41** (`finance_reversals`), **D42** (invoice numbering), plus new rows for **D43** and **D44**, and a closing row stating that this phase cites D19, D16 and D32 and invents no number. |
+
+---
+
+## Drift fixes (round 2)
+
+Closing the contradictions the convergence pass created, as recorded in
+[`../design/consistency-audit-round-2.md`](../design/consistency-audit-round-2.md) §4. The
+[financial spine](../design/finance-commission-spine.md) wins on every point touching money, and nothing
+below weakens a guarantee: the permission change **narrows** a money module's write surface and the report
+change **removes** the only figure this phase could not source legally.
+
+| ND | Change made |
+|---|---|
+| ND-1 | **The two money routes no longer depend on an ability nothing registers.** `project_payments.edit` does not exist in any registry and never will (spine §4.1 withholds `edit` on both payment tables for ever, INV-8 / INV-5), so gating `admin.invoices.payments.apply` / `.unapply` on it left them unreachable for **every** role. They now carry `can:invoices.edit` **+ `can:project_payments.link_invoice`** — the dedicated narrow ability the spine declares at §4.1 (ND-1's decision), in no Phase 1 preset and on no other slug. Changed in lockstep: §6.3 rule 4 and rule 5, the new **§6.3 rule 5a** (what the ability does and, line by line, what it does **not** authorise — no amount, date, method, reference, status, collaborator or commission column, no create / refund / void / delete, nothing on `student_fee_payments`), §7.1's two rows plus a note under the table (including why no second `module:project_payments` entry is needed — `Gate::before` step 1 already module-gates the ability, D20), §4.1 (Phase 13 invents no `Ability` case; the spine declares this one), §4.2's `project_payments` row, §4.5 rule 5, §12.1 R-2, §13.1 (the D43 row plus a new row requesting the ability, Phase 1's `Ability::LinkInvoice` case and the Accountant-only grant), §13.3's D43 wording, and new test **53**. phase-13, phase-10-12 and the spine now read identically on this point. |
+| ND-6 | **P&L block C has a legal source.** The spine publishes the company-wide form beside the per-collaborator one — `payoutsPaidTotal(?Collaborator, ?DateRange)` / `commissionAccruedTotal(?Collaborator, ?DateRange)`, a **null collaborator meaning company-wide** (spine §6.2, defined at spine §6.5.1 as the same canonical SQL with the `collaborator_id` predicate dropped). §6.7.3's block C and memo now cite `payoutsPaidTotal(null, $range)` and `commissionAccruedTotal(null, $range)`; the "Open point on the two spine signatures" paragraph is replaced by the closed statement (company-wide equals the sum of the per-collaborator figures to the paisa; the `DateRange` is mandatory when the collaborator is null; the first argument has no default, so `null` is always explicit); §13.1's row reads **satisfied** instead of "Still open"; test 37 asserts the company-wide identity and that no loop over collaborators exists. Phase 13 still sums no payout, allocation or ledger row (INV-26, FT-42). |

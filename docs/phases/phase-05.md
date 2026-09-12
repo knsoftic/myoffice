@@ -71,8 +71,9 @@ exact path with that exact signature and behaviour (`SELECT ... FOR UPDATE` on t
 inside the caller's transaction, increment, return `prefix . sprintf(pad, value)`, the column's UNIQUE index
 as backstop, exactly one retry on a 1062), plus `reserve()` for period-reset counters (§6.10, F-4.12).
 `'%06d'` is only the **default**: **every caller passes its own pad explicitly** - Phase 5 `'%06d'`,
-Phase 6 `'%05d'`, Phase 7 `'%05d'`, Phase 8-9 `'%04d'`. Phases 6, 7, 8-9, 10 and 14-17 reuse it unchanged
-and **must not re-create it** (§13).
+Phase 6 `'%05d'`, Phase 7 `'%05d'`, Phase 8-9 `'%04d'`, Phase 18 `'%06d'`. **Every later phase that needs a
+counter reuses it unchanged - 6, 7, 8-9, 10, 13, 14-17, 18 and 19-23 - and none of them may re-create it**
+(the full list with what each one numbers is in §6.10; §13.1 restates the ban).
 
 ### 1.4 Tables this phase owns
 
@@ -730,11 +731,27 @@ primary contact of a client that has others refuses until another is promoted.
 
 | Class | Responsibility |
 |---|---|
-| `App\Services\Finance\DocumentNumberService` | **[D-P5-3] / D27** - the spine's §5 contract, created here and reused unchanged by phases 6, 7, 8-9, 10 and 14-17. Two published methods: `next(string $prefixKey, string $counterKey, string $pad = '%06d'): string` (the pad is a **default, not a house style** - every caller passes its own), and `reserve(string $counterKey, ?string $periodKey = null, ?string $periodValue = null): int` (F-4.12) which reserves the next integer under the same `FOR UPDATE` lock and, when a period is supplied, resets the counter to 1 the first time the **period row** - itself a `settings` key, e.g. `institute.student_id_sequence_period` - differs from `$periodValue`, writing both in one transaction. There is **no second `FOR UPDATE` counter implementation anywhere in the codebase** |
+| `App\Services\Finance\DocumentNumberService` | **[D-P5-3] / D27** - the spine's §5 contract, created here and reused unchanged by **phases 6, 7, 8-9, 10, 13, 14-17, 18 and 19-23** (the complete consumer list - ND-10; see the table below). Two published methods: `next(string $prefixKey, string $counterKey, string $pad = '%06d'): string` (the pad is a **default, not a house style** - every caller passes its own), and `reserve(string $counterKey, ?string $periodKey = null, ?string $periodValue = null): int` (F-4.12) which reserves the next integer under the same `FOR UPDATE` lock and, when a period is supplied, resets the counter to 1 the first time the **period row** - itself a `settings` key, e.g. `institute.student_id_sequence_period` - differs from `$periodValue`, writing both in one transaction. There is **no second `FOR UPDATE` counter implementation anywhere in the codebase** |
 | `App\Support\Inquiry\CrmLeadInquiryTarget` | `implements App\Contracts\Inquiry\InquiryTarget` (Phase 4's interface) and is registered into Phase 4's `InquiryRouter` (phase-04 §6.10.4) - **the only path from a contact inquiry to a lead** (F-2.1). On a software-service inquiry it calls `LeadService::create()` with `contact_inquiry_id`, `source = website`, `source_detail` and any `?ref=` code into `referral_code_captured`; a course inquiry is routed elsewhere by the router, never by this class. Idempotency is `uq_leads_inquiry` plus the 1062 catch (§2.1), never a SELECT. Phase 5 registers **no listener on Phase 4's event** |
 | `App\Support\ContactNormalizer` | §6.2 |
 | `App\Support\CsvWriter` | Streaming CSV: a generator + `chunkById`, never an array of rows in memory; **escapes formula injection** by prefixing a cell starting with `=`, `+`, `-`, `@`, tab or CR with a single quote. Phase 23's exports reuse it |
 | `App\Services\Crm\LeadExporter` / `ClientExporter` | `stream(Filters, array $columns): StreamedResponse` through the §9 scope; above `crm.export_max_rows` the request instead queues `BuildCrmExport` and answers "we will notify you" |
+
+**Every phase that reuses `DocumentNumberService` (ND-10 - this list is complete, and "do not re-create"
+binds every row).** A phase numbering a document adds only its own `*_prefix` / `*_next_number` settings
+keys and passes its own pad; it adds no locking code, no retry loop and no second counter table.
+
+| Phase | What it numbers | Pad |
+|---|---|---|
+| **5** (owner) | `leads.lead_no`, `clients.client_code` (§2.1, §2.7) | `'%06d'` |
+| **6** | `projects.project_code` - `ProjectNumberService::next()` is a thin delegate from day one (phase-06 §6.1) | `'%05d'` |
+| **7** | `employees.employee_code`, leave-request, advance, payroll-run and payslip numbers (phase-07 §5, [D-HR-14]) | `'%05d'` |
+| **8-9** | `collaborators.collaborator_code` (`COL-1001`, phase-08-09 §6.1) | `'%04d'` |
+| **10-12** (spine) | receipt, payment, reversal and payout-voucher numbers (spine §5, §6.2; phase-10-12 §6.3 "reuse, must not re-create") | per caller |
+| **13** | `invoices.invoice_number` (assigned once at issue, never to a draft - D42), `expenses.expense_no`, and the shared reversal-voucher series (phase-13 §2.4, §2.6, §6.5) | per caller |
+| **14-17** | `students.student_code` - `StudentNumberService` calls `reserve()` for the period reset and has **no** local `FOR UPDATE` fallback (phase-14-17 §6.5, F-4.12) | per caller |
+| **18** | `student_fees.fee_number` and fee-receipt numbers (phase-18 §2.6, §6.10.2) | `'%06d'` |
+| **19-23** | `certificates.certificate_number` (INV-21-1), student ID-card numbers, `support_tickets.ticket_number` (INV-22-1) (phase-19-23 §13.1) | per caller |
 
 ---
 
@@ -1385,7 +1402,7 @@ To the **client**: `ClientPortalInvitation` (a signed password-set link, **never
 | `App\Contracts\Referrals\ReferralRecorder` implemented over `ReferralService` and bound - **Phase 9/10** | **[D-P5-6]**; `crm:record-captured-referrals` then backfills every code captured before the binding existed |
 | ~~`ReferralService::copyAttribution()`~~ - **withdrawn (F-4.5)** | **No new spine method.** §6.4 step (7) calls the published `attach($client, $collaborator, ReferralSource::ManualSelection, $code, $leadReferralDate, $ctx)` with the lead's referral date and records `lead_conversions.collaborator_referral_id`. Test 53 is unchanged - it asserts the outcome, not the method name |
 | ~~`ReferralSource::lead_conversion`~~ - **withdrawn (F-4.5)** | the spine's five cases stand (`referral_link`, `manual_selection`, `admission_form`, `import`, `api`); a carried-over attribution is `manual_selection` with the conversion reference in `notes` - the fallback this row already named |
-| **Do not re-create** `App\Services\Finance\DocumentNumberService` - **phases 6, 7, 8-9, 10 and 14-17** | **[D-P5-3] / D27** (F-4.1, F-4.12): Phase 5 ships it at the spine's path with the spine's signature **plus `reserve()`**; every other phase reuses it, passes its own pad, and adds only its own prefix/counter settings keys. `ProjectNumberService` (phase-06 §6.1) and `StudentNumberService` (phase-14-17 §6.5) delegate to it from day one - there is no local `FOR UPDATE` fallback anywhere |
+| **Do not re-create** `App\Services\Finance\DocumentNumberService` - **phases 6, 7, 8-9, 10, 13, 14-17, 18 and 19-23** (the complete list, ND-10) | **[D-P5-3] / D27** (F-4.1, F-4.12): Phase 5 ships it at the spine's path with the spine's signature **plus `reserve()`**; every other phase reuses it, passes its own pad, and adds only its own prefix/counter settings keys. `ProjectNumberService` (phase-06 §6.1) and `StudentNumberService` (phase-14-17 §6.5) delegate to it from day one - there is no local `FOR UPDATE` fallback anywhere. The three phases added here all already call the class by name: **13** for invoice, expense and reversal numbers (phase-13 §1.2, §6.5), **18** for fee and receipt numbers (phase-18 §1.2, §2.6), **19-23** for certificate, ID-card and ticket numbers (phase-19-23 §13.1). §6.10 carries the per-phase table |
 | `project_payments.client_id` and the client-panel column omission list - **Phase 10** (already in its §9) | §9.2 restates it unchanged; test 73 enforces it |
 | `invoices.client_id`, and an `InvoiceReadModel` + `ClientPortalSection` for invoices - **Phase 13** | `clients.financialSummary()` and the panel's invoice screen must never re-implement an invoice sum |
 | `support_tickets.client_id` nullable FK, `meetings.client_id` nullable FK, and `ClientPortalSection` registrations for tickets, meetings and messages - **Phase 22** | §93-§96 |
@@ -1441,3 +1458,16 @@ Nothing else in this contract was restructured or redesigned.
 | F-12.1 | §12.2 **Q1 answered** (**D20**): `permissionModuleMap()` returns null for an unregistered prefix, `Gate::before` falls through on null, and the four `*_portal` prefixes are permission namespaces, not modules; §13.2's Phase 1 ask closed. |
 | F-12.3 | §7's D31 paragraph states that **every** client route carries `client.context`, including rows a later phase fills in (the route table already carried it). |
 | F-10.1 | §13.3 renumbered to the registry in resolutions §4: D19 -> **D28**, D20 -> **D29**, D21 -> **D30**, plus the two new rows **D27** (single numbering implementation) and **D31** (`routes/client.php` ownership + `client.context`). |
+
+---
+
+## Drift fixes (round 2)
+
+Applied from [`../design/consistency-audit-round-2.md`](../design/consistency-audit-round-2.md) §4. Both
+items are completeness fixes to published contracts this phase **owns**; neither changes a signature, a
+column or a money guarantee.
+
+| ND | Change made |
+|---|---|
+| ND-10 | The numbering owner's consumer list was short: §1.3 [D-P5-3], §6.10 and §13.1 all said "phases 6, 7, 8-9, 10 and 14-17" while **three more phases already call the class by name** - phase-13 (invoice, expense and shared reversal-voucher numbers), phase-18 (fee and receipt numbers) and phase-19-23 (certificate, ID-card and ticket numbers). All three places now read **6, 7, 8-9, 10, 13, 14-17, 18, 19-23**, and §6.10 gains a per-phase table naming what each one numbers and the pad it passes, so "do not re-create" (**D27**) binds a named list rather than an open one. A short list is how a ninth phase talks itself into a second `FOR UPDATE` counter |
+| ND-4 | **No change needed, verified.** §6.10 already declares `CrmLeadInquiryTarget implements App\Contracts\Inquiry\InquiryTarget`, which is the canonical namespace; the divergent `App\Contracts\Cms\InquiryTarget` was in phase-04 §6.10.1 and has been corrected there. §1.2, §10.2, §10.5 and §13.1 name the interface without a namespace and stay neutral. The implementing class itself (`App\Support\Inquiry\CrmLeadInquiryTarget`) already agreed across both contracts |

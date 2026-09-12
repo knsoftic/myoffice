@@ -154,7 +154,7 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D40 | **`invoices.paid_amount` / `refunded_amount` / `balance_amount` are a cache of one canonical SQL** over `project_payments`; nothing may `increment()` them. | Phase 13 R-1. |
 | D41 | **`finance_reversals` is the append-only expense / other-income counterpart of `payment_reversals`**; the two are never merged and neither is ever deleted. | Phase 13 §2.6. |
 | D42 | **An invoice number is assigned once at issue**, never to a draft and never reused; a cancelled invoice keeps its number. | Phase 13 §2.9. |
-| D43 | **The single concession to INV-8**: `project_payments.invoice_id` may move NULL -> value -> NULL, by `InvoiceService` alone, reason mandatory, audited, gated by `project_payments.edit` + `invoices.edit`, with zero commission effect. | An advance received before its invoice existed must be attachable or `invoices.paid_amount` can never be right. Nobody may later "tighten" INV-8 back. Audit F-4.10. |
+| D43 | **The single concession to INV-8**: `project_payments.invoice_id` may move NULL -> value -> NULL, by `InvoiceService` alone, reason mandatory, audited, gated by `project_payments.link_invoice` + `invoices.edit`, with zero commission effect. | An advance received before its invoice existed must be attachable or `invoices.paid_amount` can never be right. Nobody may later "tighten" INV-8 back. The gate is a **dedicated narrow ability**, not `project_payments.edit`: the spine's "a received payment is never editable" rule must stay literally true, so `link_invoice` grants this one field move and no other mutation. Audit F-4.10, drift RD-1/RD-2. |
 | D44 | **One `approved` expense row per paid payroll run** (`expenses.source_type` / `source_id`, unique), written by a listener on `PayrollRunPaid`. | Without it §99's profit and loss is wrong by the whole payroll. Audit F-3.9. |
 | D45 | **The §68 admission pipeline is carried by `student_admissions.stage`**, with `students.status` and `course_inquiries.status` advanced in lockstep by `AdmissionService` only. | Three status columns, one writer. Phase 15 R-10. |
 | D46 | **Attendance and syllabus coverage attach to a dated `class_sessions` row**, never to a recurring timetable rule. | Every later phase (exams, certificates, reports) depends on it. Phase 16 [D-IN-10]. |
@@ -468,6 +468,21 @@ data, all with a named fix:
 | T20 | `phase-01.md`'s D20 text says the four portal prefixes are "permission namespaces, not modules" and that `permissionModuleMap()` returns null for them. The implemented fix kept them as registered modules with `is_core = true`. | low | The guarantee is delivered by a different mechanism, so the contract text is now wrong. Correct the text (code is fine) once the contract convergence workflow releases `docs/`. |
 | T21 | `TestCase::actingAs()` clears `password_hash_web`, so no `actingAs()` test can observe `AuthenticateSession` signing a stale session out — the very mechanism the remediation added. | low | Necessary (one session Store per test) but it narrows coverage; add one test that logs in for real instead. |
 | T22 | The modules screen's locked-card tooltip gives the "dashboard, users, roles…" reason for the four portal cards too. | low | Wrong explanation on a correct lock. |
+
+**Build-time items from the contract audit (BT-1 … BT-10)** — the documentation convergence is **closed** after
+three rounds ([`docs/design/consistency-audit-final.md`](docs/design/consistency-audit-final.md): all RD items
+closed, verdict "phases 3–25 are buildable"). These ten are deliberately left for the phase that owns them,
+because the code will make the answer obvious; they are **not** a reason to run another documentation round.
+
+| # | Owner | Item |
+|---|---|---|
+| BT-1 | Phase 10 | `app/Enums/Ability.php` needs the `LinkInvoice` case (one line) before phase-10-12 can register `project_payments.link_invoice` and phase-13's two D43 routes can work. The contract is amended ([`phase-01.md`](docs/phases/phase-01.md) §2); the code lands with Phase 10 deliberately, because an unused case now would fail the `PermissionRegistry` integrity test. |
+| BT-2 | Phase 21 | `certificates` and `student_id_cards` ship `deleted_at` in phase-19-23 while `CLAUDE.md` §3 lists them as append-only. **Recommendation: append-only wins** — D52 already makes an issued certificate a snapshot whose correction is revocation plus reissue, and a soft-deleted row would make a public QR verification URL fail ambiguously. Decide once, with the code. |
+| BT-3 | Phase 14-17 | `contact_inquiries.course_id` is the only deferred FK with no named promoter. Fold it into `add_institute_fks_to_fee_tables`. |
+| BT-4 | Phase 7 | `build-order.md` §10.2 names `job_applications.department_id`, which no contract declares; the real columns are `team_members.department_id` and `job_openings.department_id`. |
+| BT-5 | Phase 13 | Phase 6 asked for `invoices.project_milestone_id`; Phase 13 ships the link on `invoice_items.project_milestone_id` instead. Satisfied at the line-item grain — which is also the only grain that lets one invoice cover two milestones. |
+| BT-6 | Phase 19-23 | Phase 14-17 asked for `course_materials.batch_id`; batch reach is delivered through `course_material_targets` by design, so no such column exists. |
+| BT-7 … BT-10 | various | Cosmetic: a test-range label, `login_history` (the module slug) written where `login_histories` (the table) was meant, two stale quotations of a now-corrected count, and two request rows that read as open although they are already satisfied. |
 
 **Accepted deviations from the Phase 1 contract** (deliberate, documented so no later session "fixes" them):
 

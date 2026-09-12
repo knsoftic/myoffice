@@ -66,8 +66,9 @@ uniqueness check must include soft-deleted rows).
 
 ### 2.1 Deferred foreign keys — read this before writing any migration
 
-Twelve Phase-4 columns point at tables owned by later phases (`clients` → Phase 5, `departments` and
-`employees` → Phase 7, `courses` → Phase 14, `students` → Phase 15). Phase 4 creates each of them as
+Fourteen Phase-4 columns point at tables owned by later phases (`clients` → Phase 5, `departments` and
+`employees` → Phase 7, `collaborators` → Phase 8, `collaborator_referral_visits` → Phase 9,
+`courses` → Phase 14, `students` → Phase 15). Phase 4 creates each of them as
 `unsignedBigInteger`, **nullable, indexed, with no foreign-key constraint** — the target table does not
 exist yet — and always beside a denormalised snapshot column (`client_name`, `course_name`,
 `student_name`, `department`) that the public site actually renders. Consequences, all binding:
@@ -82,7 +83,13 @@ Deferred columns: `portfolio_items.client_id`, `testimonials.client_id`, `testim
 `student_reviews.student_id`, `student_reviews.course_id`, `success_stories.student_id`,
 `success_stories.course_id`, `contact_inquiries.course_id`, `team_members.department_id`,
 `job_openings.department_id`, **`team_members.employee_id`** (F-3.13), **`job_applications.employee_id`**
-(F-3.12) — the last two point at Phase 7's `employees` and follow the identical deferred pattern.
+(F-3.12) — these two point at Phase 7's `employees` — and **`contact_inquiries.collaborator_id`** →
+Phase 8's `collaborators` plus **`contact_inquiries.referral_visit_id`** → Phase 9's
+`collaborator_referral_visits` (ND-3), both `nullOnDelete` when their owning phase's guarded migration adds
+the constraint. All fourteen follow the identical deferred pattern.
+
+The non-FK snapshot column `contact_inquiries.referral_code` (string(32), nullable, indexed) ships with
+them; it points at nothing by design — a code is stored verbatim even when it resolves to nobody.
 
 ### 2.2 `service_categories`
 
@@ -556,6 +563,9 @@ reference it and may request **additive** columns only; none of them creates it.
 | `routed_at` | timestamp | null | |
 | `routing_attempts` | unsignedTinyInteger | 0 | incremented per attempt; 3 failures move it to `failed` |
 | `routing_error` | string(255) | null | `target_unregistered`, `module_disabled`, or the exception message |
+| `collaborator_id` | unsignedBigInteger | null, index, **no FK (deferred, Phase 8)** | **display snapshot only** (D37) - see the snapshot block below |
+| `referral_code` | string(32) | null, index | **display snapshot only** (D37) - the `?ref=` code as captured on the public form |
+| `referral_visit_id` | unsignedBigInteger | null, index, **no FK (deferred, Phase 9)** | the click-evidence row (`collaborator_referral_visits.id`) - evidence, never authority |
 | `assigned_to` | foreignId `users` | null, index, nullOnDelete | drives row scoping (§9) |
 | `read_at` | timestamp | null | |
 | `read_by` | foreignId `users` | null, nullOnDelete | |
@@ -574,10 +584,38 @@ never claim the same lead/course-inquiry row — the second insert fails rather 
 `index(inquiry_type, status)`, `index(routing_status, created_at)`, `index(is_spam, created_at)`,
 `index(status, created_at)`, **`index(routing_target, routing_status)`** (F-9.3 — the "Awaiting CRM" /
 "Awaiting Institute" tabs and `routePending()` filter on exactly this pair), plus the FK indexes
-`index(service_id)`, `index(assigned_to)`, `index(read_by)` (F-9.2).
+`index(service_id)`, `index(assigned_to)`, `index(read_by)` (F-9.2), plus the three referral-snapshot
+indexes `index(collaborator_id)`, `index(referral_code)`, `index(referral_visit_id)` (ND-3).
 Relationships: `belongsTo(Service)`, `belongsTo(User::class, assigned_to)`, plus a **nullable morph-like
 pointer** (`routed_type` + `routed_id`) resolved lazily: `routedRecord()` returns null when the class does
 not exist, so the admin row renders "target record removed / module not installed" instead of throwing.
+
+**The three referral-snapshot columns (ND-3, requested by phase-08-09 §13.1, governed by D37).**
+`collaborator_id`, `referral_code` and `referral_visit_id` exist because §17's public form is the
+client / project-inquiry entry point of §38 and the `?ref=` code has to survive the form submission. The
+two id columns follow §2.1's **deferred-FK** pattern exactly (`unsignedBigInteger`, nullable, indexed,
+**no FK constraint here**): `collaborators` arrives in Phase 8 and `collaborator_referral_visits` in
+Phase 9, and each owning phase adds its constraint (`nullOnDelete`) in its own guarded migration.
+`referral_code` is a plain indexed `string(32)` that points at nothing by design — a code is stored
+verbatim even when it resolves to nobody, so staff can see what the visitor actually typed. Binding rules:
+
+1. **They are display snapshots, and `collaborator_referrals` is the only truth of attribution (D37, R5).**
+   No commission, no wallet figure and no ledger row is ever derived from them. The engine resolves
+   `collaborator_referrals` on the payment date and nothing else.
+2. **No access scope may read them.** `ContactInquiry::scopeVisibleTo()` (§9.1.2) stays `view_any` or
+   `assigned_to = $user->id`; a collaborator has no reach into this table at all (§9.3). A hand-written
+   `collaborator_id` on an inquiry therefore grants **nothing** - the same guarantee phase-06 §9 and
+   phase-14-17 §9 carry for their own snapshots.
+3. **Phase 4 writes them once, at submission**, from the `?ref=` cookie/session Phase 3 preserved through
+   the public cache (`ContactInquiryService::submit()`, §6.10.5) - and never again. From Phase 9 onwards
+   the **only** writer is phase-08-09's `SyncReferralSnapshot` listener (its §10.2), re-derived from
+   `collaborator_referrals`; `collaborators:sync-referral-snapshots` repairs drift.
+4. `referral_visit_id` is **evidence**, so phase-09's retention sweep must not prune a visit an inquiry
+   still points at - the same guard INV-R6 already applies to `collaborator_referrals.referral_visit_id`
+   and `leads.referral_visit_id` (§13, Phase 8-9 block).
+5. Routing copies them onward rather than moving them: the inquiry keeps its snapshot for ever, and
+   §6.10.4's targets pass the captured code into `leads.referral_code_captured` /
+   `course_inquiries.referral_code` through the owning phase's own attribution call.
 
 ---
 
@@ -685,6 +723,12 @@ Phase 4 appends the 21 keys below into that existing group — they are listed f
 §5.1b, giving the group 34 keys with no collisions. Rules, defaults and behaviour below remain Phase 4's.
 Two groups with the slug `website` would mean one silently overwriting the other's label and sort, so this
 is a hard rule, not a preference.
+
+> **The count is 21 here and 34 in the group, verified key by key (ND-9).** The table below has 21 rows;
+> phase-03 §5.1a has 13; phase-03 §5.1b mirrors these same 21 key names exactly. **13 + 21 = 34.**
+> `docs/design/resolutions.md` §2.4's "phase-04's 22 keys … (35 keys)" is **one high and is the error** —
+> no key was lost in the merge and there is no 22nd key to restore. A future `website.*` key is added here
+> **and** to phase-03 §5.1b in the same edit, with both totals bumped together.
 
 Existing keys are **reused, never redefined**: `maintenance.contact_form_enabled` gates
 `POST /contact`, `maintenance.public_site_enabled` gates every public route (Phase 3 middleware),
@@ -1152,7 +1196,7 @@ lose a lead**.
 **6.10.1 The contract**
 
 ```php
-interface InquiryTarget                       // App\Contracts\Cms\InquiryTarget
+interface InquiryTarget                       // App\Contracts\Inquiry\InquiryTarget  (ND-4)
 {
     public function key(): string;            // 'crm_lead' | 'course_inquiry'
     public function label(): string;          // shown in the admin UI ("CRM Lead")
@@ -1170,6 +1214,13 @@ final class InquiryRouter                     // App\Services\Cms\InquiryRouter,
     public function routePending(int $limit = 200): array;        // ['routed'=>int,'pending'=>int,'failed'=>int]
 }
 ```
+
+**Namespace (ND-4).** The interface is `App\Contracts\Inquiry\InquiryTarget` — **`Inquiry`, not `Cms`**.
+Phase 4 owns and declares it, but both sides of the contract implement it: the CMS side here and the CRM
+side at phase-05 §6.10 (`App\Support\Inquiry\CrmLeadInquiryTarget`), with phase-14-17 adding
+`CourseInquiryTarget`. A contract two non-CMS phases implement does not live under `App\Contracts\Cms`,
+so the domain-neutral namespace is canonical and `App\Contracts\Cms\InquiryTarget` does not exist.
+`InquiryRouter` itself stays `App\Services\Cms\InquiryRouter` (Phase 4's own service).
 
 `InquiryType::routingTarget()` is the only mapping from form input to target key:
 `Service → 'crm_lead'`, `Course → 'course_inquiry'`, `General → null`.
@@ -1258,7 +1309,11 @@ final class ContactInquiryService
 
 Invariants: `submit()` **always** persists a row (spam included), lower-cases the email, strips HTML from
 `message`/`subject`, records `ip_address`, `user_agent`, `page_url`, `referrer_url`, `utm_*` and
-`filled_in_seconds`, defaults `assigned_to` from `website.inquiry_default_assignee_id`, and returns the
+`filled_in_seconds`, stores the referral snapshot of §2.20 (`referral_code` verbatim from the `?ref=`
+cookie/session Phase 3 preserved through the public cache, plus `referral_visit_id` and `collaborator_id`
+when Phase 9's resolver is bound and resolves them — a `collaborator_id` **posted by the browser is
+discarded**, never trusted, exactly as phase-14-17 INV-I4 requires; before Phase 9 exists the code is
+stored and the other two stay null), defaults `assigned_to` from `website.inquiry_default_assignee_id`, and returns the
 same response shape for spam and non-spam so a bot learns nothing. A non-spam row fires
 `ContactInquirySubmitted`; the queued listener calls `InquiryRouter::route()` when
 `website.inquiry_auto_route` is true. `markNotSpam()` clears `is_spam`/`spam_reason` and re-queues routing.
@@ -1280,7 +1335,7 @@ it records the fact in the activity log instead.
 | `StoreSuccessStoryRequest` / `UpdateSuccessStoryRequest` | success stories | `story` required max 20000 |
 | `ModerationRequest` | approve / reject / reset | `reason` `required_if:action,reject,reset, max:255` |
 | `BulkModerationRequest` | bulk approve | `ids` array max 200 |
-| `StoreBlogPostRequest` / `UpdateBlogPostRequest` | posts | `title` required max 200; `slug` as services; `blog_category_id` `nullable, exists`; `tags.*` string max 40, max 40 items; `content` required; `meta_description` max 255; `published_at` `nullable, date` |
+| `StoreBlogPostRequest` / `UpdateBlogPostRequest` | posts | `title` required max 200; `slug` as services; `blog_category_id` `nullable, exists`; `tags.*` string max 40, max 40 items; `content` required; `published_at` `nullable, date`. **No SEO rule** — see the delegation note below (ND-13) |
 | `ScheduleBlogPostRequest` | schedule | `published_at` `required, date, after:now` |
 | `StoreJobOpeningRequest` / `UpdateJobOpeningRequest` | jobs | `employment_type`/`work_mode`/`salary_period` enums; `salary_min`/`salary_max` `nullable, decimal:0,2, min:0` + a closure asserting `Money::compare(min, max) <= 0`; `deadline` `nullable, date, after_or_equal:today` |
 | `ChangeJobOpeningStatusRequest` | status | target in `JobOpeningStatus` |
@@ -1289,6 +1344,25 @@ it records the fact in the activity log instead.
 | `AssignRequest` | assign endpoints | `user_id` `nullable, exists:users,id` and the user must hold the module's `view_any` permission |
 | `PublicContactRequest` | **public** contact form | `inquiry_type` enum; `service_id` `nullable, exists:services,id` + required when type is service; `course_name` required when type is course and `course_id` is null; `budget` `nullable, in:` the configured options; `message` `required, min:15, max:5000`; honeypot + token |
 | `UpdateContactInquiryRequest` | admin notes | `response_notes` max 5000, `status` enum |
+
+**SEO input is validated by `SeoService`, not by an entity Form Request (D23, ND-13).** No Form Request in
+this table declares a rule for a `seo_meta` column — not `title`, `meta_description`, `meta_keywords`,
+`canonical_url`, `robots` or `og_image_media_id`. Every Form Request that backs a screen carrying
+`<x-cms.seo-fields>` (services, service categories, portfolio items, portfolio categories, blog categories,
+blog posts, job openings) instead **delegates**:
+
+```php
+public function rules(): array
+{
+    return array_merge($this->ownRules(), app(SeoService::class)->rules());   // phase-03 §6.5
+}
+```
+
+`SeoService::rules()` is published at phase-03 §6.5 and is the one SEO rule set; `SeoService::save()` is
+the one SEO writer (§8.13). `StoreBlogPostRequest`'s former `meta_description max:255` was a duplicate of
+that rule **and wrong** — `seo_meta.meta_description` is `string(320)` (phase-03 §2.12) — which is exactly
+how a second SEO write path starts: two validators drift, then one of them starts writing its own column.
+A Form Request that restates a `seo_meta` rule is a review failure.
 
 Policies (one per model, registered in `AppServiceProvider`): `ServicePolicy`, `ServiceCategoryPolicy`,
 `TechnologyPolicy`, `PortfolioItemPolicy`, `PortfolioCategoryPolicy`, `TeamMemberPolicy`,
@@ -1673,7 +1747,7 @@ the module is disabled or the user lacks the permission — no edit to the dashb
 
 | Component | Purpose |
 |---|---|
-| `<x-cms.seo-fields :model="$model">` | The identical SEO field block used by services, portfolio, blog, jobs and categories — one implementation, one validation contract, with the snippet preview and counters. **It declares no entity column** (F-2.3, D23): it reads through `SeoService::for($model)` and writes **only** through `App\Services\Cms\SeoService::save($model, $data)` into `seo_meta`. The OG-image control is a media picker writing `seo_meta.og_image_media_id` (profile `ImageProfile::Og`); the noindex toggle writes `seo_meta.robots` |
+| `<x-cms.seo-fields :model="$model">` | The identical SEO field block used by services, portfolio, blog, jobs and categories — one implementation, one validation contract, with the snippet preview and counters. **It declares no entity column** (F-2.3, D23): it reads through `SeoService::for($model)` and writes **only** through `App\Services\Cms\SeoService::save($model, $data)` into `seo_meta`. "One validation contract" is literal (ND-13): the fields post under the `seo.*` prefix and the host Form Request merges `SeoService::rules()` (phase-03 §6.5) rather than restating any of them — see §6.11. The OG-image control is a media picker writing `seo_meta.og_image_media_id` (profile `ImageProfile::Og`); the noindex toggle writes `seo_meta.robots` |
 | `<x-cms.image-field name="image" :asset="$model?->imageAsset">` | A **thin wrapper over `MediaService` + Phase 3's media picker** (F-2.4, D24): choose from the library or upload, preview, replace, remove. It posts to `MediaService::store()` and sets a `*_media_id`; it never writes a path column and owns no validation rules of its own |
 | `<x-cms.moderation-actions :record="$record">` | Approve / Reject / Feature buttons with the permission checks and the reason modal, shared by testimonials and student reviews |
 | `<x-site.contact-form :type="null" :service="null">` | The public form including honeypot, signed token and the type-dependent fields — so Phase 3 can drop the same form onto any CMS page without duplicating the spam protection |
@@ -1767,7 +1841,11 @@ signed URL + `BlogPostPolicy::view`, and which sends `X-Robots-Tag: noindex` and
 ### 9.3 Other panels
 
 `routes/collaborator.php`, `student.php`, `teacher.php` and `client.php` gain **nothing** in Phase 4. A
-student or client hitting any `/admin/...` route from this phase gets the Phase 1 `panel:admin` 403. The
+student or client hitting any `/admin/...` route from this phase gets the Phase 1 `panel:admin` 403.
+**This includes the collaborator panel (ND-3, D37):** `contact_inquiries.collaborator_id` is a display
+snapshot and grants no reach — no collaborator route, scope, portal section or widget reads this table, and
+§9.1.2's scope is `view_any` or `assigned_to`, never the snapshot. A row hand-written with a collaborator's
+id is invisible to that collaborator. The
 `student_panel` value of `ContentSource` and `student_reviews.submitted_by_user_id` exist so a later phase
 can add self-submission **without a migration** — until then no panel can write to these tables.
 
@@ -1984,6 +2062,24 @@ auto-responder is specified in the requirement — §12 Q5 raises it).
 60. Deleting a category with 5 services is refused; with `reassign_to` it moves all 5 and then
     soft-deletes the category; reordering writes `sort_order` 1..n and one activity entry.
 
+**Referral snapshot on `contact_inquiries` (ND-3, D37)**
+
+61. A submission carrying `?ref=COL-1001` stores `referral_code = 'COL-1001'` verbatim on the inquiry;
+    with no Phase-9 resolver bound, `collaborator_id` and `referral_visit_id` stay **null** and nothing
+    throws. An unknown code is stored just the same and attaches nobody.
+62. A `collaborator_id` **posted in the request body** is discarded: the stored column is null (or the
+    server-resolved value), never the submitted one.
+63. The three columns are created with **no** FK constraint (test 1 already asserts this for §2.1) and are
+    each indexed; `index-manifest.php` has a row for `collaborator_id` and `referral_visit_id`.
+64. **A snapshot grants nothing.** An inquiry hand-written with an active collaborator's `collaborator_id`
+    and `referral_code` is invisible to that collaborator (no collaborator route reaches the table at all,
+    §9.3) and does not appear in `ContactInquiry::visibleTo()` for a user holding only
+    `contact_inquiries.view` unless `assigned_to` matches — the scope never reads the snapshot.
+65. **No SEO rule is duplicated (ND-13).** `StoreBlogPostRequest::rules()` contains no `meta_description`
+    key of its own, a 300-character `seo.meta_description` is **accepted** (the column is `string(320)`, and
+    the old `max:255` copy would have rejected it), a 400-character one is rejected by
+    `SeoService::rules()`, and a static scan of `app/Http/Requests/Cms/**` finds no `seo_meta` column name.
+
 ---
 
 ## 12. Risks and open questions
@@ -2039,7 +2135,7 @@ Phase 4 owns every column it creates. The items below are what it needs **from**
 
 | Request | Why |
 |---|---|
-| `SettingsRegistry`: the new `website` group exactly as §5 | definitions live in code in the Phase 2 file; Phase 4 only supplies the field list |
+| `SettingsRegistry`: the **21 keys of §5 appended into phase-03's existing `website` group** — Phase 4 declares no group of its own (F-6.3) | definitions live in code in the Phase 2 file; Phase 4 only supplies the field list. Two declarations of the slug `website` would mean one silently overwriting the other's label and sort |
 
 **Phase 3 — public website CMS**
 
@@ -2079,6 +2175,16 @@ Everything in this block already exists in phase-03: Phase 4 **reuses** it and c
 | `job_applications.employee_id` — add the FK constraint (`nullOnDelete`) in the same guarded migration, and set it when a `selected` candidate becomes an employee (F-3.12) | HR can trace an employee back to the application, the interview trail and the CV |
 | `App\Enums\EmploymentType` — Phase 7 is the **owner** of the canonical seven cases (`full_time`, `part_time`, `contract`, `internship`, `temporary`, `consultant`, `freelance`) plus `isSalaried()` and `leaveEligibleByDefault()`; Phase 4 only casts `job_openings.employment_type` to it (F-5.2). Because Phase 4 migrates first, the class file lands with Phase 4 carrying phase-07 §3's list verbatim, and Phase 7 reuses it unchanged | two declarations of one `app/Enums` name is a merge conflict, never a style question (R3) |
 
+**Phase 8-9 — collaborators and referral attribution**
+
+| Request | Why |
+|---|---|
+| **Requests honoured (ND-3).** phase-08-09 §13.1 asks Phase 4 — the owner of `contact_inquiries` (F-2.1) — for `contact_inquiries.collaborator_id`, `.referral_code` and `.referral_visit_id`. **All three are now defined in §2.20**: `collaborator_id` and `referral_visit_id` as `unsignedBigInteger`, nullable, indexed, **deferred FK** (the §2.1 pattern); `referral_code` as `string(32)`, nullable, indexed. The ask is satisfied by this contract, not forwarded | **D37.** §17's public form is the client / project-inquiry entry point of §38, so the `?ref=` code must survive the submission. They are **display snapshots**: `collaborator_referrals` stays the only truth of attribution, no engine reads them, **no access scope reads them** (§9.1.2, §9.3), and a hand-written snapshot grants nothing |
+| `contact_inquiries.collaborator_id` → the FK constraint to `collaborators.id` (`nullOnDelete`) in **Phase 8's** guarded migration | the deferred FK of §2.1; `collaborators` does not exist when Phase 4 migrates |
+| `contact_inquiries.referral_visit_id` → the FK constraint to `collaborator_referral_visits.id` (`nullOnDelete`) in **Phase 9's** guarded migration, **and** the INV-R6 prune guard extended to never prune a visit an inquiry still points at | the same evidence-retention guarantee phase-09 already gives `collaborator_referrals.referral_visit_id` and `leads.referral_visit_id` (F-3.5); click evidence must outlive the retention sweep |
+| `SyncReferralSnapshot` (phase-08-09 §10.2) becomes the **only** writer of these three columns from Phase 9 onwards, re-derived from `collaborator_referrals`, with `collaborators:sync-referral-snapshots` repairing drift | §10.2 already names the "`contact_inquiries` … equivalents"; Phase 4 writes them once at submission and never again, so there is exactly one steady-state writer (INV-R1) |
+| A bound `ReferralAttributionResolver` / `ReferralService::resolveCode()` so `ContactInquiryService::submit()` can resolve the posted visit token — **optional by construction**: unbound, the code is stored verbatim and the other two columns stay null | §6.10.5; Phase 4 ships three phases before Phase 9 and a missing resolver can never lose an inquiry or a code (the same rule as §6.10.3) |
+
 **Phase 14 — courses**
 
 | Request | Why |
@@ -2113,7 +2219,7 @@ Everything in this block already exists in phase-03: Phase 4 **reuses** it and c
 
 | Request | Why |
 |---|---|
-| **Every FK index named in §2 has a row in `tests/Support/index-manifest.php`** — including the ones added by F-9.2 (`testimonials.approved_by`, `testimonials.submitted_by_user_id`, `student_reviews.approved_by`, `student_reviews.submitted_by_user_id`, `portfolio_item_media.created_by`, `job_openings.created_by`, `job_applications.status_changed_by`, `job_applications.employee_id`, `contact_inquiries.service_id`, `contact_inquiries.assigned_to`, `contact_inquiries.read_by`) and the eleven `*_media_id` columns | `audit:manifest --check` is part of this phase's definition of done (D60); an unindexed FK is a table scan on every delete |
+| **Every FK index named in §2 has a row in `tests/Support/index-manifest.php`** — including the ones added by F-9.2 (`testimonials.approved_by`, `testimonials.submitted_by_user_id`, `student_reviews.approved_by`, `student_reviews.submitted_by_user_id`, `portfolio_item_media.created_by`, `job_openings.created_by`, `job_applications.status_changed_by`, `job_applications.employee_id`, `contact_inquiries.service_id`, `contact_inquiries.assigned_to`, `contact_inquiries.read_by`), the two deferred-FK snapshot columns added by ND-3 (`contact_inquiries.collaborator_id`, `.referral_visit_id` — manifest rows from day one even though the constraint arrives in Phase 8/9) and the eleven `*_media_id` columns. `contact_inquiries.referral_code` is indexed too but is not an FK, so it belongs to the plain-index list | `audit:manifest --check` is part of this phase's definition of done (D60); an unindexed FK is a table scan on every delete |
 | `upload-manifest.php` carries one row per Phase-4 upload field with its disk and permission: every image field is `media_assets` on the `public` disk through `MediaService`, and `job_applications.cv_path` is the private `local` disk behind `job_applications.download` (D21) | one rule per upload field, recorded where the sweep can see it |
 
 ---
@@ -2142,3 +2248,18 @@ Applied from [`../design/resolutions.md`](../design/resolutions.md) §7 (apply m
 | F-9.3 | §2.20 adds `INDEX (routing_target, routing_status)`; §2.16 adds `INDEX (views_count)` |
 | F-12.4 | §4 adds **`contact_inquiries.view_logs`** and the ability semantics for it; §9.1 states the grant per role (Digital Marketer: no `view_any`, no `view_logs`; HR: `jobs.*` + `job_applications.*` in full; SEO Expert: neither module); §9.1.2 makes the technical/PII block query-level; §9.1.3 gains the per-opening scope (`job_openings.created_by`, no new column, no new ability); §10.5 keeps CV download in the §107 sensitive set and adds the metadata-panel trail |
 | F-10.1 | This contract claims **no** decision number; §2 preamble cites **D19, D21, D23, D24, D25, D26** and each section cites the relevant one |
+
+---
+
+## Drift fixes (round 2)
+
+Applied from [`../design/consistency-audit-round-2.md`](../design/consistency-audit-round-2.md) §4. These
+close contradictions the convergence pass itself introduced. No money guarantee is touched: the three new
+columns are **snapshots** under D37 and no engine, aggregate or scope reads them.
+
+| ND | Change made |
+|---|---|
+| ND-3 | **Phase 4 owns `contact_inquiries`, so Phase 4 defines the columns.** §2.20 adds `collaborator_id` (unsignedBigInteger, nullable, indexed, **deferred FK** → Phase 8's `collaborators`, `nullOnDelete`), `referral_code` (string(32), nullable, indexed) and `referral_visit_id` (unsignedBigInteger, nullable, indexed, **deferred FK** → Phase 9's `collaborator_referral_visits`, `nullOnDelete`), plus the three indexes in the Keys block and a five-rule snapshot block: display-only under **D37**, **no access scope may read them**, Phase 4 writes them once at submission and phase-08-09's `SyncReferralSnapshot` is the only writer thereafter, `referral_visit_id` is evidence the retention sweep must not prune, and routing copies them onward rather than moving them. §2.1's deferred list grows from twelve to **fourteen** columns and names the two new target tables. §6.10.5 `submit()` records the snapshot and **discards a browser-posted `collaborator_id`** (phase-14-17 INV-I4's rule). §9.3 states that the snapshot grants a collaborator no reach. §13 gains a **Phase 8-9 block** whose first row is "**Requests honoured**" — the three asks in phase-08-09 §13.1 are satisfied here, not forwarded — with the two FK-promotion rows, the INV-R6 prune-guard extension, the `SyncReferralSnapshot` hand-off and the optional-resolver rule. New tests **61-64**; §13 Phase 24 row carries the three index-manifest entries. This closes the "column referenced but never defined" defect (F-3.4 / F-3.5 reproduced on `contact_inquiries`) without adding an attribution authority |
+| ND-4 | §6.10.1's namespace comment corrected `App\Contracts\Cms\InquiryTarget` → **`App\Contracts\Inquiry\InquiryTarget`**, with a paragraph stating why: Phase 4 declares the interface but the CMS side *and* the CRM side (phase-05 §6.10) *and* the institute side (phase-14-17 `CourseInquiryTarget`) all implement it, so the contract is domain-neutral and does not live under `App\Contracts\Cms`. `App\Contracts\Cms\InquiryTarget` does not exist. `InquiryRouter` stays `App\Services\Cms\InquiryRouter`. phase-05 §6.10 already named the canonical namespace and needed no change |
+| ND-9 | §5 keeps **21** and the group total **34**, now with the verified derivation (21 rows here, 13 at phase-03 §5.1a, the same 21 names mirrored at phase-03 §5.1b, diffed key by key) and an explicit note that `resolutions.md` §2.4's "22 keys / 35 keys" is one high and is the error — there is no 22nd key to restore. Also corrected §13's Phase 2 row, which still asked Phase 2 for "the new `website` group" in contradiction of §5 and F-6.3; it now asks for the 21 keys appended into phase-03's single group |
+| ND-13 | §6.11's `StoreBlogPostRequest` / `UpdateBlogPostRequest` row **drops `meta_description max:255`** — a `seo_meta` column validated by an entity Form Request, and wrong as well (the column is `string(320)`). §6.11 gains the delegation rule: **no** Form Request here declares a rule for any of the six `seo_meta` columns; every request behind an `<x-cms.seo-fields>` screen merges `app(SeoService::class)->rules()` (published at phase-03 §6.5) instead, with the merge shown. §8.13's "one validation contract" is now literal. New test **65** asserts a 300-character description is accepted, a 400-character one rejected, and that no `seo_meta` column name occurs in `app/Http/Requests/Cms/**`. One SEO store, one writer, one rule set (D23) |

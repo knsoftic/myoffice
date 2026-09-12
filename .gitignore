@@ -22,3 +22,6 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# local workflow scripts (not part of the application)
+.phase-*.js
