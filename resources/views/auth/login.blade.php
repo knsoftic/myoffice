@@ -1,47 +1,78 @@
-<x-guest-layout>
-    <!-- Session Status -->
-    <x-auth-session-status class="mb-4" :status="session('status')" />
+@extends('layouts.guest')
 
-    <form method="POST" action="{{ route('login') }}">
+@section('title', 'Sign in')
+
+@section('heading')
+    <h1 class="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl dark:text-white">
+        Welcome back
+    </h1>
+    <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">
+        Sign in with the email address your administrator set up for you.
+    </p>
+@endsection
+
+@section('content')
+    @include('auth.partials.status')
+
+    <form
+        method="POST"
+        action="{{ route('login') }}"
+        x-data="{ busy: false }"
+        x-on:submit="busy = true"
+        class="space-y-5"
+    >
         @csrf
 
-        <!-- Email Address -->
+        <x-ui.form.input
+            name="email"
+            type="email"
+            label="Email address"
+            placeholder="you@company.com"
+            icon="mail"
+            autocomplete="username"
+            inputmode="email"
+            autocapitalize="none"
+            spellcheck="false"
+            required
+            autofocus
+        />
+
         <div>
-            <x-input-label for="email" :value="__('Email')" />
-            <x-text-input id="email" class="block mt-1 w-full" type="email" name="email" :value="old('email')" required autofocus autocomplete="username" />
-            <x-input-error :messages="$errors->get('email')" class="mt-2" />
-        </div>
+            <x-ui.form.input
+                name="password"
+                type="password"
+                label="Password"
+                placeholder="••••••••"
+                icon="lock-closed"
+                autocomplete="current-password"
+                required
+            />
 
-        <!-- Password -->
-        <div class="mt-4">
-            <x-input-label for="password" :value="__('Password')" />
-
-            <x-text-input id="password" class="block mt-1 w-full"
-                            type="password"
-                            name="password"
-                            required autocomplete="current-password" />
-
-            <x-input-error :messages="$errors->get('password')" class="mt-2" />
-        </div>
-
-        <!-- Remember Me -->
-        <div class="block mt-4">
-            <label for="remember_me" class="inline-flex items-center">
-                <input id="remember_me" type="checkbox" class="rounded dark:bg-gray-900 border-gray-300 dark:border-gray-700 text-indigo-600 shadow-sm focus:ring-indigo-500 dark:focus:ring-indigo-600 dark:focus:ring-offset-gray-800" name="remember">
-                <span class="ms-2 text-sm text-gray-600 dark:text-gray-400">{{ __('Remember me') }}</span>
-            </label>
-        </div>
-
-        <div class="flex items-center justify-end mt-4">
-            @if (Route::has('password.request'))
-                <a class="underline text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:focus:ring-offset-gray-800" href="{{ route('password.request') }}">
-                    {{ __('Forgot your password?') }}
-                </a>
+            @if ($canResetPassword ?? \Illuminate\Support\Facades\Route::has('password.request'))
+                <div class="mt-2 text-right">
+                    <a
+                        href="{{ route('password.request') }}"
+                        class="text-xs font-medium text-brand-600 underline-offset-4 hover:underline dark:text-brand-400"
+                    >
+                        Forgot your password?
+                    </a>
+                </div>
             @endif
-
-            <x-primary-button class="ms-3">
-                {{ __('Log in') }}
-            </x-primary-button>
         </div>
+
+        <x-ui.form.checkbox
+            name="remember"
+            label="Keep me signed in"
+            description="Only do this on a device you trust."
+            :checked="(bool) old('remember')"
+        />
+
+        @include('auth.partials.submit', ['label' => 'Sign in', 'busyLabel' => 'Signing in…'])
     </form>
-</x-guest-layout>
+@endsection
+
+@section('below')
+    Accounts are created by an administrator — there is no public sign-up.
+    <br class="hidden sm:block" />
+    Need access? Ask your administrator to invite you.
+@endsection

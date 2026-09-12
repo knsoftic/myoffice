@@ -1,39 +1,76 @@
-<x-guest-layout>
-    <form method="POST" action="{{ route('password.store') }}">
+@extends('layouts.guest')
+
+@section('title', 'Choose a new password')
+
+@section('heading')
+    <h1 class="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl dark:text-white">
+        Choose a new password
+    </h1>
+    <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">
+        Pick something you have not used anywhere else. Every device currently signed in as you will
+        be signed out.
+    </p>
+@endsection
+
+@section('content')
+    @include('auth.partials.status')
+
+    <form
+        method="POST"
+        action="{{ route('password.store') }}"
+        x-data="{ busy: false }"
+        x-on:submit="busy = true"
+        class="space-y-5"
+    >
         @csrf
 
-        <!-- Password Reset Token -->
-        <input type="hidden" name="token" value="{{ $request->route('token') }}">
+        <input type="hidden" name="token" value="{{ $request->route('token') }}" />
 
-        <!-- Email Address -->
-        <div>
-            <x-input-label for="email" :value="__('Email')" />
-            <x-text-input id="email" class="block mt-1 w-full" type="email" name="email" :value="old('email', $request->email)" required autofocus autocomplete="username" />
-            <x-input-error :messages="$errors->get('email')" class="mt-2" />
-        </div>
+        <x-ui.form.input
+            name="email"
+            type="email"
+            label="Email address"
+            :value="$request->email"
+            icon="mail"
+            autocomplete="username"
+            inputmode="email"
+            autocapitalize="none"
+            spellcheck="false"
+            required
+            autofocus
+        />
 
-        <!-- Password -->
-        <div class="mt-4">
-            <x-input-label for="password" :value="__('Password')" />
-            <x-text-input id="password" class="block mt-1 w-full" type="password" name="password" required autocomplete="new-password" />
-            <x-input-error :messages="$errors->get('password')" class="mt-2" />
-        </div>
+        <x-ui.form.input
+            name="password"
+            type="password"
+            label="New password"
+            placeholder="••••••••••"
+            icon="lock-closed"
+            autocomplete="new-password"
+            :help="$passwordHint ?? null"
+            required
+        />
 
-        <!-- Confirm Password -->
-        <div class="mt-4">
-            <x-input-label for="password_confirmation" :value="__('Confirm Password')" />
+        <x-ui.form.input
+            name="password_confirmation"
+            type="password"
+            label="Confirm new password"
+            placeholder="••••••••••"
+            icon="check-circle"
+            autocomplete="new-password"
+            required
+        />
 
-            <x-text-input id="password_confirmation" class="block mt-1 w-full"
-                                type="password"
-                                name="password_confirmation" required autocomplete="new-password" />
-
-            <x-input-error :messages="$errors->get('password_confirmation')" class="mt-2" />
-        </div>
-
-        <div class="flex items-center justify-end mt-4">
-            <x-primary-button>
-                {{ __('Reset Password') }}
-            </x-primary-button>
-        </div>
+        @include('auth.partials.submit', ['label' => 'Save new password', 'busyLabel' => 'Saving…'])
     </form>
-</x-guest-layout>
+
+    <div class="mt-6 border-t border-slate-200 pt-4 text-center dark:border-slate-800">
+        <a
+            href="{{ route('login') }}"
+            class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+        >
+            <x-ui.icon name="arrow-left" class="h-3.5 w-3.5" />
+            Back to sign in
+        </a>
+    </div>
+@endsection

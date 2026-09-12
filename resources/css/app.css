@@ -1,3 +1,324 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+|--------------------------------------------------------------------------
+| Base layer
+|--------------------------------------------------------------------------
+|
+| Global document defaults only. Anything component-shaped belongs in a Blade
+| component under resources/views/components/ui/**, not here.
+|
+*/
+@layer base {
+    :root {
+        color-scheme: light;
+        --shell-sidebar: 17rem; /* 272px */
+        --shell-rail: 4.75rem; /* 76px  */
+    }
+
+    html.dark {
+        color-scheme: dark;
+    }
+
+    html {
+        -webkit-text-size-adjust: 100%;
+        -webkit-tap-highlight-color: transparent;
+        scroll-behavior: smooth;
+    }
+
+    body {
+        @apply bg-slate-50 font-sans text-sm text-slate-900 antialiased;
+        @apply dark:bg-slate-950 dark:text-slate-100;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
+        @apply font-semibold tracking-tight;
+    }
+
+    /* Numbers line up in tables, stat cards and money columns. */
+    table,
+    .tabular,
+    [data-numeric] {
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* Alpine: never let un-initialised markup flash. */
+    [x-cloak] {
+        display: none !important;
+    }
+
+    ::selection {
+        @apply bg-brand-500/25 text-slate-900;
+    }
+
+    .dark ::selection {
+        @apply bg-brand-400/30 text-white;
+    }
+
+    /* A single, visible focus ring everywhere — keyboard users are first-class. */
+    a:focus-visible,
+    button:focus-visible,
+    summary:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible,
+    [tabindex]:focus-visible,
+    [role='button']:focus-visible,
+    [role='menuitem']:focus-visible,
+    [role='tab']:focus-visible {
+        @apply outline-none ring-2 ring-brand-500/40 ring-offset-2 ring-offset-white;
+        @apply dark:ring-brand-400/40 dark:ring-offset-slate-950;
+    }
+
+    /* @tailwindcss/forms resets inputs; re-point its ring at the brand colour. */
+    [type='text'],
+    [type='email'],
+    [type='url'],
+    [type='password'],
+    [type='number'],
+    [type='date'],
+    [type='datetime-local'],
+    [type='month'],
+    [type='search'],
+    [type='tel'],
+    [type='time'],
+    [type='week'],
+    [multiple],
+    textarea,
+    select {
+        @apply border-slate-300 dark:border-slate-700;
+    }
+
+    [type='checkbox'],
+    [type='radio'] {
+        @apply border-slate-300 text-brand-600 dark:border-slate-600 dark:bg-slate-800;
+    }
+
+    /* Slim, theme-aware scrollbars. */
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: rgb(203 213 225) transparent;
+    }
+
+    .dark * {
+        scrollbar-color: rgb(51 65 85) transparent;
+    }
+
+    ::-webkit-scrollbar {
+        width: 9px;
+        height: 9px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background-color: rgb(203 213 225);
+        border-radius: 9999px;
+        border: 2px solid transparent;
+        background-clip: content-box;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background-color: rgb(148 163 184);
+    }
+
+    .dark ::-webkit-scrollbar-thumb {
+        background-color: rgb(51 65 85);
+    }
+
+    .dark ::-webkit-scrollbar-thumb:hover {
+        background-color: rgb(71 85 105);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+            scroll-behavior: auto !important;
+        }
+    }
+}
+
+/*
+|--------------------------------------------------------------------------
+| Shell geometry
+|--------------------------------------------------------------------------
+|
+| The sidebar width lives in plain CSS keyed off a single `.is-rail` class on
+| <html>. The inline theme script sets that class before first paint, so a
+| collapsed sidebar never flashes open on reload, and Alpine only has to
+| toggle the same class at runtime.
+|
+*/
+@layer components {
+    .shell-sidebar {
+        width: var(--shell-sidebar);
+        transition: width 200ms cubic-bezier(0.16, 1, 0.3, 1),
+            transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .shell-content {
+        transition: padding-left 200ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @media (min-width: 1024px) {
+        .is-rail .shell-sidebar {
+            width: var(--shell-rail);
+        }
+
+        .shell-content {
+            padding-left: var(--shell-sidebar);
+        }
+
+        .is-rail .shell-content {
+            padding-left: var(--shell-rail);
+        }
+    }
+
+    /*
+     * Off-canvas drawer under lg. Expressed in plain CSS rather than duelling Tailwind
+     * translate utilities, so the closed state is correct on the very first paint and
+     * Alpine only has to add `.is-open`.
+     */
+    .shell-sidebar {
+        transform: translateX(-100%);
+    }
+
+    .shell-sidebar.is-open {
+        transform: translateX(0);
+    }
+
+    @media (min-width: 1024px) {
+        .shell-sidebar {
+            transform: none;
+        }
+    }
+
+    /* Hidden while the sidebar is a rail (labels, group headings, chevrons). */
+    @media (min-width: 1024px) {
+        .is-rail .rail-hide {
+            display: none !important;
+        }
+
+        .is-rail .rail-center {
+            justify-content: center !important;
+            padding-left: 0.625rem !important;
+            padding-right: 0.625rem !important;
+        }
+
+        /* Group headings disappear in rail mode, so separate groups with a hairline. */
+        .is-rail .nav-group + .nav-group {
+            margin-top: 0.5rem;
+            padding-top: 0.5rem;
+            border-top: 1px solid rgb(226 232 240);
+        }
+
+        .dark .is-rail .nav-group + .nav-group {
+            border-top-color: rgb(30 41 59);
+        }
+    }
+
+    /* Tooltip shown beside a rail icon on hover/focus. */
+    .rail-tooltip {
+        display: none;
+    }
+
+    @media (min-width: 1024px) {
+        .is-rail .rail-tooltip {
+            display: block;
+            opacity: 0;
+            transform: translateX(-4px);
+            pointer-events: none;
+            transition: opacity 120ms ease-out, transform 120ms ease-out;
+        }
+
+        .is-rail .rail-trigger:hover > .rail-tooltip,
+        .is-rail .rail-trigger:focus-visible > .rail-tooltip {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    }
+}
+
+/*
+|--------------------------------------------------------------------------
+| Utilities
+|--------------------------------------------------------------------------
+*/
+@layer utilities {
+    /* Responsive card / stat grid used by every dashboard and index page. */
+    .card-grid {
+        @apply grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 xl:grid-cols-4 lg:gap-6;
+    }
+
+    .card-grid-3 {
+        @apply grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3 lg:gap-6;
+    }
+
+    .card-grid-2 {
+        @apply grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2 lg:gap-6;
+    }
+
+    /* Surfaces — the two canonical panel treatments, light and dark. */
+    .surface {
+        @apply bg-white ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-slate-800;
+    }
+
+    .surface-muted {
+        @apply bg-slate-50 dark:bg-slate-900/60;
+    }
+
+    .hairline {
+        @apply border-slate-200 dark:border-slate-800;
+    }
+
+    .no-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+    }
+
+    .no-scrollbar::-webkit-scrollbar {
+        display: none;
+    }
+
+    /* Screen-reader-only, but visible once focused (skip links). */
+    .focus-not-sr-only:focus {
+        @apply not-sr-only fixed left-4 top-4 z-toast rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-lg;
+    }
+
+    /* Shimmer sweep used by the skeleton component. */
+    .skeleton-sweep::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        transform: translateX(-100%);
+        background-image: linear-gradient(
+            90deg,
+            rgb(255 255 255 / 0) 0%,
+            rgb(255 255 255 / 0.45) 50%,
+            rgb(255 255 255 / 0) 100%
+        );
+        animation: shimmer 1.6s infinite;
+    }
+
+    .dark .skeleton-sweep::after {
+        background-image: linear-gradient(
+            90deg,
+            rgb(255 255 255 / 0) 0%,
+            rgb(255 255 255 / 0.06) 50%,
+            rgb(255 255 255 / 0) 100%
+        );
+    }
+}

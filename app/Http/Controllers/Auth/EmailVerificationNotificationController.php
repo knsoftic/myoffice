@@ -1,24 +1,34 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
+use App\Services\Auth\LoginRedirector;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 
-class EmailVerificationNotificationController extends Controller
+/**
+ * Resend the verification email (route `verification.send`, throttled to 6/minute).
+ */
+final class EmailVerificationNotificationController extends Controller
 {
-    /**
-     * Send a new email verification notification.
-     */
+    public function __construct(private readonly LoginRedirector $redirector) {}
+
     public function store(Request $request): RedirectResponse
     {
-        if ($request->user()->hasVerifiedEmail()) {
-            return redirect()->intended(route('dashboard', absolute: false));
+        $user = $request->user();
+
+        abort_unless($user instanceof User, 401);
+
+        if ($user->hasVerifiedEmail()) {
+            return redirect()->intended($this->redirector->homeUrl($user));
         }
 
-        $request->user()->sendEmailVerificationNotification();
+        $user->sendEmailVerificationNotification();
 
-        return back()->with('status', 'verification-link-sent');
+        return back()->with('auth_status', 'verification-link-sent');
     }
 }

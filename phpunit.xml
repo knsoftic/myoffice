@@ -23,12 +23,40 @@
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
         <env name="CACHE_STORE" value="array"/>
-        <env name="DB_CONNECTION" value="sqlite"/>
-        <env name="DB_DATABASE" value=":memory:"/>
+
+        <!--
+            Phase 1 runs against a dedicated MariaDB schema, never the dev database and never
+            sqlite: the schema this project ships uses MariaDB/InnoDB specifics (utf8mb4 index
+            lengths, "group" as a column name, json columns, unsigned FKs with nullOnDelete) and
+            the RBAC fixture is the real seeded data, so the tests have to exercise the same
+            engine production does. Create it once with:
+
+              C:/xampp/mysql/bin/mysql.exe -u root -e "CREATE DATABASE IF NOT EXISTS my_office_test"
+
+            RefreshDatabase then runs one "migrate:fresh" (with seed) per test process
+            (Tests\TestCase sets $seed) and wraps every test in a transaction.
+        -->
+        <env name="DB_CONNECTION" value="mysql"/>
+        <env name="DB_HOST" value="127.0.0.1"/>
+        <env name="DB_PORT" value="3306"/>
+        <env name="DB_DATABASE" value="my_office_test"/>
+        <env name="DB_USERNAME" value="root"/>
+        <env name="DB_PASSWORD" value=""/>
         <env name="DB_URL" value=""/>
+
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
-        <env name="SESSION_DRIVER" value="array"/>
+
+        <!--
+            The session-management screens (phase-01 §1.8, §7) read and delete rows from the
+            `sessions` table, and the change-password flow proves "other sessions are revoked" by
+            those rows being gone — none of which is observable on the `array` driver.
+        -->
+        <env name="SESSION_DRIVER" value="database"/>
+
+        <!-- Demo accounts are part of the Phase 1 fixture (panel isolation matrix). -->
+        <env name="SEED_DEMO" value="true"/>
+
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
