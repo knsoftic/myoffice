@@ -86,8 +86,39 @@ routes/                       web.php (public) admin.php collaborator.php studen
 | Form Request | `Store<Model>Request` / `Update<Model>Request` | `StoreCollaboratorRequest` |
 | Test | `tests/Feature/<Phase or Module>/...Test.php` | `Feature/Rbac/PermissionEnforcementTest.php` |
 
-Every business table carries: `created_at`, `updated_at`, `deleted_at` (soft deletes),
-`created_by`, `updated_by` (nullable FK to `users`, filled by the `Blameable` trait).
+Every business table carries `created_at`, `updated_at`, `created_by`, `updated_by` (nullable FK to
+`users`, filled by the `Blameable` trait).
+
+**Soft deletes are the default, and are deliberately omitted on append-only tables.** A table is
+append-only — and therefore carries **no `deleted_at`** — when it belongs to one of these categories:
+
+| Category | Examples |
+|---|---|
+| Money received, returned or paid out | `student_fee_payments`, `project_payments`, `payment_reversals`, `finance_reversals`, `collaborator_payouts`, `collaborator_payout_allocations` |
+| Money authorised or promised | `student_fee_discounts`, `collaborator_commission_settings` (rule versions), `collaborator_commission_entitlements`, `collaborator_commission_ledger_entries` |
+| Attribution and other evidence | `collaborator_referrals`, `collaborator_referral_visits`, `lead_conversions`, `project_value_revisions` |
+| Audit, log and run history | `activity_log`, `login_history`, `sitemap_generations`, `lead_import_rows`, `collaborator_wallet_reconciliations`, `blog_post_views`, `course_material_downloads`, the eleven append-only HR tables |
+| Snapshots and revisions | `cms_revisions`, `seo_meta`, certificates, ID cards, payroll run items |
+| Append-only children and history pivots | `invoice_items`, `time_entry_segments`, `task_comment_mentions`, `collaborator_skills`, `collaborator_service` |
+
+Everything else — documents, profiles, catalogues, configuration rows, mutable pivots — keeps
+`deleted_at`. A table without `deleted_at` is protected by a model `deleting` hook and, where its
+contract says so, a `BEFORE DELETE` trigger. **Never add `deleted_at` back to one of these tables:** a
+nullable `deleted_at` on an immutable ledger lets one `->delete()` hide a row from every aggregate while
+the wallet cache keeps the money, and on a NULL-tolerant unique guard it silently permits a duplicate.
+See `DEVELOPMENT_LOG.md` §4 **D16** (the nine financial tables, approved) and **D19** (the general rule).
+
+**The `files` module slug governs the `attachments` table.** There is no `files` table. `attachments` is
+the general store (projects, tasks, comments, milestones, tickets, replies, messages, meetings,
+assignments, collaborators, invoices); five specialised stores are named exceptions because each carries
+behaviour a generic table cannot — `client_documents`, `employee_documents`, `course_materials` (+
+`course_material_targets`), `assignment_submission_files`, and `media_assets` for CMS images. Client
+visibility is `attachments.visibility` (`internal` / `team` / `client`), never a boolean on another table.
+
+Every `*_rate` and `*_percentage` column is `decimal(8,4)` — there is no "reported percentage" exception
+(marks are `decimal(8,2)` and are not percentages). No private artefact is ever written to the `public`
+disk: uploads land on a private disk and are served by a controller that re-runs the permission chain
+(`DEVELOPMENT_LOG.md` §4 D21).
 
 ---
 

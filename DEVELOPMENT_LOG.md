@@ -128,7 +128,50 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D14 | Laravel 12 style: route files, middleware aliases and global middleware are registered in `bootstrap/app.php`. | Framework convention. |
 | D15 | Public self-registration is **disabled**; accounts are created by staff, or through admission/inquiry flows that create a pending record first. | Closed business system. |
 | D16 | **Append-only financial tables carry no `deleted_at`** — payments, reversals, fee discounts, referrals, commission rule versions, entitlements, ledger entries, payouts and payout allocations. This is a deliberate exception to the "every business table has soft deletes" rule in `CLAUDE.md` §3. Correction happens only by posting a reversing row. | A nullable `deleted_at` on an immutable ledger is a loaded gun: a single `->delete()` would hide the row from every aggregate while the wallet cache keeps the money. Raised as Q1 by the financial spine; **approved 2026-09-12**. |
-| D17+ | Further decision numbers are assigned by the authoritative registry in [`docs/design/resolutions.md`](docs/design/resolutions.md) — nine contracts had independently claimed overlapping numbers (audit finding F-10.1), which would have blocked the first phase-3 migration. D1–D16 above are frozen and never renumbered. | One registry, or the decision log becomes fiction. |
+| D17 | **DB CHECK constraints, STORED generated columns and `BEFORE DELETE` triggers are part of the contract.** Developers must expect raw SQL errors on an illegal DELETE; factories and seeders never delete money rows. | The guarantee has to live where a future developer cannot forget it. Spine §2.1, §2.19. |
+| D18 | **A payout allocates named ledger entries with partial amounts**, never a running balance; "paid commission" is always derived from `collaborator_payout_allocations`. | Requirement §120.9 needs a 20,000 payout against a single 50,000 entry without a manual split. |
+| D19 | **Soft deletes are the default and are deliberately omitted on append-only tables.** Append-only = money, audit, log, snapshot/revision, view-counter, numbering and history-pivot tables. Mutable business tables (documents, profiles, catalogues, configuration) keep `deleted_at`. The full category rule is in `CLAUDE.md` §3. | Eleven contracts deviate from "every business table" for the same reason; one rule beats fifty exceptions. Audit F-9.1. |
+| D20 | **`Modules::permissionModuleMap()` returns `null` for a permission whose prefix is not a registered module slug, and `Gate::before` falls through on null.** `client_portal.*`, `student_portal.*`, `teacher_portal.*` and `collaborator_portal.*` are permission namespaces, not modules. | Without it an unknown prefix reads as "disabled" and all four non-admin panels are dead for everyone, Super Admin included. Audit F-12.1. |
+| D21 | **No private artefact is ever on the public disk.** CVs, client and employee documents, expense receipts, invoice PDFs, course materials, submissions, certificates, ID cards and exports are streamed by a controller that re-runs the full permission chain; no signed URL, no guessable path. | §111. One rule for every upload field, recorded in `upload-manifest.php`. |
+| D22 | **Public website content is published by snapshot** (`content` -> `published_content`) and invalidated by a cache **version stamp**. | The database cache driver has no tag support. Phase 3 [D-W3-7], [D-W3-14]. |
+| D23 | **One SEO store**: every public-facing entity gets SEO through the `seo_meta` morph and `SeoService`; no phase adds SEO columns to its own table. | Otherwise the SEO screen, the sitemap and the fallback chain cannot see half the site. Audit F-2.3. |
+| D24 | **Two media tiers**: `media_assets` + `MediaService` + `ImageProfile` is mandatory for anything rendered on the public website; a bare `*_path` column is allowed only for a private profile photo or document. | One public image pipeline (derivatives, alt text, usage counting, delete guard); no second uploader. Audit F-2.4. |
+| D25 | **One HTML sanitiser**: `App\Support\RichText::sanitize()` over `mews/purifier`, applied on write and again on render. | A duplicated security control is a security defect: SEC-05 must have one answer. Audit F-2.5. |
+| D26 | **A content module may gate its own public routes with `site_module`** (404, leaving no trace); disabling `website_sections` can never take the public site down. | Keeps Phase 3's INV-15 guarantee and legalises Phase 4's middleware. Audit F-6.6. |
+| D27 | **`App\Services\Finance\DocumentNumberService` is the single numbering implementation, shipped by Phase 5** (the earliest consumer), default pad `'%06d'`, every caller passing its own pad; `reserve()` adds a period reset. | Three phases each claimed to create it and four need it before Phase 10. Audit F-4.1, F-4.12. |
+| D28 | **Later-phase data reaches an earlier phase's screens only through a capability contract or a registry**; an unavailable capability renders an empty state or 404s, never a fabricated number. | Phase 5 [D-P5-1]. |
+| D29 | **Duplicate contacts are detected and warned, never blocked by a database constraint**; normalisation happens in `ContactNormalizer`, in PHP, into plain indexed columns. | Phase 5 [D-P5-5]. |
+| D30 | **`leads.view_any` means the whole pipeline and `leads.view` means own records only**; no new ability and no visibility setting is introduced. | Phase 5 [D-P5-8]. |
+| D31 | **Phase 5 owns `routes/client.php` and every `client.*` route name**; later phases append screens through `ClientPortalRegistry` and never redeclare a name, and every client route carries `client.context`. | Laravel's last registration wins silently: two URIs under one name is a live bug. Revocation must also be immediate. Audit F-6.2, F-12.3. |
+| D32 | **Assignment of work points at `users.id`; an organisational duty points at `employees.id`; the bridge is `employees.user_id` (nullable, unique).** | Assignment drives login, permissions, notifications and timers; a duty is a post. Phase 6 [D-P6-2] and Phase 7 [D-HR-2] were each right about one half. Audit F-11.1. |
+| D33 | **Elapsed time is stored only as append-only `time_entry_segments`**; every duration is a recomputed cache and "one running timer per worker" is a unique index. | Phase 6 INV-P4…P6. |
+| D34 | **Progress is derived by `ProjectProgressService`**, the only writer of `progress_percent`; a per-project manual override is reasoned, attributed and revocable. | Phase 6 [D-P6-3]. |
+| D35 | **`project_value_revisions` is append-only with a `BEFORE DELETE` trigger**, and the five value/override columns on `projects` are writable only by `ProjectValueService`. | Project value feeds commission. Phase 6 INV-P1, INV-P3. |
+| D36 | **A payroll run is immutable from `lock()`**: there is no unlock, and a correction is a new item on a `correction` run referencing the original. | Phase 7 HR-15, HR-17. |
+| D37 | **`collaborator_referrals` is the single truth of attribution.** Every `*.collaborator_id` / `*.referral_code` on a subject table is a display snapshot: no engine reads it and **no access scope may use it**. | A stale snapshot would otherwise grant one partner sight of another's project and contract value (§112). Audit F-8.2. |
+| D38 | **A referral decision follows a documented six-rank precedence ladder** in which an authenticated staff selection always wins, the losing candidate is preserved as a superseded row with its reason, and nothing the browser posts is trusted as a code. | Phase 9 INV-R2, INV-R3. |
+| D39 | **Exactly one calculation site per commission side**, reached only through an `afterCommit` event -> unique job chain; payments and ledger rows may be inserted only through `PaymentService` / `LedgerWriter`. | Phase 10 [D-IMP-2], [D-IMP-3] — the rule a future phase is most likely to break. |
+| D40 | **`invoices.paid_amount` / `refunded_amount` / `balance_amount` are a cache of one canonical SQL** over `project_payments`; nothing may `increment()` them. | Phase 13 R-1. |
+| D41 | **`finance_reversals` is the append-only expense / other-income counterpart of `payment_reversals`**; the two are never merged and neither is ever deleted. | Phase 13 §2.6. |
+| D42 | **An invoice number is assigned once at issue**, never to a draft and never reused; a cancelled invoice keeps its number. | Phase 13 §2.9. |
+| D43 | **The single concession to INV-8**: `project_payments.invoice_id` may move NULL -> value -> NULL, by `InvoiceService` alone, reason mandatory, audited, gated by `project_payments.edit` + `invoices.edit`, with zero commission effect. | An advance received before its invoice existed must be attachable or `invoices.paid_amount` can never be right. Nobody may later "tighten" INV-8 back. Audit F-4.10. |
+| D44 | **One `approved` expense row per paid payroll run** (`expenses.source_type` / `source_id`, unique), written by a listener on `PayrollRunPaid`. | Without it §99's profit and loss is wrong by the whole payroll. Audit F-3.9. |
+| D45 | **The §68 admission pipeline is carried by `student_admissions.stage`**, with `students.status` and `course_inquiries.status` advanced in lockstep by `AdmissionService` only. | Three status columns, one writer. Phase 15 R-10. |
+| D46 | **Attendance and syllabus coverage attach to a dated `class_sessions` row**, never to a recurring timetable rule. | Every later phase (exams, certificates, reports) depends on it. Phase 16 [D-IN-10]. |
+| D47 | **Schedule overlap is enforced by `ScheduleClashDetector`** (one generic `check(SlotCandidate)`) under parent row locks plus a nightly verifier. | MariaDB cannot express a range constraint, so nobody should "fix" this with a unique index. Phase 16 R-1. |
+| D48 | **Capacity is enforced by a locked recount**; `batches.current_students` is a cache with no authority. | Phase 16 INV-I6, INV-I7. |
+| D49 | **An installment plan's live lines minus waivers always equal the charge's net fee**, and every discount redistributes the plan in reverse due-date order. | Phase 18 PI-1. |
+| D50 | **Installment numbers are never reused and never renumbered**; a rebuild continues from `MAX + 1`. | Fee disputes quote a number. Phase 18 R-5. |
+| D51 | **A mark's ceiling is enforced three times** — Form Request, service, and a database CHECK made possible by snapshotting `total_marks` onto the result / submission row. | Phase 19/20 INV-19-6, INV-20-1. |
+| D52 | **An issued certificate and an issued ID card are snapshots**; a later rename, template edit or settings change alters neither their content nor their QR target. A wrong certificate is revoked and reissued. | Phase 21 INV-21-1, INV-21-4. |
+| D53 | **A print template is sanitised HTML with `{{tokens}}`**, rendered by a token replacer — never Blade, never `eval`. | Phase 21 INV-21-5. |
+| D54 | **§94's six role pairs live in `App\Support\MessagingMatrix`** plus one multiselect setting, re-checked on every send. | It is the reason a student cannot message a client. Phase 22 INV-22-4. |
+| D55 | **Every notification is declared in `NotificationRegistry`** and delivered by `NotificationService`; a disabled `notifications` module is a logged no-op that never rolls back a business write. | Phase 22 INV-22-7, INV-22-8. |
+| D56 | **A report is a declaration in `ReportRegistry` that delegates every figure to the service owning the table**; a `SUM()` in a report class is a review failure, and a withheld column is absent from the query and the file. | Phase 23 INV-23-1, INV-23-2. |
+| D57 | **Release deploys are directory swaps with a rename rollback.** | Phase 25. |
+| D58 | **Three separated MySQL users**: runtime DML, migration DDL, backup read-only. | Phase 25; closes tech debt T3. |
+| D59 | **`Model::shouldBeStrict()` outside production is the N+1 audit.** | Phase 24. |
+| D60 | **The four manifests are the authority for every sweep**, and `audit:manifest --check` is part of every phase's definition of done. | Phase 24 §13.2. |
 
 ---
 
@@ -166,10 +209,13 @@ Contract: [`docs/phases/phase-01.md`](docs/phases/phase-01.md) · built 2026-09-
 | [x] | Admin CRUD: Users, Roles (permission matrix editor), Permissions viewer, Modules toggle |
 | [x] | Activity log + login history viewers, with CSV export behind the export permission |
 | [x] | 4 panel dashboards (collaborator / student / teacher / client) with portal-permission gating |
-| [x] | Acceptance suite: **478 tests / 17,727 assertions green** on `my_office_test` |
-| [~] | Adversarial review remediation: 2 HIGH + 6 medium findings being fixed, then re-reviewed |
+| [x] | Acceptance suite: **587 tests / 18,334 assertions green** on `my_office_test` (371 test methods across 40 files) |
+| [x] | Adversarial review remediation: both HIGH findings closed and hand-verified (29/29 checks through the real HTTP kernel), 6 medium fixed, re-reviewed by two independent auditors |
+| [ ] | Carryover to Phase 2 (one real medium + small items) — see Known Issues T11–T18 |
 | [ ] | Browser pass: light/dark render + console errors (no PHPUnit test can see this — manual or Dusk) |
 | [ ] | Rollback of all 14 migrations executed against `my_office_test` (suite only asserts every `down()` is non-empty) |
+
+**Committed** `a22b7d9` — Phase 1 is a rollback point.
 
 ### [ ] PHASE 2 — Admin dashboard, system settings, module management
 
@@ -198,6 +244,9 @@ moment Phase 1 is verified (both phases touch `Admin/DashboardController`, `Admi
 ### [ ] PHASE 6 — Projects, milestones, tasks, time tracking
 ### [ ] PHASE 7 — Employees, departments, attendance, leave, payroll
 ### [ ] PHASE 8 — Collaborator management (profiles, panel shell, commission settings)
+
+> **Release note** — note: the financial spine's migration set (spine §1.3, 15 tables) is applied in the same release, immediately after Phase 8's own migrations; the spine-dependent screens stay hidden behind their module switches until then, and `collaborators:backfill-wallets` + `collaborators:seed-initial-rules` run once afterwards (phase-08-09 §1.4 [D-P8-1]).
+
 ### [ ] PHASE 9 — Referral codes, referral URLs, referral tracking
 ### [ ] PHASE 10 — Student referral commission engine (`StudentCommissionService`)
 ### [ ] PHASE 11 — Project referral commission engine (`ProjectCommissionService`)
@@ -208,6 +257,9 @@ moment Phase 1 is verified (both phases touch `Admin/DashboardController`, `Admi
 ### [ ] PHASE 16 — Teachers, batches, timetable, demo classes
 ### [ ] PHASE 17 — Student attendance + course progress
 ### [ ] PHASE 18 — Student fees, installments, discounts, scholarships (commission triggers)
+
+> **Release note** — note: consumes Phase 10's `PaymentService` and the four fee tables (`student_fees`, `student_fee_installments`, `student_fee_discounts`, `student_fee_payments`); Phase 18 creates no financial table. It ships `student_fee_reminders`, the fee services and all fee screens.
+
 ### [ ] PHASE 19 — Course material + assignments
 ### [ ] PHASE 20 — Exams + results
 ### [ ] PHASE 21 — Certificates (public QR verification) + student ID cards
@@ -219,6 +271,40 @@ moment Phase 1 is verified (both phases touch `Admin/DashboardController`, `Admi
 ---
 
 ## 6. Change Log
+
+### 2026-09-12 — Phase 1 security remediation (commit `a22b7d9`)
+
+Both HIGH findings closed at the root and each enforced twice (Form Request **and** service), because
+`Gate::before` waves a Super Admin past any policy and later phases will call the service from new places:
+
+- **Status** — `status` / `status_reason` removed from `UpdateUserRequest` and from `UserService::PROFILE_FIELDS`;
+  a submitted status that differs from the row is a 422, and the service throws on the same payload.
+  `changeStatus()` — which demands `users.change_status`, a written reason, and an actor who is not the target —
+  is now the only writer, and the edit form renders a read-only badge instead of a select.
+- **Roles** — `UserPolicy::assignRoles()` (previously dead code) is the single enforcement point: it requires
+  `users.assign`, requires the actor to outrank the **target**, and delegates the role half to
+  `RolePolicy::assign()`. A self-grant is rejected in plain PHP before the Gate is consulted, so a Super Admin
+  cannot slip through, and the form offers no role inputs on your own edit screen.
+- **A defect nobody filed** made the whole status story moot: both status controls posted `@method('PUT')` to a
+  route registered as `Route::patch()`, so the only legitimate way to change a status answered **405** — the
+  update-form back door was the only thing that worked.
+
+Medium fixes: admin-initiated password writes funnel through one `setPassword()` that revokes sessions and
+rotates the remember token (`UserService` now contains no `$user->password =` assignment at all);
+`AuthenticateSession` registered in the web group so `Auth::logoutOtherDevices()` actually works; the four
+`*_portal` modules are now **core** (one toggle could otherwise close an entire panel — the collaborator sidebar
+items were re-keyed to the real `collaborators` business module so module-gating coverage was kept); the user
+detail screen no longer runs its login-history or audit queries without the matching `view_logs` ability; role
+membership respects the same visibility rule as the users screen; hostile array query parameters no longer 500.
+
+One bug the remediation itself introduced was caught and fixed at the root: with `AuthenticateSession`
+registered, a second `actingAs()` in one test was signed out, because PHPUnit shares one session Store per test
+and the first actor's `password_hash_web` survived. Fixed in `tests/TestCase::actingAs()` (forgetting the stale
+stamp, exactly as a real login does) rather than by patching the single test that tripped over it — five or six
+other files act as two users and would have broken later.
+
+Suite: **478 → 587 tests**, 17,727 → 18,334 assertions, green twice (sequential and random order). Six tests
+that asserted the pre-fix behaviour were updated to assert the new, stricter rule; none was loosened.
 
 ### 2026-09-12 — Phase 1 built, verified, reviewed
 
@@ -343,6 +429,10 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-12 | Front-end build (post-cleanup) | `npm run build` | PASS — CSS 113.72 kB (down from 116.58 kB after dead views were removed) |
 | 2026-09-12 | Adversarial security review | read-only audit of routes, gates, middleware, policies, requests, 89 views | 14 findings (2 high, 6 medium, 6 low) — high ones under remediation |
 | 2026-09-12 | Contract compliance audit | phase-01.md walked section by section against DB + code | 14 findings (1 stale critical, 2 medium, 11 low) |
+| 2026-09-12 | Post-remediation suite | `php artisan test` (run by me, not an agent) | PASS — **587 tests / 18,334 assertions**, 111 s; also green under `--order-by=random` |
+| 2026-09-12 | HIGH fixes hand-verified | temporary probe through the real HTTP kernel against `my_office` inside a rolled-back transaction | PASS — 29/29: `users.edit` without `users.change_status` gets a 422 on `status`, 403 on the status endpoint, and a 422 on any self role grant, while still being able to manage weaker accounts |
+| 2026-09-12 | Seeder convergence on live data | `db:seed --class=ModuleSeeder` on `my_office` | PASS — 79 registered, 0 created, 4 updated; the only diff in the table is `is_core` 0→1 on the four portal modules; `is_enabled` byte-identical for all 79 rows |
+| 2026-09-12 | Re-review of all 28 findings | two independent read-only auditors | 29 FIXED, 4 PARTIAL, 8 STALE/NOT_FIXED (low), **1 new medium** carried to Phase 2 |
 
 ---
 
@@ -360,6 +450,24 @@ The two HIGH findings are both real and are being fixed now:
 | T8 | `profile.edit` remains as a dead fallback route name in `EnsureUserIsActive`, the four panel dashboards and the topbar partial. | low | Every use is guarded by `Route::has()`, so it is inert. Clean up in Phase 2. |
 | T9 | `SUPERADMIN_PASSWORD` is unset, so every `migrate:fresh --seed` mints a new random Super Admin password. | low | Printed once by the seeder. Set the env var before a production install (Phase 25). |
 | T10 | Unused Breeze view components remain (`text-input`, `primary-button`, `dropdown`, `modal`, …) plus `welcome.blade.php`. | low | Inert and unreferenced since the `x-ui` set replaced them. Delete in Phase 2 to keep the component namespace clean. |
+
+**Carried into Phase 2** — found by the post-remediation re-review, none of them exploitable with the seeded
+data, all with a named fix:
+
+| # | Item | Severity | Note |
+|---|---|---|---|
+| T11 | **A role grant is bounded only by `roles.level`, never by the permissions the actor holds.** | med | The role *editor* enforces "you may not grant a permission you do not hold"; a role *grant* does not. Today no assignable role holds a permission the Admin lacks, so it is latent — but the first custom role with `level > 5` holding, say, `modules.*` would let an Admin escalate through a puppet account. Fix: `UserPolicy::assignRoles()` must also require that the actor holds every permission in the role being granted. |
+| T12 | `roles` is `required` when updating someone else's account, but an actor without `users.assign` is offered no roles — so they can never save that account at all. | low | Functional block. Make `roles` required only when the actor may assign roles, and preserve the existing set otherwise. |
+| T13 | Admin-set passwords validate with `Password::defaults()` (min 8, no complexity) while `/account/password` uses `PasswordPolicy` (min 10, mixed case, number, symbol, uncompromised). | low | An administrator can set a weaker password than the owner could. One policy everywhere. |
+| T14 | `SettingsRepository::get()` two-argument form: a single-segment key that collides with a group name is parsed as (group, key), so `setting('localization', 'en')` returns null instead of the default. | low | Phase 2's settings UI leans on this API — fix before building on it. |
+| T15 | N+1 in `RoleController::show()` — the new member-visibility filter lazy-loads `roles` per listed member. | low | Add `with('roles')` to the member query. |
+| T16 | `user_agent` is stored unclamped, and a failed `login_histories` insert is swallowed by `catch (Throwable)`. | low | Clamp like its siblings and log the swallowed failure. |
+| T17 | `avatar_url` does a `Storage::exists()` stat on every read — 25 stats per users index. | low | Memoise per instance or cache the attribute. |
+| T18 | UI items both auditors said belong in Phase 2: `x-ui.skeleton` rendered nowhere, no bulk-select in the table component, the roles index uses inline links where users uses a row-actions dropdown, `@module` registered but never used or documented. | low | Phase 1 has no async list or bulk action for them to serve, so they were premature rather than wrong. |
+| T19 | Two accounts holding the **same** role cannot manage each other (`outranks()` is strict, 5 > 5 is false), and the users index still lists accounts whose row actions are all empty. | low | Invisible with one Admin; confusing the moment a business creates a second. Decide the peer rule and make the UI say "outranks you" instead of showing an empty menu. |
+| T20 | `phase-01.md`'s D20 text says the four portal prefixes are "permission namespaces, not modules" and that `permissionModuleMap()` returns null for them. The implemented fix kept them as registered modules with `is_core = true`. | low | The guarantee is delivered by a different mechanism, so the contract text is now wrong. Correct the text (code is fine) once the contract convergence workflow releases `docs/`. |
+| T21 | `TestCase::actingAs()` clears `password_hash_web`, so no `actingAs()` test can observe `AuthenticateSession` signing a stale session out — the very mechanism the remediation added. | low | Necessary (one session Store per test) but it narrows coverage; add one test that logs in for real instead. |
+| T22 | The modules screen's locked-card tooltip gives the "dashboard, users, roles…" reason for the four portal cards too. | low | Wrong explanation on a correct lock. |
 
 **Accepted deviations from the Phase 1 contract** (deliberate, documented so no later session "fixes" them):
 
@@ -396,3 +504,31 @@ global **setting**, so the schema already supports every option and the answer c
 | Q11 | Should a **hold period** sit between Approved and Available, so commission on a fee refunded the next day was never withdrawable? | `commission_hold_days = 0` (reproduces §51/§53 literally). Raising it is the only structural defence against paying out money that gets refunded; the clawback path is otherwise the remedy. |
 | Q12 | If a fee is refunded **after** the commission was already paid out in cash, do we claw it back or write it off? | Claw back — a negative available balance offsets future earnings. A permissioned, reasoned `write_off` action exists for genuine cases. |
 | Q13 | Should closed months be **lockable**, so a back-dated receipt cannot rewrite an already-issued statement? | No hard period lock. A 30-day back-date window, the module's `approve` ability beyond it, and both `paid_on` and `posted_at` stored so the audit is honest. |
+
+**Product decisions raised by the cross-contract convergence** (each already implemented in a way that keeps
+both options open, so answering later costs no migration — source: [`docs/design/resolutions.md`](docs/design/resolutions.md) §6):
+
+| # | Question | Recommended default | What the applying agents implement **now** (keeps both options open) |
+|---|---|---|---|
+| H1 | **REST API** (§1 "REST API where required", §6 "blocks API access") — in this release or not? (F-13.1) | **No REST API in this release.** | No `routes/api.php`, no token guard. The idempotency key is generated server-side per submission; the spine's sentence becomes "if an API is ever added it supplies the key through an `Idempotency-Key` header". `ReferralSource::api` stays as a reserved case. Adding an API later needs no schema change. |
+| H2 | **§29 "collaborator payments" as tracked income** — money *to* collaborators (a cost) or *from* them? (F-13.3) | **To** collaborators: a cost. | P&L block C is labelled "Collaborator commission (cost)" with a legend line. If the client means money *from* collaborators, it becomes an `incomes` category row later — `incomes` already has categories, so no schema change. |
+| H3 | **Ticket SLA** — §93 never asks for it; it is four settings, two clock columns, a pause rule, a sweeper and five tests. (F-13.5) | **Build it.** | Ship behind `support.sla_enabled` (boolean, default **true**); every clock column nullable. Off = no sweeper, no breach badge, no multiplier call. Dropping it later is a settings flip, not a migration. |
+| H4 | **Commission approval mode** — §120.2 says "one commission of PKR 1,000" without a status; FIN-03 asserts `pending`. Should a new commission be immediately `available`? | **Keep `manual`.** Money should not become payable without a human. | `collaborator.commission_approval_mode` already exists (`manual` default); FIN-03 asserts `pending`. Switching to `auto` is a settings change and FIN-03 gains one branch. |
+| H5 | **Referral-visit retention** — 365 days of IP and user-agent per click. (F-13.12) | **365 days**, shortenable. | Expose `collaborator.referral_visit_retention_days` (default 365) so the client can shorten it without a migration; the prune command reads the setting and never prunes a visit a `collaborator_referrals.referral_visit_id` or `leads.referral_visit_id` points at. |
+| H6 | **Public signed invoice link** (`invoices.public_token`) for clients with no login. (F-13.9) | **Build it**, off by default. | `finance.invoice_public_link_enabled` default **false**, `finance.invoice_public_link_ttl_days` default 14; the guest route 404s when disabled. |
+| H7 | **CV / applicant visibility** — who may see every CV in the system? (F-12.4) | HR full; hiring managers per opening; Digital Marketer none. | Implemented as stated in F-12.4 — no blanket `view_any` outside HR, an optional `job_opening_id` scope, the technical/PII block behind `contact_inquiries.view_logs`. Widening later is a role grant, not a code change. |
+
+**Features built beyond the literal requirement** — each one the contracts judged operationally necessary.
+Recorded here so nobody later calls them scope creep, and so you can cut any of them with one word:
+
+| Finding | Feature | Contract | Assumed default | Note |
+|---|---|---|---|---|
+| F-13.5 | Ticket SLA clocks and breach sweeps | phase-19-23 | **build** (behind `support.sla_enabled`) | H3 |
+| F-13.6 | `notification_preferences` per user/event | phase-19-23 | build | mandatory events stay locked |
+| F-13.7 | `cms_revisions` + revert, signed preview links, `sitemap_generations` | phase-03 | build | operationally necessary |
+| F-13.8 | CSV lead import (wizard, chunked jobs, error CSV) | phase-05 | build | `leads.import` gates it |
+| F-13.9 | Public signed invoice link | phase-13 | build, **disabled by default** | H6 |
+| F-13.10 | `technologies` table + two pivots | phase-04 | build | §11/§12 call it a field; a table gives filters |
+| F-13.11 | Backup restore wizard + scratch verification | phase-24-25 | build | "a backup is not a backup until it has been restored" |
+| F-13.12 | `collaborator_referral_visits` funnel report + retention | phase-08-09 | build | H5 |
+| F-13.13 | `grade_scales` / `grade_scale_bands` | phase-19-23 | build | §82 needs a grade; a scale makes it configurable |

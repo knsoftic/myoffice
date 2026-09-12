@@ -108,6 +108,7 @@ colour token such as `emerald`, `amber`, `rose`, `slate`), and exposes `static o
 | `ModuleGroup` | `System`, `SoftwareHouse`, `Hr`, `Finance`, `Collaborator`, `Institute`, `Website`, `Shared` |
 | `Ability` | `ViewAny`, `View`, `Create`, `Edit`, `Delete`, `Restore`, `Approve`, `Reject`, `Assign`, `Print`, `Export`, `Import`, `Upload`, `Download`, `ChangeStatus`, `ViewFinancial`, `ViewReports`, `ViewLogs` |
 | `LoginStatus` | `Success`, `Failed`, `Logout`, `Blocked` |
+| `RemainderPlacement` | `First`, `Last`, `Largest` — where `Money::distribute()` puts the rounding remainder (§3), so a split of money is never ambiguous. Follows the same `label()` / `color()` / `options()` contract as every other enum here. (F-4.11) |
 
 ---
 
@@ -126,9 +127,9 @@ colour token such as `emerald`, `amber`, `rose`, `slate`), and exposes `static o
 | `app/Models/Concerns/Blameable.php` | `creating` → `created_by`, `saving` → `updated_by` from `auth()->id()` (null-safe for console/seeders). Adds `creator()`/`editor()` relations. |
 | `app/Models/Concerns/LogsActivityWithContext.php` | wraps spatie `LogsActivity`; `tapActivity()` fills `ip_address`, `user_agent`, `device`, `module`; `withReason(string)` for audit entries. |
 | `app/Support/PermissionRegistry.php` | **the single source of truth** for modules and permissions (§4). Pure arrays, no DB access. |
-| `app/Support/Modules.php` | `enabled(slug)`, `all()`, `permissionModuleMap()` (permission name => module slug, cached), `flushCache()`. |
+| `app/Support/Modules.php` | `enabled(slug)`, `all()`, `permissionModuleMap()` (permission name => module slug, cached), `flushCache()`. **`permissionModuleMap()` returns `null` when the permission's prefix is not a registered module slug; a `null` means "not module-gated", never "disabled"** — so `client_portal.*`, `student_portal.*`, `teacher_portal.*` and `collaborator_portal.*` (permission namespaces, not modules) are never denied by module gating (D20, F-12.1). |
 | `app/Support/SettingsRepository.php` | `get($group, $key, $default)`, `set()`, `all($group)`, cached in one payload; bound as a singleton; `setting('company.name', 'x')` helper in `app/Support/helpers.php` (autoloaded via composer `files`). |
-| `app/Support/Money.php` | bcmath: `add`, `sub`, `mul`, `div`, `percentage($base, $rate)`, `compare`, `isZero`, `format($amount)` using the currency setting. Scale 2, round half-up. |
+| `app/Support/Money.php` | **The one canonical money surface for the whole system** (F-4.11): `add`, `sub`, `mul`, `div`, `percentage($base, $rate)`, `percentageOf($part, $whole)`, `compare`, `isZero`, `isNegative`, `abs`, `min`, `max`, `sum(array $amounts)`, `round($value, $scale = 2)`, `roundTo($amount, int $nearest)`, `prorate($amount, $part, $total)`, `distribute($amount, int $parts, RemainderPlacement $r = RemainderPlacement::First): array`, `toMinor`, `fromMinor`, `format($amount)` using the currency setting. **bcmath only, intermediate scale 6, final half-up at 2, strings in and out, never a float.** `distribute()` is the only function that may split a money value; `percentage()` and `distribute()` are public and float-free (asserted by phase-24-25 FIN-12). The remainder rule is `App\Enums\RemainderPlacement` (§2). No later phase adds a second money helper. |
 | `app/Support/Sidebar.php` | builds the nav tree from a declarative array; an item renders only when its module is enabled, the route exists (`Route::has`) and the user holds the permission. |
 | `app/Support/Device.php` | lightweight user-agent parse → `['device' => 'desktop|mobile|tablet', 'platform' => ..., 'browser' => ...]`. No extra package. |
 
@@ -154,8 +155,9 @@ LOGS      = [view_logs]
 Each module entry: `slug`, `name`, `group` (`ModuleGroup`), `icon`, `is_core`, `sort`, `abilities` (a
 merged preset list). Permission name = `{slug}.{ability}`; label = `"{Ability label} {Module name}"`.
 
-**Modules to register in Phase 1** (permissions for all of them are seeded now so later phases only add
-UI; a module appears in the sidebar only once its routes exist):
+**Modules to register in Phase 1** (these are the modules **known at Phase 1**; later phases append to
+`PermissionRegistry`, `ModuleSeeder` and `RoleSeeder`, always idempotently and never destructively — the
+final count is ~112 modules; a module appears in the sidebar only once its routes exist):
 
 - **System** (`is_core = true`, never disableable): `dashboard`, `users`, `roles`, `permissions`, `modules`, `settings`, `activity_log`, `login_history`, `backups`, `global_search`
 - **Software house**: `leads`, `clients`, `projects`, `project_milestones`, `tasks`, `time_tracking`
@@ -168,6 +170,11 @@ UI; a module appears in the sidebar only once its routes exist):
 
 Financial modules additionally get `MONEY`; anything with an approval flow gets `APPROVE`; anything
 assignable gets `ASSIGN`; report modules get `REPORTS`.
+
+`ModuleGroup` is a **grouping** for the sidebar and the module screen; `is_core` is a **per-module flag**.
+The ten Phase 1 System modules are `is_core = true`; a later System-group module may be `is_core = false`
+(e.g. `audit_trail`, `system_health`, `integrity_checks`) so the business can hide an operations screen
+without being told it cannot. (F-6.5)
 
 ### Collaborator-panel permissions (spec §59)
 
@@ -214,8 +221,10 @@ longer present in the registry are reported in the console, not deleted.
 
 `AppServiceProvider::boot()`:
 
-1. `Gate::before`: if the ability maps to a module (via `Modules::permissionModuleMap()`) that is
-   disabled **and not core** → return `false` (denies everyone, Super Admin included).
+1. `Gate::before`: if `Modules::permissionModuleMap()` returns **a slug** and that module is disabled
+   **and not core** → return `false` (denies everyone, Super Admin included). **On `null` (the prefix is
+   not a registered module slug) fall through** — an unregistered prefix is "not module-gated", never
+   "disabled", so the four `*_portal` permission namespaces are never denied by module gating (D20).
 2. Then: if the user has the `Super Admin` role → return `true`.
 3. Otherwise return `null` so spatie resolves it.
 4. Blade: `@module('slug')`, `@endmodule`, `@canAny` usage documented in the shell views.
@@ -307,7 +316,40 @@ Each panel gets a placeholder `dashboard` route so isolation is testable immedia
 | Module gating | disabling `projects` makes its routes 403 for Super Admin too, hides the sidebar item, and leaves the data intact; core modules cannot be disabled |
 | Role protection | `is_system` roles cannot be renamed or deleted; a role cannot grant a permission that does not exist |
 | Panel isolation | a Student hitting `/admin`, `/collaborator`, `/teacher`, `/client` gets 403; the same for every other panel role |
+| Portal permissions (D20) | a Collaborator, Student, Teacher and Client each reach their own panel **with every module disabled except their own** — `permissionModuleMap()` returns `null` for the `*_portal` prefixes and `Gate::before` falls through |
 | Profile | avatar upload rejects a non-image and a 5 MB file; change password invalidates other sessions |
 | Registration | `/register` returns 404 |
 | Audit | changing a user's role writes an activity row with old and new values plus IP |
 | UI | admin dashboard, users index, roles index render in light and dark without console errors; sidebar shows only permitted items |
+
+---
+
+## 11. Amendments (2026-09-12, contract convergence)
+
+Phase 1 is **built and tested** (478 tests green). The convergence pass below changed this contract's
+**text** only — it did not redesign Phase 1. Two of the four edits describe behaviour the Phase 1
+**remediation team** still has to bring the code up to; they are listed here so no reader assumes the
+code already matches.
+
+| # | Contract edit | Code status |
+|---|---|---|
+| A1 | §3 `Money.php` now publishes the full canonical surface (20 methods) and §2 adds `RemainderPlacement` (F-4.11) | **Pending** — owned by the Phase 1 remediation team; asserted by phase-24-25 **FIN-12** (`distribute()` called directly) and by the spine's money tests. Existing callers of `add`/`sub`/`mul`/`div`/`percentage`/`compare`/`isZero`/`format` are unaffected: every change is additive plus the explicit bcmath/scale contract. |
+| A2 | §3 `Modules.php` + §6 step 1: `permissionModuleMap()` returns `null` for an unregistered prefix and `Gate::before` falls through on `null` (F-12.1, **D20**) | **Pending** — owned by the Phase 1 remediation team, with the new §10 "Portal permissions" test. Until it lands, no phase may assume a `*_portal` permission survives module gating. |
+| A3 | §4 module list reworded: Phase 1 registers the modules known at Phase 1; later phases append idempotently (F-6.4) | **No code change** — the registry and seeders are already idempotent and append-only. The old sentence ("permissions for all of them are seeded now") was simply false: Phase 1 registers 75 of ~112 slugs. |
+| A4 | §4 records that `ModuleGroup` is a grouping and `is_core` is per module (F-6.5) | **No code change** — `modules.is_core` is already a per-row boolean. This only stops a later System-group module being read as undisableable. |
+
+Soft deletes in §1 stay exactly as built: `roles`, `permissions`, `modules`, `settings`,
+`login_histories` and `activity_log` carry no `deleted_at`, which is what **D19** (the category rule in
+`CLAUDE.md` §3) now states generally.
+
+---
+
+## Convergence log (2026-09-12)
+
+| Finding | Change made |
+|---|---|
+| F-4.11 | §3: the `Money.php` row replaced with the canonical 20-method surface (`percentageOf`, `isNegative`, `abs`, `min`, `max`, `sum`, `round`, `roundTo`, `prorate`, `distribute`, `toMinor`, `fromMinor` added) plus the explicit contract "bcmath only, intermediate scale 6, final half-up at 2, strings in and out, never a float"; §2: `RemainderPlacement` (`First`, `Last`, `Largest`) added. Code change flagged as pending in §11 A1. |
+| F-6.4 | §4: "(permissions for all of them are seeded now so later phases only add UI…)" replaced with "these are the modules known at Phase 1; later phases append to `PermissionRegistry`, `ModuleSeeder` and `RoleSeeder`, always idempotently and never destructively — the final count is ~112 modules". |
+| F-6.5 | §4: added the paragraph stating `ModuleGroup` is a grouping and `is_core` is a per-module flag; the ten Phase 1 System modules are `is_core = true`, a later System-group module may be `is_core = false`. |
+| F-12.1 | §3: `Modules.php` row now specifies `permissionModuleMap()` returning `null` for an unregistered prefix ("not module-gated", never "disabled"); §6 step 1 rewritten to fall through on `null`; §10 gained the four-panel "every module disabled except their own" test. Recorded as **D20**. Code change flagged as pending in §11 A2. |
+| — | §11 "Amendments" added, separating contract text from the remediation team's pending code work. |
