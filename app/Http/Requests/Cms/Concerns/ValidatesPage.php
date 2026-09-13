@@ -42,7 +42,9 @@ trait ValidatesPage
 
         return array_merge([
             'title' => array_merge($required, ['bail', 'string', 'max:200']),
-            'slug' => ['sometimes', 'bail', 'nullable', 'string', 'max:200', 'regex:'.self::SLUG_PATTERN, $this->slugRule()],
+            // The reserved/duplicate check runs before the pattern, so `sitemap.xml` or `robots.txt` is refused
+            // by name as a reserved address (FT-14) rather than as a malformed one.
+            'slug' => ['sometimes', 'bail', 'nullable', 'string', 'max:200', $this->slugRule(), 'regex:'.self::SLUG_PATTERN],
             'layout' => array_merge($required, ['bail', 'string', Rule::enum(PageLayout::class)]),
             'excerpt' => ['sometimes', 'bail', 'nullable', 'string', 'max:500'],
             'content' => ['sometimes', 'bail', 'nullable', 'string', 'max:1000000'],

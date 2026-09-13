@@ -148,7 +148,7 @@
                             <label for="unpublish-reason" class="block text-xs font-medium text-slate-600 dark:text-slate-300">
                                 Reason <span class="text-rose-500">*</span> <span class="font-normal text-slate-400">(recorded in the audit trail)</span>
                             </label>
-                            <input id="unpublish-reason" type="text" name="reason" form="unpublish-page-form" required minlength="3" maxlength="255" class="mt-1.5 block w-full rounded-lg border-slate-300 text-sm shadow-sm focus:border-brand-500 focus:ring-brand-500/30 dark:border-slate-700 dark:bg-slate-950/40 dark:text-white">
+                            <input id="unpublish-reason" type="text" name="reason" form="unpublish-page-form" required minlength="{{ \App\Http\Requests\Cms\CmsFormRequest::REASON_MIN }}" maxlength="255" class="mt-1.5 block w-full rounded-lg border-slate-300 text-sm shadow-sm focus:border-brand-500 focus:ring-brand-500/30 dark:border-slate-700 dark:bg-slate-950/40 dark:text-white">
                         </div>
                     </x-ui.confirm>
                 @endif

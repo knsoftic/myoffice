@@ -17,6 +17,7 @@ use App\Support\Format;
 use App\Support\Money;
 use App\Support\SettingsRepository;
 use App\Support\Sidebar;
+use App\Support\SiteSettings;
 
 if (! function_exists('settings_repo')) {
     /**
@@ -37,6 +38,20 @@ if (! function_exists('setting')) {
     function setting(string $key, mixed $default = null): mixed
     {
         return settings_repo()->get($key, $default);
+    }
+}
+
+if (! function_exists('site_setting')) {
+    /**
+     * The ONLY way a public view reads a setting (phase-03 §5.3, INV-10). Throws
+     * App\Support\Exceptions\NonPublicSettingException for any key whose registry definition is not
+     * `public => true`, so a secret can never be printed into a public page by mistake.
+     *
+     *   site_setting('company.name', '');
+     */
+    function site_setting(string $key, mixed $default = null): mixed
+    {
+        return app(SiteSettings::class)->get($key, $default);
     }
 }
 

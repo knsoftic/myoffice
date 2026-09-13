@@ -924,7 +924,9 @@ class SectionRegistry
                 ],
                 'contact_button' => self::linkField('Contact button', 70, [
                     'tab' => self::TAB_BUTTONS,
-                    'default' => self::linkDefault('Contact', '#contact', ButtonStyle::Ghost),
+                    // No URL until the owning phase serves a target (integration K-5): a link with no
+                    // URL renders nothing, so a freshly placed header never links nowhere.
+                    'default' => self::linkDefault('Contact', null, ButtonStyle::Ghost),
                 ]),
                 'admission_button_enabled' => [
                     'label' => 'Show the Admission button',
@@ -937,7 +939,7 @@ class SectionRegistry
                 ],
                 'admission_button' => self::linkField('Admission button', 90, [
                     'tab' => self::TAB_BUTTONS,
-                    'default' => self::linkDefault('Admissions', '#admission', ButtonStyle::Secondary),
+                    'default' => self::linkDefault('Admissions', null, ButtonStyle::Secondary),
                 ]),
                 'cta_button_enabled' => [
                     'label' => 'Show the call-to-action button',
@@ -949,7 +951,7 @@ class SectionRegistry
                 ],
                 'cta_button' => self::linkField('Call-to-action button', 110, [
                     'tab' => self::TAB_BUTTONS,
-                    'default' => self::linkDefault('Get a quote', '#contact', ButtonStyle::Primary),
+                    'default' => self::linkDefault('Get a quote', null, ButtonStyle::Primary),
                 ]),
                 'sticky' => [
                     'label' => 'Stick to the top of the window on scroll',
@@ -1036,11 +1038,12 @@ class SectionRegistry
                 ],
                 'primary_button' => self::linkField('Primary button', 40, [
                     'tab' => self::TAB_BUTTONS,
-                    'default' => self::linkDefault('Get started', '#contact', ButtonStyle::Primary),
+                    // No URL until the owning phase serves a target (integration K-5).
+                    'default' => self::linkDefault('Get started', null, ButtonStyle::Primary),
                 ]),
                 'secondary_button' => self::linkField('Secondary button', 50, [
                     'tab' => self::TAB_BUTTONS,
-                    'default' => self::linkDefault('Explore courses', '#courses', ButtonStyle::Outline),
+                    'default' => self::linkDefault('Explore courses', null, ButtonStyle::Outline),
                 ]),
                 'show_statistics' => [
                     'label' => 'Show the statistics strip',
@@ -1386,7 +1389,8 @@ class SectionRegistry
                 ],
                 'show_all_link' => self::linkField('"See all" link', 60, [
                     'tab' => self::TAB_BUTTONS,
-                    'default' => self::linkDefault('See all questions', '/faqs', ButtonStyle::Link),
+                    // No `/faqs` page is served yet (integration K-5); a link with no URL renders nothing.
+                    'default' => self::linkDefault('See all questions', null, ButtonStyle::Link),
                 ]),
             ],
             'repeaters' => [],
@@ -1439,7 +1443,7 @@ class SectionRegistry
         return [
             'label' => 'Site footer',
             'description' => 'The about line, up to two menu columns, the legal links, contact details, social icons and the copyright.',
-            'icon' => 'bars-3-bottom-left',
+            'icon' => 'queue-list',
             'group' => 'layout',
             'placements' => [SectionPlacement::GlobalFooter->value => 10],
             'unique' => true,

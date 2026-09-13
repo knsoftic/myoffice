@@ -115,6 +115,7 @@ final class PageController extends Controller
             'reservedSlugs' => $this->pages->reservedSlugs(),
             'seoMeta' => null,
             'seoInherited' => null,
+            'mediaLibrary' => $this->mediaLibrary(),
         ]);
     }
 
@@ -160,6 +161,7 @@ final class PageController extends Controller
             // Each SEO field shows the value it inherits when left blank (§8.12).
             'seoInherited' => $this->seo->for($page),
             'seoCompleteness' => $this->seo->completeness($page),
+            'mediaLibrary' => $this->mediaLibrary(),
             'menuItems' => $page->menuItems()->get(['id', 'menu_id', 'label', 'is_enabled']),
             'revisionCount' => CmsRevision::query()
                 ->where('revisionable_type', $page->getMorphClass())

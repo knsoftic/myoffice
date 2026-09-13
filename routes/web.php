@@ -2,189 +2,63 @@
 
 declare(strict_types=1);
 
-use Illuminate\Http\Response;
+use App\Http\Controllers\Site\HomeController;
+use App\Http\Controllers\Site\PreviewController;
+use App\Http\Controllers\Site\RobotsController;
+use App\Http\Controllers\Site\SitemapController;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\View;
-use Illuminate\Support\Str;
 
 /*
 |--------------------------------------------------------------------------
-| Public routes (phase-01 §8)
+| Public website (phase-03 §7.6)
 |--------------------------------------------------------------------------
 |
-| Phase 1 exposes exactly one public route: a branded holding page. The real,
-| CMS-driven public website (sections, menus, pages, services, blog, SEO) is
-| Phase 3, which replaces this route with App\Http\Controllers\Site\* actions
-| and the resources/views/site/** views — the route name `home` stays.
+| No public route carries `module:` or `can:` (INV-15): the site is the published output, not a
+| module's UI, and disabling website_sections never takes it down. A later content module gates its
+| OWN public routes with `site_module` (D26), never these.
 |
-| Authentication (login, password reset, email verification) and the /account
-| screens live in routes/auth.php, required at the bottom of this file.
-| The five panel route files are loaded by bootstrap/app.php (withRouting
-| then:), each declaring its own prefix, name prefix and panel middleware.
+| `site` is the one maintenance gate (EnsurePublicSiteAvailable, also aliased `public_site` since
+| phase-02). It is on every public GET route except robots.txt, which must stay readable while the
+| site is closed ([D-W3-13]).
 |
-| Every PUBLIC route carries `public_site` (phase-02 §6): the two `maintenance`
-| settings close the website with a 503 holding page and can never touch a
-| panel, because the gate is attached here rather than sniffing the URL.
-| Phase 3 applies the same alias to its own public group.
+| Preview authorisation (a valid signature, or a session holding pages.view / website_sections.view;
+| a bad signature is 403, none is 404) lives in Site\PreviewController, so no `signed` or `auth`
+| middleware is attached here.
+|
+| `site.page` (/{slug}) is NOT declared here: routes/site-pages.php is loaded by bootstrap/app.php
+| after every panel file, because routes match in registration order. A later phase's public route
+| (/services, /courses, ...) is declared in this file, before that catch-all.
+|
+| Authentication (login, password reset, email verification) and the /account screens live in
+| routes/auth.php, required at the bottom of this file.
 |
 */
 
-Route::get('/', function (): Response {
-    $company = (string) (setting('company.name') ?: config('app.name', 'My Office'));
-    $tagline = (string) (setting('company.tagline') ?: 'One system for your software house and training institute.');
+// The phase-03 §7.6 stacks.
+$pageStack = ['site', 'site.preview', 'site.cache'];
+$feedStack = ['site', 'site.cache'];
+$previewStack = ['site', 'site.preview'];
 
-    // Phase 3 owns resources/views/site/**; hand over to it the moment it exists.
-    if (View::exists('site.home')) {
-        return response()->view('site.home', [
-            'company' => $company,
-            'tagline' => $tagline,
-        ]);
-    }
+Route::get('robots.txt', RobotsController::class)->name('site.robots');
 
-    $initials = Str::of($company)
-        ->explode(' ')
-        ->filter()
-        ->map(static fn (string $word): string => Str::upper(Str::substr($word, 0, 1)))
-        ->take(2)
-        ->implode('');
+Route::get('/', HomeController::class)
+    ->middleware($pageStack)
+    ->name('site.home');
 
-    $name = e($company);
-    $mark = e($initials !== '' ? $initials : 'MO');
-    $lead = e($tagline);
-    $year = date('Y');
-    $loginUrl = Route::has('login') ? e(route('login')) : null;
-    $signIn = $loginUrl === null
-        ? ''
-        : '<a class="action" href="'.$loginUrl.'">Sign in to the panel</a>';
+Route::middleware($feedStack)->group(function (): void {
+    Route::get('sitemap.xml', [SitemapController::class, 'index'])->name('site.sitemap');
 
-    $html = <<<HTML
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <meta name="robots" content="noindex, nofollow">
-            <title>{$name}</title>
-            <style>
-                :root {
-                    --bg: #f1f5f9;
-                    --card: #ffffff;
-                    --fg: #0f172a;
-                    --muted: #64748b;
-                    --border: #e2e8f0;
-                    --brand: #4f46e5;
-                    --brand-soft: #eef2ff;
-                    --brand-fg: #ffffff;
-                }
-                @media (prefers-color-scheme: dark) {
-                    :root {
-                        --bg: #020617;
-                        --card: #0f172a;
-                        --fg: #e2e8f0;
-                        --muted: #94a3b8;
-                        --border: #1e293b;
-                        --brand: #6366f1;
-                        --brand-soft: #1e1b4b;
-                        --brand-fg: #ffffff;
-                    }
-                }
-                * { box-sizing: border-box; }
-                html, body { height: 100%; }
-                body {
-                    margin: 0;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    padding: 1.5rem;
-                    background: var(--bg);
-                    color: var(--fg);
-                    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-                    line-height: 1.6;
-                    -webkit-font-smoothing: antialiased;
-                }
-                .card {
-                    width: 100%;
-                    max-width: 32rem;
-                    padding: 2.5rem 2rem;
-                    border: 1px solid var(--border);
-                    border-radius: 1rem;
-                    background: var(--card);
-                    box-shadow: 0 12px 32px -20px rgba(15, 23, 42, .35);
-                    text-align: center;
-                }
-                .mark {
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    width: 3.25rem;
-                    height: 3.25rem;
-                    margin-bottom: 1.25rem;
-                    border-radius: .875rem;
-                    background: var(--brand);
-                    color: var(--brand-fg);
-                    font-size: 1.125rem;
-                    font-weight: 700;
-                    letter-spacing: .04em;
-                }
-                h1 {
-                    margin: 0 0 .5rem;
-                    font-size: 1.5rem;
-                    font-weight: 700;
-                    letter-spacing: -.015em;
-                }
-                .lead { margin: 0 0 1.75rem; color: var(--muted); }
-                .notice {
-                    padding: .875rem 1rem;
-                    border: 1px solid var(--border);
-                    border-radius: .75rem;
-                    background: var(--brand-soft);
-                    color: var(--fg);
-                    font-size: .875rem;
-                    text-align: left;
-                }
-                .notice strong { font-weight: 600; }
-                .action {
-                    display: inline-block;
-                    margin-top: 1.75rem;
-                    padding: .625rem 1.25rem;
-                    border-radius: .625rem;
-                    background: var(--brand);
-                    color: var(--brand-fg);
-                    font-size: .9375rem;
-                    font-weight: 600;
-                    text-decoration: none;
-                }
-                .action:hover { filter: brightness(1.08); }
-                footer {
-                    margin-top: 2rem;
-                    color: var(--muted);
-                    font-size: .8125rem;
-                }
-                @media (max-width: 480px) {
-                    .card { padding: 2rem 1.25rem; }
-                    h1 { font-size: 1.25rem; }
-                }
-            </style>
-        </head>
-        <body>
-            <main class="card">
-                <div class="mark" aria-hidden="true">{$mark}</div>
-                <h1>{$name}</h1>
-                <p class="lead">{$lead}</p>
-                <p class="notice">
-                    <strong>Website coming in Phase 3.</strong>
-                    This is a temporary holding page. The full public website — pages, services,
-                    courses, portfolio and blog — is managed from the admin CMS and goes live in
-                    Phase 3 of the build.
-                </p>
-                {$signIn}
-                <footer>&copy; {$year} {$name}</footer>
-            </main>
-        </body>
-        </html>
-        HTML;
+    Route::get('sitemap-{index}.xml', [SitemapController::class, 'chunk'])
+        ->whereNumber('index')
+        ->name('site.sitemap.chunk');
+});
 
-    return response($html);
-})->middleware('public_site')->name('home');
+Route::prefix('preview')
+    ->name('site.preview.')
+    ->middleware($previewStack)
+    ->group(function (): void {
+        Route::get('page/{page}', [PreviewController::class, 'page'])->whereNumber('page')->name('page');
+        Route::get('section/{section}', [PreviewController::class, 'section'])->whereNumber('section')->name('section');
+    });
 
 require __DIR__.'/auth.php';

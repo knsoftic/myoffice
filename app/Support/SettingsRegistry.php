@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Enums\Cms\SitemapChangeFrequency;
 use App\Enums\ThemePreference;
 use App\Models\Branch;
 use DateTime;
@@ -378,6 +379,13 @@ final class SettingsRegistry
                 'icon' => 'envelope',
                 'description' => 'Outgoing mail transport. Saved here and used instead of the environment file.',
                 'sort' => 70,
+            ],
+            // phase-03 §5.1: declared once here; Phase 4 appends its 21 keys to websiteFields() (§5.1b).
+            'website' => [
+                'label' => 'Website & Forms',
+                'icon' => 'globe-alt',
+                'description' => 'Public-site caching, preview links, image processing, revision history and what the public pages show.',
+                'sort' => 75,
             ],
             'collaborator' => [
                 'label' => 'Collaborators & commission',
@@ -1337,6 +1345,7 @@ final class SettingsRegistry
             'social' => self::socialFields(),
             'seo' => self::seoFields(),
             'mail' => self::mailFields(),
+            'website' => self::websiteFields(),
             'collaborator' => self::collaboratorFields(),
             'institute' => self::instituteFields(),
             'finance' => self::financeFields(),
@@ -2067,6 +2076,180 @@ final class SettingsRegistry
                 'public' => true,
                 'span' => 6,
                 'sort' => 110,
+            ],
+
+            // phase-03 §5.2 — read server-side by SeoService, never by a public view (all non-public).
+            'robots_txt_mode' => [
+                'label' => 'robots.txt',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string'],
+                'options' => ['auto' => 'Generated automatically', 'custom' => 'Custom text'],
+                'default' => 'auto',
+                'help' => 'Whichever is chosen, crawlers are told to stay away while the site is closed or not indexable.',
+                'span' => 6,
+                'sort' => 120,
+            ],
+            'robots_txt_custom' => [
+                'label' => 'Custom robots.txt',
+                'type' => self::TYPE_TEXTAREA,
+                'rules' => ['nullable', 'string', 'max:5000'],
+                'default' => null,
+                'help' => 'Used only in custom mode. A Sitemap: line pointing at another domain is dropped when the file is served.',
+                'span' => 12,
+                'sort' => 130,
+            ],
+            'sitemap_changefreq_default' => [
+                'label' => 'Default change frequency',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string'],
+                'options' => SitemapChangeFrequency::options(),
+                'default' => SitemapChangeFrequency::Weekly->value,
+                'help' => 'Stamped on each new SEO record.',
+                'span' => 6,
+                'sort' => 140,
+            ],
+            'sitemap_priority_default' => [
+                'label' => 'Default sitemap priority',
+                'type' => self::TYPE_DECIMAL,
+                // decimal(2,1) in seo_meta.sitemap_priority: one decimal, 0.0 to 1.0, never '1e0'.
+                'rules' => ['required', 'numeric', 'decimal:0,1', 'min:0', 'max:1'],
+                'scale' => 1,
+                'default' => '0.5',
+                'help' => 'Stamped on each new SEO record.',
+                'span' => 6,
+                'sort' => 150,
+            ],
+        ];
+    }
+
+    /**
+     * phase-03 §5.1a — the 13 keys Phase 3 declares. Phase 4 appends its 21 keys (§5.1b) to this same
+     * method and declares no second `website` group (F-6.3).
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private static function websiteFields(): array
+    {
+        return [
+            'cache_enabled' => [
+                'label' => 'Cache public pages',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Anonymous visitors are served a stored copy. Publishing anything invalidates every copy at once.',
+                'span' => 6,
+                'sort' => 10,
+            ],
+            'cache_ttl_minutes' => [
+                'label' => 'Cached page lifetime',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:10080'],
+                'default' => 1440,
+                'suffix' => 'minutes',
+                'help' => 'Publishing clears the cache immediately, whatever this is set to.',
+                'span' => 6,
+                'sort' => 20,
+            ],
+            'cache_warm_enabled' => [
+                'label' => 'Re-render pages after a publish',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'span' => 6,
+                'sort' => 30,
+            ],
+            'preview_ttl_minutes' => [
+                'label' => 'Shareable preview link lifetime',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:5', 'max:10080'],
+                'default' => 120,
+                'suffix' => 'minutes',
+                'span' => 6,
+                'sort' => 40,
+            ],
+            'image_quality' => [
+                'label' => 'Image quality',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:60', 'max:95'],
+                'default' => 82,
+                'help' => '60 to 95. Applies to image sizes generated from now on.',
+                'span' => 6,
+                'sort' => 50,
+            ],
+            'image_max_width' => [
+                'label' => 'Largest stored image width',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:320', 'max:8000'],
+                'default' => 2560,
+                'suffix' => 'px',
+                'help' => 'Wider uploads are scaled down. Nothing is ever scaled up.',
+                'span' => 6,
+                'sort' => 60,
+            ],
+            'image_webp_enabled' => [
+                'label' => 'Also generate WebP images',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'public' => true,
+                'span' => 6,
+                'sort' => 70,
+            ],
+            'image_lazy_loading' => [
+                'label' => 'Lazy-load images below the hero',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'public' => true,
+                'span' => 6,
+                'sort' => 80,
+            ],
+            'menu_max_depth' => [
+                'label' => 'Menu depth',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['nullable', 'integer', 'in:2'],
+                'default' => 2,
+                'help' => 'Fixed at two levels by a database constraint (INV-6). Shown for information; it cannot be raised.',
+                'readonly' => true,
+                'span' => 6,
+                'sort' => 90,
+            ],
+            'revision_keep' => [
+                'label' => 'Draft revisions kept per item',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:500'],
+                'default' => 20,
+                'help' => 'Published versions are always kept.',
+                'span' => 6,
+                'sort' => 100,
+            ],
+            'hero_video_enabled' => [
+                'label' => 'Allow a hero background video',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'public' => true,
+                'help' => 'Off shows the poster image everywhere, which saves visitors mobile data.',
+                'span' => 6,
+                'sort' => 110,
+            ],
+            'faq_accordion_open_first' => [
+                'label' => 'Open the first FAQ answer',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'public' => true,
+                'span' => 6,
+                'sort' => 120,
+            ],
+            'show_theme_toggle' => [
+                'label' => 'Show the light/dark switch on the public site',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'public' => true,
+                'span' => 6,
+                'sort' => 130,
             ],
         ];
     }

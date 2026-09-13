@@ -162,9 +162,19 @@ final class SidebarVisibilityTest extends TestCase
                 'Activity Log',
                 'Login History',
                 'Settings',
+                // phase-03 §7-§8: the nine Website CMS entries whose routes now exist.
+                'Website Overview',
+                'Sections',
+                'Menus',
+                'Pages',
+                'CTA Blocks',
+                'FAQs',
+                'FAQ Categories',
+                'Media Library',
+                'SEO',
             ],
             $labels,
-            'Only the screens whose phase has actually shipped its routes may appear — Phase 1 plus Phase 2\'s Settings.'
+            'Only the screens whose phase has actually shipped its routes may appear — Phase 1, Phase 2\'s Settings and Phase 3\'s Website CMS.'
         );
     }
 

@@ -487,7 +487,7 @@ final class SnapshotBuilder
                 MenuItemLinkType::Route => $this->routeUrl($row->route_name, $row->route_params),
                 MenuItemLinkType::SectionAnchor => trim((string) $row->anchor) === ''
                     ? null
-                    : rtrim($this->url->to('/'), '/').'/#'.ltrim((string) $row->anchor, '#'),
+                    : $this->rootPath().'/#'.ltrim((string) $row->anchor, '#'),
                 MenuItemLinkType::Url => is_string($row->url) && RichText::isSafeHref($row->url) ? trim($row->url) : null,
                 MenuItemLinkType::None => null,
             };
@@ -496,11 +496,16 @@ final class SnapshotBuilder
         }
     }
 
+    /*
+     * Menu links are frozen into the header / footer snapshot, so they are stored **root-relative**
+     * (integration K-8): a snapshot published from the console, or under another host or base path,
+     * must not carry that origin into every page it renders on.
+     */
     private function pageUrl(string $slug): string
     {
         return $this->router->has('site.page')
-            ? $this->url->route('site.page', ['slug' => $slug])
-            : rtrim($this->url->to('/'), '/').'/'.$slug;
+            ? $this->url->route('site.page', ['slug' => $slug], false)
+            : $this->rootPath().'/'.$slug;
     }
 
     private function routeUrl(mixed $name, mixed $params): ?string
@@ -513,7 +518,18 @@ final class SnapshotBuilder
 
         $params = is_string($params) ? json_decode($params, true) : $params;
 
-        return $this->url->route($name, is_array($params) ? $params : []);
+        return $this->url->route($name, is_array($params) ? $params : [], false);
+    }
+
+    /**
+     * The application's base path without a trailing slash (`''` at a domain root, `/my%20office/public`
+     * under a sub-directory) — the root-relative prefix of an anchor or page link.
+     */
+    private function rootPath(): string
+    {
+        $path = parse_url($this->url->to('/'), PHP_URL_PATH);
+
+        return is_string($path) ? rtrim($path, '/') : '';
     }
 
     /**

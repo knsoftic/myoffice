@@ -9,6 +9,8 @@ use App\Enums\Cms\RevisionEvent;
 use App\Models\Cms\CmsRevision;
 use App\Models\Cms\Page;
 use App\Models\Cms\WebsiteSection;
+use App\Models\User;
+use App\Notifications\Cms\ScheduledPagePublished;
 use App\Services\Cms\Exceptions\ContentActionNotAllowedException;
 use App\Services\Cms\Exceptions\InvalidSectionContentException;
 use App\Services\Cms\Exceptions\UnknownSectionTypeException;
@@ -18,6 +20,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Notification;
 use Throwable;
 
 /**
@@ -292,7 +295,7 @@ final class ContentPublisher
             return [];
         }
 
-        return $this->cache->batch(function () use ($ids): array {
+        $published = $this->cache->batch(function () use ($ids): array {
             $published = [];
 
             foreach (Page::query()->whereIn('id', $ids)->get() as $page) {
@@ -306,6 +309,42 @@ final class ContentPublisher
 
             return $published;
         }, 'Scheduled pages published');
+
+        $this->notifyScheduledPublished($published);
+
+        return $published;
+    }
+
+    /**
+     * §10.3 `ScheduledPagePublished`: the page's author and every active holder of `pages.change_status`.
+     * A notification failure is reported and never undoes a promotion that has already committed.
+     *
+     * @param  list<int>  $pageIds
+     */
+    private function notifyScheduledPublished(array $pageIds): void
+    {
+        if ($pageIds === []) {
+            return;
+        }
+
+        try {
+            $publishers = User::query()->active()->permission(self::PAGE_MODULE.'.change_status')->get();
+
+            foreach (Page::query()->whereIn('id', $pageIds)->get() as $page) {
+                $author = $page->created_by !== null ? User::query()->active()->find($page->created_by) : null;
+
+                // concat() returns a new collection: the shared publisher list is never mutated per page.
+                $recipients = ($author !== null ? $publishers->concat([$author]) : $publishers)
+                    ->unique(static fn (User $user): int => (int) $user->getKey())
+                    ->values();
+
+                if ($recipients->isNotEmpty()) {
+                    Notification::send($recipients, ScheduledPagePublished::forPage($page));
+                }
+            }
+        } catch (Throwable $exception) {
+            report($exception);
+        }
     }
 
     /**

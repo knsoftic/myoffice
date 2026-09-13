@@ -67,6 +67,7 @@ final class CtaBlockController extends Controller
             'statusOptions' => ContentStatus::options(),
             'variantOptions' => CtaVariant::options(),
             'styleOptions' => ButtonStyle::options(),
+            'mediaLibrary' => $this->mediaLibrary(),
             'filters' => $request->activeFilters(),
             'can' => [
                 'create' => $user->can('website_cta_blocks.create'),
@@ -104,6 +105,7 @@ final class CtaBlockController extends Controller
             'usage' => $this->blocks->usage($ctaBlock),
             'variantOptions' => CtaVariant::options(),
             'styleOptions' => ButtonStyle::options(),
+            'mediaLibrary' => $this->mediaLibrary(),
             'canEdit' => $request->user()?->can('update', $ctaBlock) === true,
             'canChangeKey' => $request->user()?->can('changeKey', $ctaBlock) === true,
         ]);

@@ -175,7 +175,7 @@ final class SitemapGenerator
             return null;
         }
 
-        $key = $this->version->key('sitemap', [$chunk ?? 0]);
+        $key = $this->cacheKey($chunk);
 
         try {
             $xml = $this->cache->get($key);
@@ -230,7 +230,7 @@ final class SitemapGenerator
                     $xml = (string) $this->generate($chunk, $urls);
                     $bytes += strlen($xml);
 
-                    $this->cache->put($this->version->key('sitemap', [$chunk ?? 0]), $xml, self::CACHE_SECONDS);
+                    $this->cache->put($this->cacheKey($chunk), $xml, self::CACHE_SECONDS);
                 }
             }
 
@@ -270,6 +270,15 @@ final class SitemapGenerator
     | Internals
     |--------------------------------------------------------------------------
     */
+
+    /**
+     * The version-stamped key of one sitemap file. The index is keyed `index`, never `0`, so a request
+     * for `/sitemap-0.xml` can never be answered from the index's entry (integration K-6).
+     */
+    private function cacheKey(?int $chunk): string
+    {
+        return $this->version->key('sitemap', [$chunk ?? 'index']);
+    }
 
     /**
      * @return array<string, object>

@@ -52,10 +52,6 @@ final class CmsAuditor
         try {
             $logger = activity();
 
-            if ($subject !== null) {
-                $logger->performedOn($subject);
-            }
-
             $causer = $this->auth->guard()->user();
 
             if ($causer instanceof Model) {
@@ -72,7 +68,18 @@ final class CmsAuditor
 
             $context = $this->requestContext();
 
-            $logger->tap(static function (ActivityContract $activity) use ($context, $module, $reason): void {
+            $logger->tap(static function (ActivityContract $activity) use ($context, $module, $reason, $subject): void {
+                if ($subject !== null && $activity instanceof Model) {
+                    // The subject is associated by key only. spatie's log() re-applies the subject model's
+                    // own tapActivity() last whenever the `subject` relation is loaded, which would file this
+                    // act under the model's module and reason instead of the CMS act's (an SEO change on a
+                    // page would land under `pages`, not `seo`; Known Issue T5). With the relation set to
+                    // null that tap is skipped; subject_type / subject_id are stored exactly as before.
+                    $activity->setAttribute('subject_type', $subject->getMorphClass());
+                    $activity->setAttribute('subject_id', $subject->getKey());
+                    $activity->setRelation('subject', null);
+                }
+
                 foreach ($context as $column => $value) {
                     if ($value !== null) {
                         $activity->setAttribute($column, $value);

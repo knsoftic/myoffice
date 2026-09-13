@@ -276,6 +276,8 @@ final class PermissionRegistryTest extends TestCase
                 'website_sections', 'menus', 'pages', 'services', 'portfolio', 'team', 'testimonials',
                 'student_reviews', 'success_stories', 'faqs', 'blog_categories', 'blog_posts', 'jobs',
                 'job_applications', 'contact_inquiries', 'seo',
+                // phase-03 §4.1
+                'website_cta_blocks', 'website_media', 'faq_categories',
             ]],
             'shared' => [ModuleGroup::Shared, [
                 'support_tickets', 'meetings', 'messages', 'files', 'notifications', 'reports',

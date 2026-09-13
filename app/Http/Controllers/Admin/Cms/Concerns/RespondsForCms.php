@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Admin\Cms\Concerns;
 
+use App\Models\Cms\MediaAsset;
 use App\Models\User;
 use App\Services\Cms\Exceptions\ContentActionNotAllowedException;
 use App\Services\Cms\Exceptions\InvalidSectionContentException;
 use App\Services\Cms\Exceptions\MediaInUseException;
 use App\Services\Cms\Exceptions\UnknownSectionTypeException;
 use App\Services\Cms\Exceptions\UnsupportedUploadException;
+use App\Services\Cms\MediaService;
 use Closure;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
@@ -125,6 +127,34 @@ trait RespondsForCms
         abort_unless($actor instanceof User, Response::HTTP_FORBIDDEN);
 
         return $actor;
+    }
+
+    /**
+     * The media picker's library (`admin.cms.partials.media-picker`): images and videos, newest first,
+     * bounded. Shared by every screen with an image slot (sections, page banner, CTA background, OG image).
+     *
+     * @return list<array<string, mixed>>
+     */
+    protected function mediaLibrary(): array
+    {
+        $media = app(MediaService::class);
+
+        return MediaAsset::query()
+            ->latest('id')
+            ->limit(200)
+            ->get()
+            ->map(static fn (MediaAsset $asset): array => [
+                'id' => (int) $asset->getKey(),
+                'name' => (string) ($asset->title ?: $asset->original_name),
+                'alt_text' => $asset->alt_text,
+                'mime_type' => $asset->mime_type,
+                'kind' => $asset->isVideo() ? 'video' : 'image',
+                'url' => $media->url($asset),
+                'width' => $asset->width,
+                'height' => $asset->height,
+            ])
+            ->values()
+            ->all();
     }
 
     /**

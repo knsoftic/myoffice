@@ -23,9 +23,10 @@ use Spatie\Permission\PermissionRegistrar;
  * way a module whose ability set changes in the registry automatically widens or narrows the
  * roles that own it.
  *
- * Idempotent: roles are matched on the natural key (`name`, `guard_name`), their meta columns
- * are refreshed, and permissions are applied with `syncPermissions()` so the seeded grant is
- * the authoritative state after every run. Nothing is ever deleted.
+ * Idempotent: roles are matched on the natural key (`name`, `guard_name`) and their meta columns
+ * are refreshed. Grants converge **additively** (D65): a role this run creates receives exactly the
+ * seeded grant; a role that already exists receives only the seeded permissions it is missing, and
+ * nothing an administrator granted in the role editor is ever revoked. Nothing is ever deleted.
  *
  * Super Admin additionally holds every permission in the registry — belt and braces next to
  * the `Gate::before` short-circuit in AppServiceProvider.
@@ -96,6 +97,7 @@ class RoleSeeder extends Seeder
 
         DB::transaction(function () use ($guard, $definitions): void {
             $created = 0;
+            $granted = 0;
             $rows = [];
 
             foreach ($definitions as $definition) {
@@ -117,11 +119,20 @@ class RoleSeeder extends Seeder
 
                 $role->save();
 
-                // The seeded grant is authoritative (phase-01 §5: syncPermissions).
-                $role->syncPermissions($definition['permissions']);
-
                 if (! $existed) {
+                    // A fresh install gets exactly the seeded grant (phase-01 §5).
+                    $role->syncPermissions($definition['permissions']);
                     $created++;
+                } else {
+                    // D65: converge additively on an existing role. Grant what the registry now adds
+                    // (a later phase's new permissions), never revoke what an administrator granted.
+                    $held = $role->permissions()->pluck('name')->map(static fn (mixed $name): string => (string) $name)->all();
+                    $missing = array_values(array_diff($definition['permissions'], $held));
+
+                    if ($missing !== []) {
+                        $role->givePermissionTo($missing);
+                        $granted += count($missing);
+                    }
                 }
 
                 $rows[] = [
@@ -134,9 +145,10 @@ class RoleSeeder extends Seeder
             }
 
             $this->seedInfo(sprintf(
-                'Roles: %d seeded (%d created), permissions synced.',
+                'Roles: %d seeded (%d created), %d missing permission grant(s) added, none revoked.',
                 count($definitions),
                 $created,
+                $granted,
             ));
 
             $this->seedTable(['Role', 'Panel', 'Level', 'System', 'Permissions'], $rows);
@@ -272,7 +284,7 @@ class RoleSeeder extends Seeder
             [
                 'name' => 'SEO Expert',
                 'label' => 'SEO Expert',
-                'description' => 'Blog, SEO metadata and website section copy, plus own tasks.',
+                'description' => 'Blog, SEO metadata, website section and page copy and the media library, plus own tasks.',
                 'panel' => PanelType::Admin,
                 'level' => 40,
                 'is_system' => false,
@@ -281,13 +293,17 @@ class RoleSeeder extends Seeder
                     $staffBase,
                     PermissionRegistry::permissionNamesFor(['blog_posts', 'blog_categories', 'seo']),
                     PermissionRegistry::permissionNamesFor('website_sections', self::READ_EDIT),
+                    // phase-03 §9: page copy and the whole media library. Never *.change_status: an SEO
+                    // edit goes live when someone with publish rights publishes it.
+                    PermissionRegistry::permissionNamesFor('pages', self::READ_EDIT),
+                    PermissionRegistry::permissionNamesFor('website_media'),
                     PermissionRegistry::permissionNamesFor('tasks', self::WORK_ON),
                 ),
             ],
             [
                 'name' => 'Digital Marketer',
                 'label' => 'Digital Marketer',
-                'description' => 'Leads, blog, website sections and course inquiries.',
+                'description' => 'Leads, blog, website sections, CTA blocks, FAQs, media uploads and course inquiries.',
                 'panel' => PanelType::Admin,
                 'level' => 40,
                 'is_system' => false,
@@ -296,6 +312,10 @@ class RoleSeeder extends Seeder
                     $staffBase,
                     PermissionRegistry::permissionNamesFor(['leads', 'blog_posts', 'blog_categories', 'course_inquiries']),
                     PermissionRegistry::permissionNamesFor('website_sections', self::READ_EDIT),
+                    // phase-03 §9: CTA blocks and FAQs in full; media view + upload only. No pages, no
+                    // seo.edit, no publish.
+                    PermissionRegistry::permissionNamesFor(['website_cta_blocks', 'faqs']),
+                    PermissionRegistry::permissionNamesFor('website_media', [Ability::ViewAny, Ability::View, Ability::Upload]),
                 ),
             ],
             [

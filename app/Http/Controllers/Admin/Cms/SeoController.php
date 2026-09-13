@@ -132,7 +132,8 @@ final class SeoController extends Controller
             ]);
         }
 
-        return view('admin.cms.seo.edit', $data);
+        // The OG image picker's library (integration K-1); the JSON drawer does not render a picker.
+        return view('admin.cms.seo.edit', $data + ['mediaLibrary' => $this->mediaLibrary()]);
     }
 
     public function update(UpdateSeoRequest $request): Response

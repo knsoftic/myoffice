@@ -10,24 +10,31 @@ use Illuminate\Support\Facades\View;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Alias: `public_site` (phase-02 §2 `maintenance` group, §6 "Maintenance").
+ * Aliases: `site` (phase-03 §6.10) and `public_site` (phase-02 §6 "Maintenance") — one gate, two names.
  *
- *   Route::get('/', …)->middleware('public_site');
+ *   Route::get('/', …)->middleware('site');
  *
  * Two settings, one gate:
  *
- *   · `maintenance.public_site_enabled` off  — the public website is not published at all.
+ *   · `maintenance.public_site_enabled` off  — the public website is not published at all
+ *                                              (`site.holding`).
  *   · `maintenance.maintenance_mode` on      — the website is published but temporarily closed,
- *                                              showing `maintenance.maintenance_message`.
+ *                                              showing `maintenance.maintenance_message`
+ *                                              (`site.maintenance`).
  *
- * Both answer **503 Service Unavailable** with a holding page, which is what tells a crawler the
- * absence is temporary; a 200 would invite it to index the holding page in place of the real site.
+ * Both answer **503 Service Unavailable** with `Retry-After` and `X-Robots-Tag: noindex`, which is what
+ * tells a crawler the absence is temporary; a 200 would invite it to index the holding page in place of
+ * the real site.
  *
- * The admin panel and the four portals can never be blocked by this — not because the middleware
- * checks the path, but because it is attached only to public routes. That is deliberate: a gate
- * that decides "is this request public?" from the URL is one rename away from locking every
- * administrator out of the screen that turns it off again. Phase 3 applies the same alias to its
- * own public route group and replaces the inline page with `site.maintenance`.
+ * **Staff bypass (phase-03 §6.10).** A signed-in user holding `website_sections.view` sees the real site
+ * with an amber ribbon naming the state (request attribute `site_state`, read by `site.layouts.public`).
+ * The permission decides, never the login: a signed-in student or client is an ordinary visitor (§9).
+ * That response is personal, so it is marked `private, no-store` and `noindex`.
+ *
+ * The admin panel and the four portals can never be blocked by this — not because the middleware checks
+ * the path, but because it is attached only to public routes. A gate that decides "is this request
+ * public?" from the URL is one rename away from locking every administrator out of the screen that
+ * turns it off again. robots.txt never carries it ([D-W3-13]).
  *
  * `site_module` (D26) is a different gate: it 404s one content area. This one closes the site.
  */
@@ -36,43 +43,62 @@ final class EnsurePublicSiteAvailable
     /** How long a crawler should wait before asking again (seconds). */
     private const RETRY_AFTER = 3600;
 
+    /** Who may browse a closed site (phase-03 §6.10). */
+    private const BYPASS_PERMISSION = 'website_sections.view';
+
     public function handle(Request $request, Closure $next): Response
     {
-        if (! setting('maintenance.public_site_enabled', true)) {
-            return $this->holdingPage(
-                'This website is currently unavailable.',
-                (string) (setting('maintenance.maintenance_message') ?: 'The public website has been switched off. Please try again later.'),
-            );
+        $state = match (true) {
+            ! setting('maintenance.public_site_enabled', true) => 'disabled',
+            (bool) setting('maintenance.maintenance_mode', false) => 'maintenance',
+            default => null,
+        };
+
+        if ($state === null) {
+            return $next($request);
         }
 
-        if (setting('maintenance.maintenance_mode', false)) {
-            return $this->holdingPage(
+        if ($request->user()?->can(self::BYPASS_PERMISSION) === true) {
+            $request->attributes->set('site_state', $state);
+
+            $response = $next($request);
+            $response->headers->set('Cache-Control', 'no-store, private');
+            $response->headers->set('X-Robots-Tag', 'noindex, nofollow');
+
+            return $response;
+        }
+
+        return $state === 'disabled'
+            ? $this->holdingPage(
+                'site.holding',
+                'This website is currently unavailable.',
+                (string) (setting('maintenance.maintenance_message') ?: 'The public website has been switched off. Please try again later.'),
+            )
+            : $this->holdingPage(
+                'site.maintenance',
                 'Scheduled maintenance',
                 (string) (setting('maintenance.maintenance_message') ?: 'We are performing scheduled maintenance. Please check back shortly.'),
             );
-        }
-
-        return $next($request);
     }
 
     /**
-     * The holding page, as a 503.
-     *
-     * Phase 3 owns `resources/views/site/**`; the moment `site.maintenance` exists it takes over,
-     * exactly as the `home` route hands over to `site.home`.
+     * The holding page, as a 503: the state's own view, else `site.maintenance`, else the inline page.
      */
-    private function holdingPage(string $heading, string $message): Response
+    private function holdingPage(string $view, string $heading, string $message): Response
     {
         $company = (string) (setting('company.name') ?: config('app.name', 'My Office'));
 
-        if (View::exists('site.maintenance')) {
-            return response()
-                ->view('site.maintenance', [
-                    'company' => $company,
-                    'heading' => $heading,
-                    'message' => $message,
-                ], 503)
-                ->header('Retry-After', (string) self::RETRY_AFTER);
+        foreach ([$view, 'site.maintenance'] as $candidate) {
+            if (View::exists($candidate)) {
+                return response()
+                    ->view($candidate, [
+                        'company' => $company,
+                        'heading' => $heading,
+                        'message' => $message,
+                    ], 503)
+                    ->header('Retry-After', (string) self::RETRY_AFTER)
+                    ->header('X-Robots-Tag', 'noindex');
+            }
         }
 
         $name = e($company);
@@ -120,6 +146,8 @@ final class EnsurePublicSiteAvailable
             </html>
             HTML;
 
-        return response($html, 503)->header('Retry-After', (string) self::RETRY_AFTER);
+        return response($html, 503)
+            ->header('Retry-After', (string) self::RETRY_AFTER)
+            ->header('X-Robots-Tag', 'noindex');
     }
 }

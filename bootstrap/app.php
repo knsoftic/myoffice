@@ -1,9 +1,12 @@
 <?php
 
+use App\Http\Middleware\CachePublicResponse;
 use App\Http\Middleware\EnsureModuleEnabled;
 use App\Http\Middleware\EnsurePanelAccess;
 use App\Http\Middleware\EnsurePublicSiteAvailable;
+use App\Http\Middleware\EnsureSiteModuleEnabled;
 use App\Http\Middleware\EnsureUserIsActive;
+use App\Http\Middleware\ResolvePreviewMode;
 use App\Support\SettingsRegistry;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -23,6 +26,9 @@ use Spatie\Permission\Middleware\RoleOrPermissionMiddleware;
 | routes/web.php (which itself requires routes/auth.php). Each file declares its own
 | prefix, route-name prefix and panel middleware — see the header comment in the file.
 |
+| routes/site-pages.php (the phase-03 public `/{slug}` catch-all) is loaded last of all, so no
+| panel, auth or later-phase public route can ever be shadowed by a CMS page.
+|
 */
 
 $panels = ['admin', 'collaborator', 'student', 'teacher', 'client'];
@@ -39,6 +45,13 @@ return Application::configure(basePath: dirname(__DIR__))
                 if (realpath($file) !== false) {
                     Route::middleware('web')->group($file);
                 }
+            }
+
+            // phase-03 §7.6: the /{slug} catch-all is registered after every other route file.
+            $pages = __DIR__.'/../routes/site-pages.php';
+
+            if (realpath($pages) !== false) {
+                Route::middleware('web')->group($pages);
             }
         },
     )
@@ -69,6 +82,14 @@ return Application::configure(basePath: dirname(__DIR__))
             // phase-02 §6 "Maintenance": applied to PUBLIC routes only, never to a panel — see the
             // class docblock for why the gate is attached rather than path-sniffed.
             'public_site' => EnsurePublicSiteAvailable::class,
+            // phase-03 §6.10 names the same gate `site`, and phases 14-23 use that name on their public
+            // routes. One class, two aliases: MaintenanceModeTest recognises the gate by class, not alias.
+            'site' => EnsurePublicSiteAvailable::class,
+            // phase-03 INV-15 / D26: a content module gates ITS OWN public routes with a plain 404.
+            'site_module' => EnsureSiteModuleEnabled::class,
+            // phase-03 §6.7 full-page cache and §6.12 preview flag (CachePublicResponse skips a preview).
+            'site.cache' => CachePublicResponse::class,
+            'site.preview' => ResolvePreviewMode::class,
             'role' => RoleMiddleware::class,
             'permission' => PermissionMiddleware::class,
             'role_or_permission' => RoleOrPermissionMiddleware::class,

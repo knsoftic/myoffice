@@ -18,7 +18,8 @@
                                                              items[group] => list of item arrays, media[role] => ids
       $assets         Collection<int, MediaAsset>            every asset the draft references, keyed by id
       $mediaLibrary   list<array{id, name, alt_text, mime_type, kind, url, width, height}>   picker library
-      $options        array{cta_blocks: Collection, menus: Collection, faq_categories: Collection, pages: Collection}
+      $options        array{cta_blocks: Collection, menus: Collection, faq_categories: Collection, pages: Collection,
+                            faqs: Collection}                faqs: the `faq` section's hand-picked questions picker
       $statistics     array<string, ?string>                 StatisticsProvider::all(), metric => value (INV-12)
       $publisher      ?string                                name of the last publisher
       $revisionCount  int
@@ -27,11 +28,12 @@
 
     Writes:
       PUT  admin.website.sections.update {section}  content[field]…, media[role] (id | '') or media[role][],
+                                                    faqs, faqs[] (a `faq` section's hand-picked questions),
                                                     name, anchor, publish (0 = save draft, 1 = save and publish)
       POST admin.website.sections.publish {section}  label (optional)
       Repeater items: see sections/partials/repeater.blade.php and item-form.blade.php.
 
-    Error keys: content.{field}, content.{field}.{part}, media.{role}, name, anchor, publish, action — the keys
+    Error keys: content.{field}, content.{field}.{part}, media.{role}, faqs, name, anchor, publish, action — the keys
     UpdateSectionRequest and SectionService report, so every refusal lands on its own field.
 --}}
 
@@ -197,7 +199,7 @@
 
                     <div class="mt-4">
                         <label for="remove-reason" class="block text-xs font-medium text-slate-600 dark:text-slate-300">Reason <span class="text-rose-500">*</span></label>
-                        <input id="remove-reason" type="text" name="reason" form="remove-section-form" required minlength="3" maxlength="255" class="mt-1.5 block w-full rounded-lg border-slate-300 text-sm shadow-sm focus:border-rose-500 focus:ring-rose-500/30 dark:border-slate-700 dark:bg-slate-950/40 dark:text-white">
+                        <input id="remove-reason" type="text" name="reason" form="remove-section-form" required minlength="{{ \App\Http\Requests\Cms\CmsFormRequest::REASON_MIN }}" maxlength="255" class="mt-1.5 block w-full rounded-lg border-slate-300 text-sm shadow-sm focus:border-rose-500 focus:ring-rose-500/30 dark:border-slate-700 dark:bg-slate-950/40 dark:text-white">
                     </div>
                 </x-ui.confirm>
             @endif
@@ -328,6 +330,16 @@
                                     @endif
                                 </div>
                             @endforeach
+
+                            {{-- A FAQ section's hand-picked questions (§2.11): posted with this form as faqs[] --}}
+                            @if ($key === 'faq')
+                                @include('admin.cms.sections.partials.faq-picker', [
+                                    'choices' => $options['faqs'] ?? collect(),
+                                    'selectedIds' => $draft['faqs'] ?? [],
+                                    'source' => isset($fields['source']) ? $valueOf('source', $fields['source']) : null,
+                                    'canEdit' => $can['edit'],
+                                ])
+                            @endif
 
                             {{-- Identity: admin label and the public #anchor a menu item can link to --}}
                             <div class="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 sm:p-5 dark:bg-slate-900 dark:ring-slate-800">

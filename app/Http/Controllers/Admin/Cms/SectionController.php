@@ -19,6 +19,7 @@ use App\Http\Requests\Cms\UnpublishContentRequest;
 use App\Http\Requests\Cms\UpdateSectionRequest;
 use App\Models\Cms\CmsRevision;
 use App\Models\Cms\CtaBlock;
+use App\Models\Cms\Faq;
 use App\Models\Cms\FaqCategory;
 use App\Models\Cms\MediaAsset;
 use App\Models\Cms\Menu;
@@ -26,7 +27,6 @@ use App\Models\Cms\Page;
 use App\Models\Cms\WebsiteSection;
 use App\Models\User;
 use App\Services\Cms\ContentPublisher;
-use App\Services\Cms\MediaService;
 use App\Services\Cms\SectionService;
 use App\Services\Cms\StatisticsProvider;
 use App\Support\Cms\SectionRegistry;
@@ -55,10 +55,12 @@ final class SectionController extends Controller
     /** A placement is bounded by the registry; this page size keeps the full set on one sortable page. */
     private const PLACEMENT_PAGE_SIZE = 100;
 
+    /** How many questions the FAQ section's picker lists. */
+    private const FAQ_CHOICES_LIMIT = 500;
+
     public function __construct(
         private readonly SectionService $sections,
         private readonly ContentPublisher $publisher,
-        private readonly MediaService $media,
     ) {}
 
     /**
@@ -212,6 +214,16 @@ final class SectionController extends Controller
                 'pages' => in_array(SectionRegistry::TYPE_PAGE_REF, $fieldTypes, true)
                     ? Page::query()->orderBy('title')->get(['id', 'title', 'slug', 'status'])
                     : collect(),
+                // The hand-picked questions picker of a `faq` section (§2.11, `faq_website_section`).
+                'faqs' => $key === 'faq' && ! $orphaned
+                    ? Faq::query()
+                        ->with('category:id,name')
+                        ->orderBy('faq_category_id')
+                        ->orderBy('sort_order')
+                        ->orderBy('id')
+                        ->limit(self::FAQ_CHOICES_LIMIT)
+                        ->get(['id', 'question', 'status', 'faq_category_id'])
+                    : collect(),
             ],
             // Resolved live counts for the statistics repeaters' inline "live" chip (§8.7, INV-12).
             'statistics' => ! $orphaned && (SectionRegistry::hasRepeater($key, 'statistic'))
@@ -249,6 +261,11 @@ final class SectionController extends Controller
         return $this->attempt($request, function () use ($request, $section): Response {
             if ($request->touchesDraft()) {
                 $section = $this->sections->saveDraft($section, $request->contentPayload(), $request->mediaPayload());
+            }
+
+            // A `faq` section's hand-picked questions (§2.11): a draft write, live only on publish.
+            if ($request->touchesFaqs()) {
+                $section = $this->sections->syncFaqs($section, $request->faqPayload());
             }
 
             if ($request->touchesName()) {
@@ -495,31 +512,6 @@ final class SectionController extends Controller
         $ids = array_values(array_unique(array_filter(array_map('intval', array_filter($ids, 'is_numeric')))));
 
         return $ids === [] ? [] : User::query()->whereIn('id', $ids)->pluck('name', 'id')->all();
-    }
-
-    /**
-     * The picker's library: usable images and videos, newest first, bounded.
-     *
-     * @return list<array<string, mixed>>
-     */
-    private function mediaLibrary(): array
-    {
-        return MediaAsset::query()
-            ->latest('id')
-            ->limit(200)
-            ->get()
-            ->map(fn (MediaAsset $asset): array => [
-                'id' => (int) $asset->getKey(),
-                'name' => (string) ($asset->title ?: $asset->original_name),
-                'alt_text' => $asset->alt_text,
-                'mime_type' => $asset->mime_type,
-                'kind' => $asset->isVideo() ? 'video' : 'image',
-                'url' => $this->media->url($asset),
-                'width' => $asset->width,
-                'height' => $asset->height,
-            ])
-            ->values()
-            ->all();
     }
 
     /**

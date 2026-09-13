@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Enums\Cms\SectionPlacement;
 use App\Enums\PanelType;
 use App\Models\User;
 use Illuminate\Support\Facades\Route;
@@ -614,27 +615,81 @@ final class Sidebar
                 'label' => 'Website',
                 'icon' => 'globe-alt',
                 'items' => [
+                    // phase-03 §8 (F-6.7): content ABOUT the site lives under /admin/website. Every
+                    // `permission` below is exactly the can: of the route it links to.
+                    [
+                        'label' => 'Website Overview',
+                        'icon' => 'globe-alt',
+                        'route' => 'admin.website.index',
+                        'module' => 'website_sections',
+                        'permission' => 'website_sections.view_any',
+                        // Explicit: the default "admin.website.*" would light this item on every CMS screen.
+                        'match' => 'admin.website.index',
+                    ],
                     [
                         'label' => 'Sections',
                         'icon' => 'view-columns',
-                        'route' => 'admin.website-sections.index',
+                        'route' => 'admin.website.sections.index',
+                        // Required: the route has a {placement} parameter; without it the item renders as a non-link.
+                        'params' => ['placement' => SectionPlacement::Home->value],
                         'module' => 'website_sections',
                         'permission' => 'website_sections.view_any',
+                        'match' => ['admin.website.sections.*', 'admin.website.section-items.*', 'admin.website.statistics.*'],
                     ],
                     [
                         'label' => 'Menus',
                         'icon' => 'bars-3',
-                        'route' => 'admin.menus.index',
+                        'route' => 'admin.website.menus.index',
                         'module' => 'menus',
                         'permission' => 'menus.view_any',
+                        'match' => ['admin.website.menus.*', 'admin.website.menu-items.*'],
                     ],
                     [
                         'label' => 'Pages',
                         'icon' => 'document',
-                        'route' => 'admin.pages.index',
+                        'route' => 'admin.website.pages.index',
                         'module' => 'pages',
                         'permission' => 'pages.view_any',
                     ],
+                    [
+                        'label' => 'CTA Blocks',
+                        'icon' => 'megaphone',
+                        'route' => 'admin.website.cta-blocks.index',
+                        'module' => 'website_cta_blocks',
+                        'permission' => 'website_cta_blocks.view_any',
+                    ],
+                    // Two flat items, not a parent with children: a rendered parent has no URL of its
+                    // own, which SidebarVisibilityTest::every_rendered_item_points_at_a_url… refuses.
+                    [
+                        'label' => 'FAQs',
+                        'icon' => 'question-mark-circle',
+                        'route' => 'admin.website.faqs.index',
+                        'module' => 'faqs',
+                        'permission' => 'faqs.view_any',
+                    ],
+                    [
+                        'label' => 'FAQ Categories',
+                        'icon' => 'rectangle-stack',
+                        'route' => 'admin.website.faq-categories.index',
+                        'module' => 'faq_categories',
+                        'permission' => 'faq_categories.view_any',
+                    ],
+                    [
+                        'label' => 'Media Library',
+                        'icon' => 'photo',
+                        'route' => 'admin.website.media.index',
+                        'module' => 'website_media',
+                        'permission' => 'website_media.view_any',
+                    ],
+                    [
+                        'label' => 'SEO',
+                        'icon' => 'magnifying-glass',
+                        'route' => 'admin.website.seo.index',
+                        'module' => 'seo',
+                        'permission' => 'seo.view_any',
+                    ],
+
+                    // Business entities the site renders stay at the top level (Phase 4 onwards, unchanged).
                     [
                         'label' => 'Services',
                         'icon' => 'wrench-screwdriver',
@@ -676,13 +731,6 @@ final class Sidebar
                         'route' => 'admin.success-stories.index',
                         'module' => 'success_stories',
                         'permission' => 'success_stories.view_any',
-                    ],
-                    [
-                        'label' => 'FAQs',
-                        'icon' => 'question-mark-circle',
-                        'route' => 'admin.faqs.index',
-                        'module' => 'faqs',
-                        'permission' => 'faqs.view_any',
                     ],
                     [
                         'label' => 'Blog',
@@ -730,13 +778,6 @@ final class Sidebar
                         'route' => 'admin.contact-inquiries.index',
                         'module' => 'contact_inquiries',
                         'permission' => 'contact_inquiries.view_any',
-                    ],
-                    [
-                        'label' => 'SEO',
-                        'icon' => 'globe-alt',
-                        'route' => 'admin.seo.index',
-                        'module' => 'seo',
-                        'permission' => 'seo.view_any',
                     ],
                 ],
             ],

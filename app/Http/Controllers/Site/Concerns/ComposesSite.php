@@ -140,12 +140,53 @@ trait ComposesSite
      */
     protected function chrome(bool $draft = false): array
     {
-        $pick = fn (SectionPlacement $placement): ?array => ($draft ? $this->draftSections($placement) : $this->liveSections($placement))[0] ?? null;
+        if ($draft) {
+            return [
+                'header' => $this->draftSections(SectionPlacement::GlobalHeader)[0] ?? null,
+                'footer' => $this->draftSections(SectionPlacement::GlobalFooter)[0] ?? null,
+            ];
+        }
 
-        return [
-            'header' => $pick(SectionPlacement::GlobalHeader),
-            'footer' => $pick(SectionPlacement::GlobalFooter),
-        ];
+        // One read for both global placements (FT-27: a cold page stays within its query budget).
+        $rows = app(CacheVersion::class)->remember(
+            'sections',
+            ['chrome', 0],
+            $this->cacheSeconds(),
+            static fn (): array => WebsiteSection::query()
+                ->where(static function ($query): void {
+                    $query->where(static fn ($header) => $header->forPlacement(SectionPlacement::GlobalHeader))
+                        ->orWhere(static fn ($footer) => $footer->forPlacement(SectionPlacement::GlobalFooter));
+                })
+                ->visible()
+                ->ordered()
+                ->publishedSnapshot()
+                ->get()
+                ->map(static fn (WebsiteSection $section): array => [
+                    'id' => (int) $section->getKey(),
+                    'placement' => $section->placement instanceof SectionPlacement ? $section->placement->value : (string) $section->placement,
+                    'section_key' => (string) $section->section_key,
+                    'anchor' => $section->anchor,
+                    'sort_order' => (int) $section->sort_order,
+                    'snapshot' => $section->published_content,
+                ])
+                ->values()
+                ->all(),
+        );
+
+        $chrome = ['header' => null, 'footer' => null];
+        $slots = [SectionPlacement::GlobalHeader->value => 'header', SectionPlacement::GlobalFooter->value => 'footer'];
+
+        foreach (is_array($rows) ? $rows : [] as $row) {
+            $slot = is_array($row) ? ($slots[$row['placement'] ?? ''] ?? null) : null;
+
+            if ($slot === null || $chrome[$slot] !== null) {
+                continue;
+            }
+
+            $chrome[$slot] = $this->usableSection($row);
+        }
+
+        return $chrome;
     }
 
     /**

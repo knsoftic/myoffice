@@ -606,7 +606,9 @@ final class PermissionRegistry
                 'icon' => 'view-columns',
                 'is_core' => false,
                 'sort' => 810,
-                'abilities' => self::merge(self::CRUD, self::STATUS, self::FILES, self::RESTORE),
+                // phase-03 §4.2: + LOGS (revision history is read under website_sections.view_logs). FILES and
+                // RESTORE are Phase 1 grants that are already seeded; the registry only ever adds (D4).
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::FILES, self::RESTORE, self::LOGS),
             ],
             'menus' => [
                 'name' => 'Menus',
@@ -622,7 +624,18 @@ final class PermissionRegistry
                 'icon' => 'document',
                 'is_core' => false,
                 'sort' => 830,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::FILES, self::RESTORE),
+                // phase-03 §4.2: + LOGS. FILES and RESTORE are kept (additive, D4); `restore` backs
+                // admin.website.pages.restore.
+                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::FILES, self::RESTORE, self::LOGS),
+            ],
+            'website_cta_blocks' => [
+                'name' => 'CTA Blocks',
+                'group' => ModuleGroup::Website,
+                'icon' => 'megaphone',
+                'is_core' => false,
+                'sort' => 835,
+                // phase-03 §4.1. `delete` is refused by CtaBlockPolicy while usage_count > 0.
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::LOGS),
             ],
             'services' => [
                 'name' => 'Services',
@@ -680,6 +693,15 @@ final class PermissionRegistry
                 'sort' => 900,
                 'abilities' => self::merge(self::CRUD, self::STATUS, self::RESTORE),
             ],
+            'faq_categories' => [
+                'name' => 'FAQ Categories',
+                'group' => ModuleGroup::Website,
+                'icon' => 'rectangle-stack',
+                'is_core' => false,
+                'sort' => 905,
+                // phase-03 §4.1: the same split as blog_categories / blog_posts.
+                'abilities' => self::merge(self::CRUD, self::STATUS),
+            ],
             'blog_categories' => [
                 'name' => 'Blog Categories',
                 'group' => ModuleGroup::Website,
@@ -726,7 +748,18 @@ final class PermissionRegistry
                 'icon' => 'globe-alt',
                 'is_core' => false,
                 'sort' => 960,
-                'abilities' => self::merge(self::READ, self::EDIT_ONLY, self::IMPORT, [Ability::Export]),
+                // phase-03 §4.2: READ + edit + export + LOGS. No create/delete: a seo_meta row is an attribute
+                // of its target. IMPORT is a Phase 1 grant that is already seeded (additive, D4).
+                'abilities' => self::merge(self::READ, self::EDIT_ONLY, self::IMPORT, [Ability::Export], self::LOGS),
+            ],
+            'website_media' => [
+                'name' => 'Media Library',
+                'group' => ModuleGroup::Website,
+                'icon' => 'photo',
+                'is_core' => false,
+                'sort' => 970,
+                // phase-03 §4.1: the shared CMS image library (D24). `edit` = alt text, title and caption only.
+                'abilities' => self::merge(self::READ, [Ability::Create, Ability::Edit, Ability::Delete], self::FILES, self::LOGS),
             ],
 
             /*
@@ -1000,7 +1033,9 @@ final class PermissionRegistry
         'certificates' => ['students', 'courses'],
         'student_id_cards' => ['students'],
 
-        // Website — phase-03, phase-04.
+        // Website — phase-03, phase-04. Phase 3 adds no edge: faqs.faq_category_id is nullable (the
+        // uncategorised bucket is supported), and a section's menu, CTA block and images are optional
+        // references whose published snapshot keeps rendering while that module is off (INV-15).
         'blog_posts' => ['blog_categories'],
         'job_applications' => ['jobs'],
     ];

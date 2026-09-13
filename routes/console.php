@@ -1,8 +1,66 @@
 <?php
 
+use App\Enums\Cms\ContentStatus;
+use App\Models\Cms\WebsiteSection;
+use App\Services\Cms\ContentPublisher;
+use App\Services\Cms\MediaService;
+use App\Services\Cms\SitemapGenerator;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
+
+/*
+|--------------------------------------------------------------------------
+| Website CMS (phase-03 §10.4)
+|--------------------------------------------------------------------------
+| Times are in app.schedule_timezone, which falls back to app.timezone = UTC (D61). The contract's
+| night-time slots are meant in business hours' terms: see integration step H.2.
+|
+| Not registered yet, because a command that silently does nothing is worse than none:
+| cms:warm-cache (needs WarmPublicPageCache), cms:prune-revisions (needs PruneCmsRevisions) and
+| cms:check-links (needs BrokenMenuLinksDetected). Add them at 03:00, weekly Sunday 03:30 and 05:00
+| once those classes exist.
+*/
+
+Artisan::command('cms:publish-scheduled', function (ContentPublisher $publisher) {
+    $this->info(count($publisher->publishDue()).' scheduled page(s) published.');
+})->purpose('Promote scheduled pages whose publish time has come (phase-03 §10.4)');
+
+Artisan::command('cms:sitemap-generate', function (SitemapGenerator $sitemap) {
+    $generation = $sitemap->regenerate('scheduled');
+    $this->info(sprintf('Sitemap: %d URLs, status %s.', (int) $generation->url_count, (string) $generation->status));
+})->purpose('Rebuild sitemap.xml (phase-03 §10.4)');
+
+Artisan::command('cms:media-recount', function (MediaService $media) {
+    $media->recountUsage();
+    $this->info('Media usage counts refreshed.');
+})->purpose('Recount media_assets.usage_count from every reference (phase-03 §10.4)');
+
+Artisan::command('cms:verify-published-snapshots', function (ContentPublisher $publisher) {
+    $failures = 0;
+
+    WebsiteSection::query()
+        ->where('status', ContentStatus::Published->value)
+        ->where('is_enabled', true)
+        ->each(function (WebsiteSection $section) use ($publisher, &$failures): void {
+            foreach ($publisher->verify($section) as $problem) {
+                $failures++;
+                $this->error(sprintf('Section #%d: %s', (int) $section->getKey(), $problem));
+            }
+        });
+
+    if ($failures === 0) {
+        $this->info('Every live section has a valid published snapshot.');
+    }
+
+    return $failures === 0 ? 0 : 1;
+})->purpose('Assert every live section has a valid published snapshot (phase-03 §10.4)');
+
+Schedule::command('cms:publish-scheduled')->everyFiveMinutes()->withoutOverlapping();
+Schedule::command('cms:sitemap-generate')->dailyAt('02:30')->withoutOverlapping();
+Schedule::command('cms:media-recount')->dailyAt('04:00')->withoutOverlapping();
+Schedule::command('cms:verify-published-snapshots')->dailyAt('04:30');

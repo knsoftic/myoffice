@@ -6,6 +6,7 @@ namespace App\Http\Requests\Cms;
 
 use App\Http\Requests\Cms\Concerns\BuildsRegistryRules;
 use App\Models\Cms\WebsiteSection;
+use App\Services\Cms\FaqService;
 use App\Support\Cms\SectionRegistry;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -17,6 +18,8 @@ use Illuminate\Validation\Validator;
  *   content[primary_button][url]=   a `link` composite: label, url, style, new_tab
  *   media[hero_image]=12            a single-slot role; media[gallery][]=3&media[gallery][]=9 a multiple
  *   name=, anchor=                  the admin label and the public #anchor
+ *   faqs=&faqs[]=4&faqs[]=9         a `faq` section's hand-picked questions, in order (§2.11); the empty
+ *                                   `faqs` field lets the list be cleared. Any other type refuses the key
  *   publish=1                       "Save & publish" — additionally needs website_sections.change_status
  *
  * **Drafts may be incomplete, never malformed**: `required` is relaxed to `nullable` here, exactly as
@@ -27,6 +30,9 @@ use Illuminate\Validation\Validator;
 final class UpdateSectionRequest extends CmsFormRequest
 {
     use BuildsRegistryRules;
+
+    /** The only section type that keeps hand-picked questions (`faq_website_section`). */
+    private const FAQ_SECTION_KEY = 'faq';
 
     protected function permission(): string
     {
@@ -44,6 +50,7 @@ final class UpdateSectionRequest extends CmsFormRequest
             'name' => ['sometimes', 'bail', 'nullable', 'string', 'max:150'],
             'anchor' => ['sometimes', 'bail', 'nullable', 'string', 'max:65', 'regex:/^#?[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/'],
             'publish' => ['sometimes', 'boolean'],
+            'faqs' => ['prohibited'],
         ];
 
         $key = $this->sectionKey();
@@ -53,6 +60,12 @@ final class UpdateSectionRequest extends CmsFormRequest
         }
 
         $rules = array_merge($rules, $this->registryRules(SectionRegistry::fields($key), 'content', relaxRequired: true));
+
+        if ($key === self::FAQ_SECTION_KEY) {
+            // SectionService::syncFaqs() re-checks every id under the section's row lock.
+            $rules['faqs'] = ['sometimes', 'nullable', 'array', 'max:'.FaqService::SECTION_LIMIT];
+            $rules['faqs.*'] = ['bail', 'integer', 'min:1', 'distinct', Rule::exists('faqs', 'id')->whereNull('deleted_at')];
+        }
 
         foreach (SectionRegistry::mediaRoles($key) as $role => $slot) {
             if ($slot['multiple']) {
@@ -140,6 +153,26 @@ final class UpdateSectionRequest extends CmsFormRequest
     public function touchesName(): bool
     {
         return $this->has('name') || $this->has('anchor');
+    }
+
+    /**
+     * Did the form send the hand-picked question list (possibly emptied)?
+     */
+    public function touchesFaqs(): bool
+    {
+        return $this->has('faqs') && $this->sectionKey() === self::FAQ_SECTION_KEY;
+    }
+
+    /**
+     * The hand-picked question ids in their new order, for `SectionService::syncFaqs()`.
+     *
+     * @return list<int>
+     */
+    public function faqPayload(): array
+    {
+        $faqs = $this->validated('faqs');
+
+        return is_array($faqs) ? array_values(array_map(static fn (mixed $id): int => (int) $id, $faqs)) : [];
     }
 
     public function wantsPublish(): bool

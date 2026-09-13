@@ -17,6 +17,7 @@ use Illuminate\Database\Seeder;
  *   5. SettingSeeder     the settings catalogue
  *   6. SuperAdminSeeder  the first account (needs the Super Admin role and the branch)
  *   7. DemoUserSeeder    one demo account per remaining role (needs the roles)
+ *   8. WebsiteCmsSeeder  the day-one public site: menus, system pages, home sections (needs settings)
  *
  * Every seeder is idempotent: `php artisan db:seed` can be run on an existing database as often
  * as you like. Nothing is truncated and nothing is deleted — values an administrator changed
@@ -38,6 +39,7 @@ class DatabaseSeeder extends Seeder
             SettingSeeder::class,
             SuperAdminSeeder::class,
             DemoUserSeeder::class,
+            WebsiteCmsSeeder::class,
         ]);
     }
 }

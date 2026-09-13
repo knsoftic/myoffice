@@ -57,7 +57,10 @@
         '[&_iframe]:aspect-video [&_iframe]:h-auto [&_iframe]:w-full [&_iframe]:rounded-xl [&_iframe]:border-0',
     ]) }}>
         @if ($hasSanitiser)
-            {!! \App\Support\RichText::sanitize($value, $profile) !!}
+            {{-- Each table scrolls inside its own container (CLAUDE.md §6, FT-51). The sanitiser's output is
+                 well-formed, so every <table> has its </table> and the wrappers always balance; only fixed
+                 markup is added, never anything from the stored value. --}}
+            {!! str_replace(['<table', '</table>'], ['<div class="overflow-x-auto"><table', '</table></div>'], \App\Support\RichText::sanitize($value, $profile)) !!}
         @else
             {{-- The sanitiser has not shipped yet: print it escaped rather than unsanitised. --}}
             {{ $value }}

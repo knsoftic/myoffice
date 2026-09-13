@@ -4,15 +4,41 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Models\Cms\CmsRevision;
+use App\Models\Cms\CtaBlock;
+use App\Models\Cms\Faq;
+use App\Models\Cms\FaqCategory;
+use App\Models\Cms\MediaAsset;
+use App\Models\Cms\Menu;
+use App\Models\Cms\MenuItem;
+use App\Models\Cms\Page;
+use App\Models\Cms\SeoMeta;
+use App\Models\Cms\SitemapGeneration;
+use App\Models\Cms\WebsiteSection;
+use App\Models\Cms\WebsiteSectionItem;
 use App\Models\Module;
 use App\Models\Role;
 use App\Models\User;
+use App\Policies\Cms\CmsRevisionPolicy;
+use App\Policies\Cms\CtaBlockPolicy;
+use App\Policies\Cms\FaqCategoryPolicy;
+use App\Policies\Cms\FaqPolicy;
+use App\Policies\Cms\MediaPolicy;
+use App\Policies\Cms\MenuItemPolicy;
+use App\Policies\Cms\MenuPolicy;
+use App\Policies\Cms\PagePolicy;
+use App\Policies\Cms\SeoMetaPolicy;
+use App\Policies\Cms\SitemapGenerationPolicy;
+use App\Policies\Cms\WebsiteSectionItemPolicy;
+use App\Policies\Cms\WebsiteSectionPolicy;
 use App\Policies\ModulePolicy;
 use App\Policies\RolePolicy;
 use App\Policies\UserPolicy;
+use App\Services\Cms\CacheVersion;
 use App\Support\ConfigureFromSettings;
 use App\Support\Modules;
 use App\Support\SettingsRepository;
+use App\Support\SiteSettings;
 use Closure;
 use Illuminate\Auth\Access\Gate as AccessGate;
 use Illuminate\Contracts\Auth\Access\Gate as GateContract;
@@ -33,6 +59,21 @@ class AppServiceProvider extends ServiceProvider
         User::class => UserPolicy::class,
         Role::class => RolePolicy::class,
         Module::class => ModulePolicy::class,
+
+        // phase-03. MediaPolicy does not follow the {Model}Policy naming convention, so explicit
+        // registration is required; the rest are listed here for the same one-place reason.
+        WebsiteSection::class => WebsiteSectionPolicy::class,
+        WebsiteSectionItem::class => WebsiteSectionItemPolicy::class,
+        Menu::class => MenuPolicy::class,
+        MenuItem::class => MenuItemPolicy::class,
+        Page::class => PagePolicy::class,
+        CtaBlock::class => CtaBlockPolicy::class,
+        Faq::class => FaqPolicy::class,
+        FaqCategory::class => FaqCategoryPolicy::class,
+        SeoMeta::class => SeoMetaPolicy::class,
+        MediaAsset::class => MediaPolicy::class,
+        CmsRevision::class => CmsRevisionPolicy::class,
+        SitemapGeneration::class => SitemapGenerationPolicy::class,
     ];
 
     /**
@@ -42,6 +83,15 @@ class AppServiceProvider extends ServiceProvider
     {
         // One settings payload per request, shared by the setting() helper (phase-01 §3).
         $this->app->singleton(SettingsRepository::class);
+
+        // phase-03 (D22): one cache version stamp and one bump batch per request or queued job.
+        $this->app->scoped(CacheVersion::class);
+
+        // phase-03 §5.3: the public views' only settings reader (stateless, so a singleton).
+        $this->app->singleton(SiteSettings::class);
+
+        // StatisticsProvider is deliberately left unbound (a fresh instance per resolve): its memo is
+        // per instance, and sharing one across a request would outlive a publish's cache-stamp bump.
     }
 
     /**

@@ -5,6 +5,12 @@ declare(strict_types=1);
 namespace App\Support;
 
 use App\Models\Activity;
+use App\Models\Cms\CtaBlock;
+use App\Models\Cms\MediaAsset;
+use App\Models\Cms\MenuItem;
+use App\Models\Cms\SeoMeta;
+use App\Models\Cms\SitemapGeneration;
+use App\Models\Cms\WebsiteSectionItem;
 use App\Models\LoginHistory;
 use App\Models\Module;
 use App\Models\Permission;
@@ -64,6 +70,15 @@ final class Modules
         Role::class => 'roles',
         Setting::class => 'settings',
         User::class => 'users',
+
+        // phase-03: models whose class name does not pluralise into their module slug. An instance
+        // answers through moduleSlug(); a class string (`can('viewAny', CtaBlock::class)`) needs this map.
+        MenuItem::class => 'menus',
+        WebsiteSectionItem::class => 'website_sections',
+        CtaBlock::class => 'website_cta_blocks',
+        MediaAsset::class => 'website_media',
+        SeoMeta::class => 'seo',
+        SitemapGeneration::class => 'seo',
     ];
 
     /** @var array<string, bool>|null */

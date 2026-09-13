@@ -64,6 +64,7 @@ Installed packages beyond the Laravel skeleton:
 | spatie/laravel-permission | ^6.25 | DB-driven roles and permissions |
 | spatie/laravel-activitylog | ^4.12 | Activity log + audit trail (old/new values) |
 | laravel/breeze | ^2.4 (dev) | Auth scaffolding base (Blade + dark mode) |
+| mews/purifier | ^3.4 (3.4.4) | Phase 3: the HTMLPurifier parser pass inside `App\Support\RichText` (D25); `config/purifier.php` only mirrors its two profiles |
 
 Planned for later phases (install only when that phase starts):
 
@@ -245,7 +246,27 @@ moment Phase 1 is verified (both phases touch `Admin/DashboardController`, `Admi
 | [x] | 14 acceptance tests green |
 
 **Committed** `515465b` (build), `39c49d3` (close-out). Verified on a Phase-2-only tree: **1246 tests / 32,270 assertions**.
-### [ ] PHASE 3 — Dynamic public website CMS (sections, menus, pages, SEO)
+### [x] PHASE 3 — Dynamic public website CMS (sections, menus, pages, SEO)
+
+Contract: [`docs/phases/phase-03.md`](docs/phases/phase-03.md) · integration plan `docs-pending/phase-03-integration.md` (steps A–M) ·
+verified and committed 2026-09-13
+
+| | Item |
+|---|---|
+| [x] | Schema: 10 migrations / 14 tables (applied to `my_office` in batch 4 earlier, empty until seeded); 7 CHECK constraints, 2 STORED generated `has_unpublished_changes`, 10 `uq_*` guards — L.7 SQL 7 / 2 / 10 |
+| [x] | Registries: PermissionRegistry **82 modules / 812 permissions** (+`website_cta_blocks`, `faq_categories`, `website_media`; +24 permissions); SettingsRegistry **14 groups** (+`website`, 13 keys; +4 `seo` keys); 6 CMS model→module mappings; 9 Website sidebar entries |
+| [x] | Services: `PageService` (+ `RESERVED_SLUGS`), `MenuService`, `CtaBlockService`, `FaqService`, `StatisticsProvider` on top of `ContentPublisher` (D22), `SectionService`, `SeoService` (D23), `MediaService` (D24), `SitemapGenerator`, `RichText` (D25) |
+| [x] | Middleware: `site` = `EnsurePublicSiteAvailable` (holding / maintenance 503 with `X-Robots-Tag: noindex`, staff bypass on `website_sections.view` with the ribbon), `site_module` (D26), `site.cache`, `site.preview` |
+| [x] | Routes: 78 `admin.website.*` + 7 `site.*` (151 routes, no duplicate names); `/{slug}` catch-all loaded last behind a reserved-slug lookahead; skeleton `public/robots.txt` deleted so `site.robots` is reachable |
+| [x] | Scheduler: `cms:publish-scheduled` (sends `ScheduledPagePublished`), `cms:sitemap-generate`, `cms:media-recount`, `cms:verify-published-snapshots` |
+| [x] | Seeders: `RoleSeeder` converges additively (D65), `DemoUserSeeder` never seeds production, insert-only `WebsiteCmsSeeder` (4 menus, 9 items, 4 system pages, 6 live sections, 15 items, 1 CTA, 3 FAQ categories, 6 FAQs, 5 seo_meta) |
+| [x] | Packages / assets: `mews/purifier` 3.4.4 + `config/purifier.php` mirroring the two `RichText` profiles; `resources/data/icons.php` (96 icons); `storage:link`; `npm run build` |
+| [x] | Acceptance: every contract row FT-01 … FT-51 + FT-36b maps to a passing test in `tests/Feature/Cms` (103 tests) |
+| [x] | Suite **1350 tests / 39,156 assertions** green sequentially and in random order; HTTP smoke 171/171 |
+| [ ] | Manual browser pass (L.8: 375 / 768 / 1280 px, light and dark, focus trap) — FT-51 is asserted on the rendered HTML only (T7) |
+| [ ] | Deferred §10 pieces: the §10.1 events and `BumpPublicCacheVersion` (the services bump the cache stamp after commit instead, FT-25 asserts +1), the five §10.2 queued jobs (derivatives run synchronously after commit), four of the five §10.3 notifications, `cms:warm-cache` / `cms:prune-revisions` / `cms:check-links`, the §13.2 dashboard widgets |
+
+**Committed** — Phase 3 is a rollback point.
 ### [ ] PHASE 4 — Services, portfolio, blog, careers
 ### [ ] PHASE 5 — CRM: leads (Kanban), clients, client panel
 ### [ ] PHASE 6 — Projects, milestones, tasks, time tracking
@@ -278,6 +299,47 @@ moment Phase 1 is verified (both phases touch `Admin/DashboardController`, `Admi
 ---
 
 ## 6. Change Log
+
+### 2026-09-13 — Phase 3 (public website CMS) verified and committed
+
+- **Integrated** per `docs-pending/phase-03-integration.md`: registries (C, D, E.1–E.4), policies and bindings
+  (E.3), middleware aliases (E.5–E.6), routes (F), sidebar (G), scheduler (H), seeders (I), test updates (J) and
+  reconciliation fixes (K-1 … K-8, K-10). The step A gate passed (A.1 OK, A.2 OK); A.3's file counts differ only
+  because unit 04's untracked files share the same folders.
+- **Applied by the verify pass** (the integration had left them open): E.7 — `EnsurePublicSiteAvailable` now
+  answers `site.holding` when the site is switched off, puts `X-Robots-Tag: noindex` on both 503s and lets a
+  holder of `website_sections.view` browse the closed site with the ribbon; `resources/data/icons.php`; F.3 —
+  the skeleton `public/robots.txt` deleted; B.3 `storage:link`; B.4 `npm run build`.
+- **Fixed during verification** (each found by a failing acceptance test, none by loosening one):
+  - FT-32: `App\Notifications\Cms\ScheduledPagePublished` did not exist. `ContentPublisher::publishDue()` now
+    notifies the page's author and every active holder of `pages.change_status` after the promotion commits;
+    database channel once Phase 22's `notifications` table exists, mail until then; a failure is reported and
+    never undoes a promotion.
+  - FT-43: every CMS audit row carrying a subject was filed under the **subject model's** module, not the act's
+    (an SEO change on a page landed under `pages`), because spatie re-applies the subject's `tapActivity()` last
+    (Known Issue T5). `CmsAuditor` now associates the subject by key only, so the module and reason of the act
+    survive.
+  - FT-27: a cold anonymous home page issued 11 queries against a contract ceiling of 8 — five
+    `information_schema` probes from `StatisticsProvider` and separate header and footer reads. The provider
+    now makes one schema probe and one `UNION ALL` count (with per-metric fallback if the union fails), and the
+    header and footer load in one query: a bounded budget however many later phases install their tables.
+  - FT-14: `sitemap.xml` / `robots.txt` as a page slug were refused as "format is invalid" instead of by name
+    as reserved; the reserved/duplicate/trashed check now runs before the slug pattern.
+  - FT-51: a rich-text `<table>` did not scroll inside its own container on a phone; `<x-site.prose>` now wraps
+    each sanitised table in `overflow-x-auto`.
+- **Tests added**: `Cms/Behaviour/RichTextProfilesTest` (FT-36b) and `Cms/Install/InstallAndRollbackTest`
+  (FT-50: a real `migrate:fresh --seed`, reverse rollback of every Phase 3+ migration and re-migrate in a child
+  process against a scratch schema created and dropped by the test, after proving the child is connected to it).
+  Existing tests changed only as integration step J prescribes: `MaintenanceModeTest` (robots.txt exempt from the
+  "every public GET is gated" scan), `SettingsRegistryTest` / `SettingsFormRoundTripTest` (fourteen groups),
+  `SidebarVisibilityTest` (nine Website labels), `PermissionRegistryTest` (three new Website slugs). None loosened.
+- **Dev database** `my_office`: backed up first (`mysqldump`), then ModuleSeeder (+3 modules), PermissionSeeder
+  (+24), RoleSeeder (+77 grants: Super Admin 24, Admin 24, Digital Marketer 17, SEO Expert 12; **0 revoked**),
+  SettingSeeder (+17 rows), WebsiteCmsSeeder; `cms:verify-published-snapshots` clean. A before/after SQL diff
+  proved no setting value, module `is_enabled` or role grant changed or disappeared (D65).
+- **Deviations kept on purpose** (integration M-30, B.2, B.5): `Admin\Cms` / `admin/cms` naming,
+  `site.layouts.public`, `SectionRegistry`, `CacheVersion`, `SitemapGenerator`; `intervention/image` not installed
+  (nothing calls it — `MediaService` uses GD); Trix and sortablejs not installed (textarea + native drag).
 
 ### 2026-09-13 — Phase 2 closed; automated build of phases 3-25 launched
 
@@ -492,6 +554,16 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-13 | Phase 2 security tests | 4 new classes (floors, write guards, input hardening, avatar policy) | PASS — 154 tests |
 | 2026-09-13 | Avatar polyglot | GIF and PNG with an appended PHP payload uploaded through /account/avatar | PASS — stored file is re-encoded pixels, no payload; `tests/Feature/Account` 76 passed |
 | 2026-09-13 | Phase 2 isolated suite | Phase 3 domain files stashed, `php artisan test` (run by me) | PASS — **1246 tests / 32,270 assertions**, 253 s |
+| 2026-09-13 | Phase 3 forward migrate on `my_office` | `php artisan migrate` | PASS — nothing to migrate (the ten CMS migrations were already in batch 4) |
+| 2026-09-13 | Phase 3 seed convergence (D65) | backup, then Module / Permission / Role / Setting / WebsiteCms seeders on `my_office`; before/after SQL diff | PASS — +3 modules, +24 permissions, +77 grants, +17 settings; 0 setting values, 0 module `is_enabled` and 0 role grants changed or removed; `cms:verify-published-snapshots` clean |
+| 2026-09-13 | Phase 3 database guarantees + seeded site | integration L.7 read-only SQL | PASS — 7 CHECK / 2 generated / 10 unique; 3 modules / 24 permissions / 13 + 4 settings; 6 live sections, 15 items, 4 system pages, 4 menus, 9 items, 1 CTA, 3 FAQ categories, 6 FAQs, 5 seo_meta; 0 drift; 0 absolute URLs |
+| 2026-09-13 | Phase 3 routes, gate, scans, build | A.3 gate, L.3–L.5, L.6 scripts; `route:list`; `npm run build`; `php -l` + `pint --test` on 72 PHP files | PASS — A.1 OK / A.2 OK; 85 Phase 3 routes, 151 total, no duplicate names; L.6 OK; build OK |
+| 2026-09-13 | Phase 3 first full run (before the fixes above) | `php artisan test` | 5 failed / 1343 passed — FT-43, FT-27, FT-14, FT-51 (fixed) and T23 (unit 04's files) |
+| 2026-09-13 | Phase 3 acceptance suite | `php artisan test tests/Feature/Cms` | PASS — 103 tests; FT-01 … FT-51 + FT-36b each mapped to a passing test |
+| 2026-09-13 | Phase 3 full suite, sequential | `php artisan test` on the Phase 3 commit tree (a copy without unit 04's untracked files) | PASS — **1350 tests / 39,156 assertions**, 978 s |
+| 2026-09-13 | Phase 3 full suite, random order | `php artisan test --order-by=random` on the same tree | PASS — **1350 tests / 39,156 assertions**, 799 s |
+| 2026-09-13 | Phase 3 full suite in the shared working tree | `php artisan test --order-by=random` with unit 04's files present | 1 failed / 1349 passed — only T23 (unit 04 reads two undeclared `website.*` keys) |
+| 2026-09-13 | Phase 3 HTTP smoke | probe through the real HTTP kernel on `my_office` inside a rolled-back transaction | PASS — 171/171: 24 admin CMS screens 200 for Super Admin, 403 for Accountant, Student and Client, 302 for a guest; public pages, sitemap and generated robots.txt 200; `/register` 404; unsigned preview 404, forged 403; a draft heading never reaches a guest, Student, Client or Accountant (live, `?preview=1`, preview route) but does reach a Super Admin preview (`no-store`); every panel still reaches only its own dashboard; row counts identical after rollback |
 
 ---
 
@@ -527,6 +599,18 @@ data, all with a named fix:
 | T20 | `phase-01.md`'s D20 text says the four portal prefixes are "permission namespaces, not modules" and that `permissionModuleMap()` returns null for them. The implemented fix kept them as registered modules with `is_core = true`. | low | The guarantee is delivered by a different mechanism, so the contract text is now wrong. Correct the text (code is fine) once the contract convergence workflow releases `docs/`. |
 | T21 | `TestCase::actingAs()` clears `password_hash_web`, so no `actingAs()` test can observe `AuthenticateSession` signing a stale session out — the very mechanism the remediation added. | low | Necessary (one session Store per test) but it narrows coverage; add one test that logs in for real instead. |
 | T22 | The modules screen's locked-card tooltip gives the "dashboard, users, roles…" reason for the four portal cards too. | low | Wrong explanation on a correct lock. |
+
+**Recorded by the Phase 3 verification (2026-09-13)**:
+
+| # | Item | Severity | Note |
+|---|---|---|---|
+| T23 | `SettingsSplitTruthRegressionTest::no_view_route_or_middleware_reads_a_key_the_registry_does_not_declare` is red in the shared working tree while unit 04's unintegrated files are on disk: `Site\ContactController`, `PublicContactRequest` and `ModeratedContentController` read `website.contact_budget_options` and `website.testimonial_auto_approve`. | med | Not a Phase 3 defect — the committed Phase 3 tree (verified on a copy without unit 04's files) is green twice. Clears when Phase 4 declares its §5.1b `website.*` keys. |
+| T24 | `CtaBlockPolicy`, `FaqCategoryPolicy` and `MediaPolicy` check `{module}.restore`, which the registry does not declare for those modules (integration K-11). | low | No route restores them, so nothing reachable; declare `restore` or drop the method when a restore screen is added. |
+| T25 | Every anonymous public GET starts a `sessions` row (the public routes sit in the `web` group), cached page or not (M-2). | med | A crawler-heavy site writes a row per visitor. Needs a lighter middleware group for public GETs — Phase 25. |
+| T26 | `CacheVersion::STAMP_TTL_SECONDS` is ten years and `cache.expiration` is a signed INT: from **2028-01-21** a fresh stamp overflows and `bump()` fails (reported, not thrown) (M-27). | med | Shorten the TTL or widen the column before then. |
+| T27 | Media URLs inside published snapshots are absolute (`APP_URL`); menu links are root-relative (K-8, M-10). | low | Set `APP_URL` correctly before the first image is published on a real host. The seeded snapshots carry no absolute URL (L.7 check = 0). |
+| T28 | Contract gaps shipped as known omissions: no `menus.store` (the `mobile` slot cannot be created, G-1); FAQ categories toggle through `PUT` (G-2); robots.txt text is edited on the SEO settings tab under `settings.edit` (G-3); a signed preview link answers 503 while the site is closed because preview routes carry `site` (M-26). | low | Integration F.6 / M-22. |
+| T29 | "Live" hero statistics are frozen inside the cached page for `website.cache_ttl_minutes` (1440) (M-17). | low | A number can be a day old; a publish flushes it. |
 
 **Build-time items from the contract audit (BT-1 … BT-10)** — the documentation convergence is **closed** after
 three rounds ([`docs/design/consistency-audit-final.md`](docs/design/consistency-audit-final.md): all RD items

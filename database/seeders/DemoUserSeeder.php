@@ -22,12 +22,13 @@ use Illuminate\Support\Str;
  * Super Admin is skipped — that account is owned by SuperAdminSeeder and has a real password.
  *
  * These accounts are convenience fixtures, never production data:
- *   · `SEED_DEMO=true|false` decides explicitly when it is set;
- *   · otherwise they are seeded in every environment except `production`.
+ *   · in `production` they are never seeded, even with `SEED_DEMO=true` (D65);
+ *   · elsewhere `SEED_DEMO=true|false` decides explicitly when it is set;
+ *   · otherwise they are seeded.
  *
- * (The contract words this as "local or SEED_DEMO (default true)". Defaulting to true in
- * production would create accounts whose password is literally `password`, so production is
- * excluded unless SEED_DEMO says otherwise; `local` and `testing` behave as specified.)
+ * (The contract words this as "local or SEED_DEMO (default true)". Any path that seeds production
+ * would create accounts whose password is literally `password`, so D65 makes that impossible rather
+ * than merely off by default; `local` and `testing` behave as specified.)
  *
  * Idempotent: matched on `users.email`; an existing demo account keeps its password and is only
  * re-activated and re-attached to its role.
@@ -45,7 +46,9 @@ class DemoUserSeeder extends Seeder
     public function run(): void
     {
         if (! $this->shouldSeed()) {
-            $this->seedComment('Demo users: skipped (set SEED_DEMO=true to create them in this environment).');
+            $this->seedComment(app()->environment('production')
+                ? 'Demo users: skipped (never seeded in production, D65).'
+                : 'Demo users: skipped (set SEED_DEMO=true to create them in this environment).');
 
             return;
         }
@@ -131,10 +134,15 @@ class DemoUserSeeder extends Seeder
     }
 
     /**
-     * An explicit SEED_DEMO wins; otherwise seed everywhere but production.
+     * Never in production, whatever SEED_DEMO says (D65): a weak demo password must be impossible
+     * there, not merely off by default. Elsewhere an explicit SEED_DEMO wins; otherwise seed.
      */
     private function shouldSeed(): bool
     {
+        if (app()->environment('production')) {
+            return false;
+        }
+
         $flag = env('SEED_DEMO');
 
         if ($flag !== null && $flag !== '') {

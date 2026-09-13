@@ -33,7 +33,7 @@ use stdClass;
  * One public entry point per operation:
  *
  *   place()  saveDraft()  rename()  enable()  disable()  toggle()  reorder()  duplicate()
- *   remove()  restore()  upsertItem()  toggleItem()  reorderItems()  deleteItem()
+ *   remove()  restore()  upsertItem()  toggleItem()  reorderItems()  deleteItem()  syncFaqs()
  *   validateContent()  assertPublishable()  draftPayload()  publishedPayload()
  *
  * Invariants:
@@ -61,6 +61,9 @@ final class SectionService
     private const MODULE = 'website_sections';
 
     private const ANCHOR_PATTERN = '/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/';
+
+    /** A FAQ section's snapshot shows at most this many questions (`SnapshotBuilder::faqs()`). */
+    private const FAQ_PICK_LIMIT = 100;
 
     /** @var array<string, bool> */
     private array $tables = [];
@@ -825,6 +828,117 @@ final class SectionService
         });
 
         $this->afterReferencesChanged($assets, []);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Hand-picked FAQs (faq_website_section)
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * Replace the hand-picked questions of a `faq` section — the pivot read when its `source` is
+     * `selected` (§2.11, integration K-10). The list is the full ordered set; an empty list clears it.
+     *
+     * A draft write like `saveDraft()` (INV-1): the pivot is folded into the canonical payload, so the hash
+     * is recomputed in the same transaction (INV-4) and the live page changes only on publish. Picking the
+     * same list again writes nothing and no revision.
+     *
+     * @param  array<int, int|string>  $faqIds
+     *
+     * @throws InvalidSectionContentException for a section that is not a FAQ section, an unknown or
+     *                                        trashed question, a duplicate, or more than the snapshot shows
+     */
+    public function syncFaqs(WebsiteSection $section, array $faqIds): WebsiteSection
+    {
+        $given = [];
+
+        foreach (array_values($faqIds) as $faqId) {
+            if (! is_int($faqId) && ! (is_string($faqId) && ctype_digit($faqId))) {
+                throw InvalidSectionContentException::withErrors('The chosen questions are not valid.', ['faqs' => ['Choose questions from the list.']]);
+            }
+
+            $given[] = (int) $faqId;
+        }
+
+        if (count($given) !== count(array_unique($given))) {
+            throw InvalidSectionContentException::withErrors('A question was chosen twice.', ['faqs' => ['Each question may appear once.']]);
+        }
+
+        if (count($given) > self::FAQ_PICK_LIMIT) {
+            throw InvalidSectionContentException::withErrors('Too many questions were chosen.', [
+                'faqs' => [sprintf('A FAQ section shows at most %d questions.', self::FAQ_PICK_LIMIT)],
+            ]);
+        }
+
+        $this->connection()->transaction(function () use ($section, $given): void {
+            $row = $this->lockRow((int) $section->getKey());
+            $this->assertEditable($row);
+
+            if ((string) $row->section_key !== 'faq' || ! $this->hasTable('faq_website_section') || ! $this->hasTable('faqs')) {
+                throw InvalidSectionContentException::withErrors('Only a FAQ section holds hand-picked questions.', [
+                    'faqs' => ['This section does not list questions.'],
+                ]);
+            }
+
+            $live = $given === [] ? [] : $this->connection()->table('faqs')
+                ->whereIn('id', $given)->whereNull('deleted_at')
+                ->pluck('id')->map(static fn (mixed $id): int => (int) $id)->all();
+
+            $missing = array_values(array_diff($given, $live));
+
+            if ($missing !== []) {
+                throw InvalidSectionContentException::withErrors('A chosen question no longer exists.', [
+                    'faqs' => [sprintf('Question #%s was deleted or is in the trash.', implode(', #', $missing))],
+                ]);
+            }
+
+            $current = $this->connection()->table('faq_website_section')
+                ->where('website_section_id', $row->id)
+                ->orderBy('sort_order')->orderBy('faq_id')
+                ->lockForUpdate()
+                ->pluck('faq_id')->map(static fn (mixed $id): int => (int) $id)->all();
+
+            if ($current === $given) {
+                return;
+            }
+
+            $before = $row->content_hash;
+            $now = Carbon::now();
+
+            $this->connection()->table('faq_website_section')->where('website_section_id', $row->id)->delete();
+
+            if ($given !== []) {
+                $this->connection()->table('faq_website_section')->insert(array_map(
+                    static fn (int $faqId, int $index): array => [
+                        'faq_id' => $faqId,
+                        'website_section_id' => $row->id,
+                        'sort_order' => ($index + 1) * 10,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ],
+                    $given,
+                    array_keys($given)
+                ));
+            }
+
+            $this->touchDraft((int) $row->id, []);
+            $after = $this->refreshHash($section);
+
+            if ($after !== $before) {
+                $this->revisions->record($section, RevisionEvent::DraftSaved, $this->canonicalPayload($section));
+            }
+
+            $this->auditor->record(
+                module: self::MODULE,
+                description: sprintf('FAQ picks saved: %s', $this->label($row)),
+                subject: $section,
+                properties: ['old' => ['faqs' => $current, 'content_hash' => $before], 'attributes' => ['faqs' => $given, 'content_hash' => $after]],
+                event: 'faqs_picked',
+            );
+        });
+
+        return $this->find((int) $section->getKey());
     }
 
     /*

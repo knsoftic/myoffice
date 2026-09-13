@@ -219,7 +219,8 @@ final class MaintenanceModeTest extends TestCase
             }
 
             // Framework plumbing that is not "the public site".
-            if ($uri === '/up' || str_starts_with($uri, '/storage') || str_starts_with($uri, '/_') || str_starts_with($uri, '/sanctum')) {
+            // phase-03 §6.5 [D-W3-13], FT-47: robots.txt must answer while the site is closed.
+            if ($uri === '/up' || $uri === '/robots.txt' || str_starts_with($uri, '/storage') || str_starts_with($uri, '/_') || str_starts_with($uri, '/sanctum')) {
                 continue;
             }
 
