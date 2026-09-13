@@ -10,8 +10,8 @@
 | **Stack** | Laravel 12.69.2 · PHP 8.2.12 · MariaDB 10.4.32 · Tailwind 3.4 · Alpine 3 · Vite 7 |
 | **Database** | `my_office` (utf8mb4_unicode_ci) |
 | **Created** | 2026-09-12 |
-| **Last updated** | 2026-09-12 |
-| **Current phase** | PHASE 1 — Laravel setup, authentication, roles & permissions |
+| **Last updated** | 2026-09-13 |
+| **Current phase** | PHASES 3-25 — automated build in release-slice order (docs/design/build-order.md) |
 
 ---
 
@@ -222,7 +222,7 @@ Contract: [`docs/phases/phase-01.md`](docs/phases/phase-01.md) · built 2026-09-
 
 **Committed** `a22b7d9` — Phase 1 is a rollback point.
 
-### [ ] PHASE 2 — Admin dashboard, system settings, module management
+### [x] PHASE 2 — Admin dashboard, system settings, module management
 
 Contract: [`docs/phases/phase-02.md`](docs/phases/phase-02.md) — **written 2026-09-12**, build starts the
 moment Phase 1 is verified (both phases touch `Admin/DashboardController`, `Admin/ModuleController`,
@@ -231,18 +231,20 @@ moment Phase 1 is verified (both phases touch `Admin/DashboardController`, `Admi
 | | Item |
 |---|---|
 | [x] | Phase 2 contract written (schema deltas, `SettingsRegistry`, services, routes, UI, 14 acceptance tests) |
-| [ ] | Migrations: `modules.depends_on` + disable audit, `settings.updated_by`/`is_readonly`, `users.preferences` |
-| [ ] | `SettingsRegistry` — 13 groups, ~110 typed fields with rules/defaults/help, driving seeder + form + validation |
-| [ ] | `SettingsService` (upload handling, encryption, per-key audit, group reset) + `ConfigureFromSettings` runtime wiring |
-| [ ] | Mail settings + test-email service (uses saved SMTP, throttled, password never exposed) |
-| [ ] | `ModuleService` dependency resolution, impact preview, cascade, disable audit, data-safety guarantee |
-| [ ] | `DashboardRegistry` + 10 real widgets + `DateRange` + per-user widget layout |
-| [ ] | Settings UI (tab rail, dirty save bar, live branding preview, reset-to-defaults) |
-| [ ] | Modules UI (grouped cards, impact modal with reason, bulk toggle) |
-| [ ] | Dashboard UI (widget grid, date range, customize mode, Chart.js `x-ui.chart`) |
-| [ ] | Runtime brand colour via CSS variables in `tailwind.config.js` |
-| [ ] | `Format` helpers (`money()`, `app_date()`) reading localization settings |
-| [ ] | 14 acceptance tests green |
+| [x] | Migrations: `modules.depends_on` + disable audit, `settings.updated_by`/`is_readonly`, `users.preferences` |
+| [x] | `SettingsRegistry` — 13 groups, ~110 typed fields with rules/defaults/help, driving seeder + form + validation |
+| [x] | `SettingsService` (upload handling, encryption, per-key audit, group reset) + `ConfigureFromSettings` runtime wiring |
+| [x] | Mail settings + test-email service (uses saved SMTP, throttled, password never exposed) |
+| [x] | `ModuleService` dependency resolution, impact preview, cascade, disable audit, data-safety guarantee |
+| [x] | `DashboardRegistry` + 10 real widgets + `DateRange` + per-user widget layout |
+| [x] | Settings UI (tab rail, dirty save bar, live branding preview, reset-to-defaults) |
+| [x] | Modules UI (grouped cards, impact modal with reason, bulk toggle) |
+| [x] | Dashboard UI (widget grid, date range, customize mode, Chart.js `x-ui.chart`) |
+| [x] | Runtime brand colour via CSS variables in `tailwind.config.js` |
+| [x] | `Format` helpers (`money()`, `app_date()`) reading localization settings |
+| [x] | 14 acceptance tests green |
+
+**Committed** `515465b` (build), `39c49d3` (close-out). Verified on a Phase-2-only tree: **1246 tests / 32,270 assertions**.
 ### [ ] PHASE 3 — Dynamic public website CMS (sections, menus, pages, SEO)
 ### [ ] PHASE 4 — Services, portfolio, blog, careers
 ### [ ] PHASE 5 — CRM: leads (Kanban), clients, client panel
@@ -276,6 +278,22 @@ moment Phase 1 is verified (both phases touch `Admin/DashboardController`, `Admi
 ---
 
 ## 6. Change Log
+
+### 2026-09-13 — Phase 2 closed; automated build of phases 3-25 launched
+
+- Phase 2 close-out committed (`39c49d3`) after verification on a Phase-2-only tree. The final review's two
+  blockers were resolved: the suite's six failures were caused solely by unintegrated Phase 3 files (proved by
+  stashing them), and every settings security fix now has behaviour tests.
+- Found and fixed on the way: MariaDB was converting UTC strings as Asia/Karachi on every TIMESTAMP (session
+  zone SYSTEM) — pinned to +00:00 with a byte-identical re-base; a polyglot image (valid header + PHP) passed
+  every upload rule and was stored verbatim — avatars are now re-encoded through GD (`ImageSanitizer`);
+  XAMPP's Apache would serve `.env` from the project root — a root `.htaccess` denies it.
+- Phase 3 domain code committed as WIP (`f85bd2c`).
+- Launched one orchestration for units 03 → 25 in `docs/design/build-order.md` slice order: parallel domain
+  code per unit on new paths (migrations staged outside `database/migrations` so the suite never sees an
+  unintegrated table), then serially per unit integration → acceptance tests → verify (suite twice, HTTP
+  smoke) → **commit** → adversarial security + contract review → fix rounds. A unit that cannot go green stops
+  every unit that depends on it.
 
 ### 2026-09-13 — Phase 2 finishing pass, and Phase 3 started in parallel
 
@@ -469,6 +487,11 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-12 | HIGH fixes hand-verified | temporary probe through the real HTTP kernel against `my_office` inside a rolled-back transaction | PASS — 29/29: `users.edit` without `users.change_status` gets a 422 on `status`, 403 on the status endpoint, and a 422 on any self role grant, while still being able to manage weaker accounts |
 | 2026-09-12 | Seeder convergence on live data | `db:seed --class=ModuleSeeder` on `my_office` | PASS — 79 registered, 0 created, 4 updated; the only diff in the table is `is_core` 0→1 on the four portal modules; `is_enabled` byte-identical for all 79 rows |
 | 2026-09-12 | Re-review of all 28 findings | two independent read-only auditors | 29 FIXED, 4 PARTIAL, 8 STALE/NOT_FIXED (low), **1 new medium** carried to Phase 2 |
+| 2026-09-13 | Phase 2 checkpoint suite | `php artisan test` (run by me) | PASS — 1020 tests / 30,851 assertions, 227 s |
+| 2026-09-13 | DB timezone pin proof | before/after read of all 67 TIMESTAMP columns under the old SYSTEM and new +00:00 session | PASS — 3,927 values byte-identical; new row UNIX_TIMESTAMP = PHP time() with 0 s drift; backup taken first |
+| 2026-09-13 | Phase 2 security tests | 4 new classes (floors, write guards, input hardening, avatar policy) | PASS — 154 tests |
+| 2026-09-13 | Avatar polyglot | GIF and PNG with an appended PHP payload uploaded through /account/avatar | PASS — stored file is re-encoded pixels, no payload; `tests/Feature/Account` 76 passed |
+| 2026-09-13 | Phase 2 isolated suite | Phase 3 domain files stashed, `php artisan test` (run by me) | PASS — **1246 tests / 32,270 assertions**, 253 s |
 
 ---
 
