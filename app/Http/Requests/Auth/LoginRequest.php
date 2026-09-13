@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 /**
  * Sign-in request (phase-01 §7).
@@ -30,9 +31,13 @@ use Illuminate\Validation\ValidationException;
 class LoginRequest extends FormRequest
 {
     /**
-     * Attempts allowed per email + IP before the lockout.
+     * Attempts allowed per email + IP before the lockout, when `security.login_max_attempts` is
+     * unreadable.
      */
     private const MAX_ATTEMPTS = 5;
+
+    /** Lockout length in minutes when `security.lockout_minutes` is unreadable. */
+    private const LOCKOUT_MINUTES = 15;
 
     public function authorize(): bool
     {
@@ -61,7 +66,7 @@ class LoginRequest extends FormRequest
         $this->ensureIsNotRateLimited();
 
         if (! Auth::attempt($this->only('email', 'password'), $this->boolean('remember'))) {
-            RateLimiter::hit($this->throttleKey());
+            RateLimiter::hit($this->throttleKey(), $this->lockoutSeconds());
 
             throw ValidationException::withMessages([
                 'email' => trans('auth.failed'),
@@ -100,7 +105,7 @@ class LoginRequest extends FormRequest
 
         // A refused state still counts against the throttle, so the endpoint cannot be used as
         // an account-status oracle.
-        RateLimiter::hit($this->throttleKey());
+        RateLimiter::hit($this->throttleKey(), $this->lockoutSeconds());
 
         throw ValidationException::withMessages([
             'email' => $this->statusMessage($status),
@@ -130,7 +135,7 @@ class LoginRequest extends FormRequest
      */
     public function ensureIsNotRateLimited(): void
     {
-        if (! RateLimiter::tooManyAttempts($this->throttleKey(), self::MAX_ATTEMPTS)) {
+        if (! RateLimiter::tooManyAttempts($this->throttleKey(), $this->maxAttempts())) {
             return;
         }
 
@@ -144,6 +149,35 @@ class LoginRequest extends FormRequest
                 'minutes' => ceil($seconds / 60),
             ]),
         ]);
+    }
+
+    /**
+     * `security.login_max_attempts` (1–20), read live so the Security screen actually governs the
+     * sign-in throttle. Before the Phase 2 finishing pass the setting was saved and enforced nowhere.
+     */
+    protected function maxAttempts(): int
+    {
+        return $this->securityInt('security.login_max_attempts', self::MAX_ATTEMPTS, 1, 20);
+    }
+
+    /**
+     * `security.lockout_minutes` (1–1440) as the limiter's decay. The throttle used Laravel's
+     * default 60 seconds while the screen said the lockout lasted 15 minutes.
+     */
+    protected function lockoutSeconds(): int
+    {
+        return $this->securityInt('security.lockout_minutes', self::LOCKOUT_MINUTES, 1, 1440) * 60;
+    }
+
+    private function securityInt(string $key, int $fallback, int $min, int $max): int
+    {
+        try {
+            $value = settings_repo()->get($key);
+        } catch (Throwable) {
+            return $fallback;
+        }
+
+        return is_numeric($value) ? max($min, min($max, (int) $value)) : $fallback;
     }
 
     /**

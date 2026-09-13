@@ -126,7 +126,13 @@ final class UserController extends Controller
     {
         $this->authorize('create', User::class);
 
-        $user = $this->users->create($request->payload(), $request->file('avatar'));
+        try {
+            // The actor is named so the service can apply the T11 grant bound itself, instead of
+            // trusting that a Form Request ran.
+            $user = $this->users->create($request->payload(), $request->file('avatar'), $this->actor());
+        } catch (ActionNotAllowedException $exception) {
+            return back()->withInput()->with('toast', ['type' => 'error', 'message' => $exception->getMessage()]);
+        }
 
         return redirect()
             ->route('admin.users.show', $user)
@@ -351,11 +357,15 @@ final class UserController extends Controller
      * question, asked twice, which is why the form and the server cannot disagree. Pass an unsaved
      * `User` for the create screen: there is no target rank yet.
      *
+     * The permission sets are eager loaded because the policy now compares them against the actor's
+     * own grants (T11): without it, filtering eighteen roles means eighteen extra queries.
+     *
      * @return Collection<int, Role>
      */
     private function assignableRoles(User $target): Collection
     {
         return Role::query()
+            ->with('permissions:id,name')
             ->ordered()
             ->get(['id', 'name', 'label', 'description', 'panel', 'level', 'is_system'])
             ->filter(static fn (Role $role): bool => Gate::allows('assignRoles', [$target, $role]))

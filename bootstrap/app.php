@@ -2,7 +2,9 @@
 
 use App\Http\Middleware\EnsureModuleEnabled;
 use App\Http\Middleware\EnsurePanelAccess;
+use App\Http\Middleware\EnsurePublicSiteAvailable;
 use App\Http\Middleware\EnsureUserIsActive;
+use App\Support\SettingsRegistry;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -64,11 +66,22 @@ return Application::configure(basePath: dirname(__DIR__))
             'active' => EnsureUserIsActive::class,
             'module' => EnsureModuleEnabled::class,
             'panel' => EnsurePanelAccess::class,
+            // phase-02 §6 "Maintenance": applied to PUBLIC routes only, never to a panel — see the
+            // class docblock for why the gate is attached rather than path-sniffed.
+            'public_site' => EnsurePublicSiteAvailable::class,
             'role' => RoleMiddleware::class,
             'permission' => PermissionMiddleware::class,
             'role_or_permission' => RoleOrPermissionMiddleware::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        /*
+        | A failed validation flashes the request input back into the session, and Laravel's own
+        | list only strips top-level `password` keys. The settings form nests every field under
+        | `settings[...]`, so a mistyped from-address beside a freshly typed SMTP password wrote
+        | that password into sessions.payload in clear text. Every secret the registry declares
+        | (encrypted, or a password input) is stripped by its nested name — derived from the
+        | registry, never listed by hand.
+        */
+        $exceptions->dontFlash(SettingsRegistry::secretInputNames());
     })->create();

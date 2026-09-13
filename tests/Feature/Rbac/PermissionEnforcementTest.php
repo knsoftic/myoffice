@@ -36,7 +36,10 @@ final class PermissionEnforcementTest extends TestCase
     public static function adminRouteProvider(): array
     {
         return [
-            'dashboard' => ['/admin', 'dashboard.view_any'],
+            // phase-02 §4 gives all three dashboard rows the same ability, `dashboard.view`;
+            // the landing page was still asking for `dashboard.view_any` while its own widget
+            // and layout endpoints asked for `view`, so the two halves of one screen disagreed.
+            'dashboard' => ['/admin', 'dashboard.view'],
             'users index' => ['/admin/users', 'users.view_any'],
             'user create' => ['/admin/users/create', 'users.create'],
             'roles index' => ['/admin/roles', 'roles.view_any'],
@@ -158,10 +161,16 @@ final class PermissionEnforcementTest extends TestCase
         $this->assertSoftDeleted($target);
     }
 
+    /**
+     * The subject is `project_milestones`: Phase 2 gave `projects` enabled dependents, so a disable
+     * with no cascade is now refused on dependency grounds — which would make the second half of
+     * this test pass for the wrong reason (redirect back with an error instead of the flip). What is
+     * under test here is the permission gate, so the module chosen is one nothing depends on.
+     */
     #[Test]
     public function toggling_a_module_needs_the_change_status_permission(): void
     {
-        $module = Module::query()->where('slug', 'projects')->firstOrFail();
+        $module = Module::query()->where('slug', 'project_milestones')->firstOrFail();
 
         $this->actingAs($this->createUserWithPermissions(['modules.view_any']))
             ->from('/admin/modules')
@@ -170,10 +179,12 @@ final class PermissionEnforcementTest extends TestCase
 
         $this->assertTrue((bool) $module->fresh()->is_enabled);
 
+        // D63: a disable must carry a 5–255 character reason on the server.
         $this->actingAs($this->createUserWithPermissions(['modules.view_any', 'modules.change_status']))
             ->from('/admin/modules')
-            ->post('/admin/modules/'.$module->getKey().'/toggle', ['enabled' => false])
-            ->assertRedirect('/admin/modules');
+            ->post('/admin/modules/'.$module->getKey().'/toggle', ['enabled' => false, 'reason' => 'Milestones not tracked yet'])
+            ->assertRedirect('/admin/modules')
+            ->assertSessionHasNoErrors();
 
         $this->assertFalse((bool) $module->fresh()->is_enabled);
     }

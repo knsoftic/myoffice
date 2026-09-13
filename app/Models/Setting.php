@@ -9,6 +9,7 @@ use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Crypt;
 use Throwable;
 
@@ -38,6 +39,8 @@ use Throwable;
  * @property string|null $label
  * @property string|null $description
  * @property int $sort_order
+ * @property int|null $updated_by who last wrote this key (phase-02 §1, stamped by SettingsService)
+ * @property bool $is_readonly key that may only change through the console or the environment
  */
 class Setting extends Model
 {
@@ -90,6 +93,8 @@ class Setting extends Model
         'label',
         'description',
         'sort_order',
+        'updated_by',
+        'is_readonly',
     ];
 
     /**
@@ -101,6 +106,7 @@ class Setting extends Model
             'options' => 'array',
             'is_encrypted' => 'boolean',
             'is_public' => 'boolean',
+            'is_readonly' => 'boolean',
             'sort_order' => 'integer',
         ];
     }
@@ -216,6 +222,15 @@ class Setting extends Model
     }
 
     /**
+     * A read-only key is rendered disabled by the settings screen and refused by the Form
+     * Request: it changes only through the console or the environment (phase-02 §1).
+     */
+    public function isReadonly(): bool
+    {
+        return (bool) ($this->attributes['is_readonly'] ?? false);
+    }
+
+    /**
      * Dotted name used by the `setting()` helper — "company.name".
      *
      * @return Attribute<string, never>
@@ -223,6 +238,23 @@ class Setting extends Model
     protected function fullKey(): Attribute
     {
         return Attribute::get(fn (): string => $this->group.'.'.$this->key);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Relations
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * The user who last wrote this key — feeds each settings group's "last updated by X" footer
+     * (phase-02 §5). Null for a seeded value nobody has edited yet.
+     *
+     * @return BelongsTo<User, $this>
+     */
+    public function updatedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'updated_by');
     }
 
     /*

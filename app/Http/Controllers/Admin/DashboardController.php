@@ -4,40 +4,56 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Admin;
 
-use App\Enums\LoginStatus;
-use App\Enums\ModuleGroup;
-use App\Enums\UserStatus;
+use App\Dashboard\Layout;
+use App\Dashboard\WidgetDescriptor;
 use App\Http\Controllers\Controller;
-use App\Models\Activity;
-use App\Models\LoginHistory;
-use App\Models\Role;
+use App\Http\Requests\Dashboard\UpdateDashboardLayoutRequest;
 use App\Models\User;
-use App\Support\Modules;
+use App\Support\DashboardRegistry;
+use App\Support\DateRange;
 use Carbon\CarbonImmutable;
-use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\View\View;
 use Throwable;
 
 /**
- * The admin landing page (route `admin.dashboard`, phase-01 §8).
+ * The admin dashboard (phase-02 §4) — three actions over `DashboardRegistry`.
  *
- * Every number on this screen is a real query — nothing is mocked. Each block is gated on the
- * permission that owns the data it shows, so the same view degrades to exactly what the signed
- * in role may see: a user without `activity_log.view_logs` never gets the activity table, and a
- * user without `settings.view_any` never sees the infrastructure card.
+ *   GET  /admin                        index   the grid
+ *   GET  /admin/dashboard/widget/{key} widget  one card's JSON (throttled, re-authorised)
+ *   PUT  /admin/dashboard/layout       layout  save this user's order and hidden list
  *
- * Phase 2 replaces the fixed layout with a user-arrangeable widget framework; until then the
- * dashboards that belong to later phases are advertised as empty states rather than faked with
- * placeholder charts.
+ * **It knows nothing about any particular widget.** There is no `if ($key === 'users_by_status')`
+ * anywhere in this file and there never may be: a later phase adds a card by dropping a class into
+ * `app/Dashboard/Widgets/`, and this controller picks it up because the registry does. The only
+ * decisions made here are which range to use, which cards to render eagerly, and how to answer.
+ *
+ * ---------------------------------------------------------------------------------------------
+ * Why most cards render server-side
+ * ---------------------------------------------------------------------------------------------
+ *
+ * Rendering every card from the browser would mean ten requests per page view, ten permission
+ * re-checks, and a dashboard that says nothing with JavaScript off. So the cheap cards are
+ * rendered inline on the initial request — their figures are in the HTML, the page works without
+ * JavaScript, and the range selector is an ordinary link — while the two genuinely expensive ones
+ * (`deferred()`: a filesystem walk and an `information_schema` aggregate) are skipped and fetched
+ * afterwards behind an `x-ui.skeleton`. `?eager=1` renders those inline too, which is what the
+ * `<noscript>` fallback links to.
+ *
+ * Measured on the seeded database: **9 widget queries for the initial render** (10 once
+ * `login_histories` has rows, the extra being one eager load), **13–14 with `?eager=1`**, and at
+ * most 4 for a single widget's JSON. Constant in every case — no figure here grows with the number
+ * of rows, and nothing queries inside a loop.
  */
 final class DashboardController extends Controller
 {
-    /** Rows shown in each of the two recent-events tables. */
-    private const RECENT_LIMIT = 10;
+    /** Widget JSON fetches allowed per user per minute, on top of any route throttle. */
+    private const WIDGET_RATE_LIMIT = 120;
 
     /**
      * Supports both `Route::get('/', DashboardController::class)` and
@@ -48,491 +64,323 @@ final class DashboardController extends Controller
         return $this->index($request);
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | GET /admin
+    |--------------------------------------------------------------------------
+    */
+
     public function index(Request $request): View
     {
-        $user = $request->user();
+        $user = $this->user($request);
+        $range = $this->range($request, $user);
 
-        $permissions = [
-            'users' => $this->allows($user, 'users.view_any'),
-            'roles' => $this->allows($user, 'roles.view_any'),
-            'modules' => $this->allows($user, 'modules.view_any'),
-            'activity' => $this->allows($user, 'activity_log.view_logs'),
-            'logins' => $this->allows($user, 'login_history.view_logs'),
-            'health' => $this->allows($user, 'settings.view_any'),
-        ];
+        $layout = Layout::fromUser($user);
+        $available = DashboardRegistry::for($user);
 
-        $timezone = $user instanceof User
-            ? $user->effectiveTimezone()
-            : (string) config('app.timezone', 'UTC');
+        // Arrange once; the two halves are a partition of the same ordered collection.
+        $arranged = $layout->arrange($available);
+        $visible = $arranged->reject(fn ($descriptor): bool => $layout->isHidden($descriptor->key));
+        $hidden = $arranged->filter(fn ($descriptor): bool => $layout->isHidden($descriptor->key));
 
-        $today = CarbonImmutable::now($timezone);
-        $appTimezone = (string) config('app.timezone', 'UTC');
-        $dayStart = $today->startOfDay()->setTimezone($appTimezone);
-        $dayEnd = $today->endOfDay()->setTimezone($appTimezone);
+        // `?eager=1` renders the deferred cards inline as well: the <noscript> escape hatch, and
+        // the switch an acceptance test flips to assert on every figure in one response.
+        $eager = $request->boolean('eager');
 
-        $userCounts = $permissions['users'] ? $this->userCounts() : [];
-        $loginCounts = $permissions['logins'] ? $this->loginCounts($dayStart, $dayEnd) : [];
-        $moduleCounts = $permissions['modules'] ? $this->moduleCounts() : [];
+        $sections = $this->sections($arranged, $layout, $range, $eager);
 
         return view('admin.dashboard', [
-            'permissions' => $permissions,
-            'timezone' => $timezone,
-            'today' => $today,
-            'stats' => $this->statCards($permissions, $userCounts, $loginCounts, $moduleCounts),
-            'health' => $permissions['health'] ? $this->systemHealth() : [],
-            'recentActivity' => $permissions['activity'] ? $this->recentActivity() : null,
-            'recentLogins' => $permissions['logins'] ? $this->recentLogins() : null,
-            'moduleNames' => Modules::names(),
-            'upcoming' => $this->upcomingDashboards(),
-            'activityIndexUrl' => $this->urlFor('admin.activity-log.index'),
-            'loginIndexUrl' => $this->urlFor('admin.login-history.index'),
-            'hasAnyBlock' => in_array(true, $permissions, true),
+            'range' => $range,
+            'rangePresets' => DateRange::presets(),
+            'layout' => $layout,
+            'sections' => $sections,
+            'visible' => $visible,
+            'hidden' => $hidden,
+            'available' => $arranged,
+            // The arrangement a "reset to default" goes back to: group, then widget sort, then title.
+            'defaultOrder' => Layout::empty()->arrange($available)->keys()->values()->all(),
+            'eager' => $eager,
+            'widgetUrlTemplate' => $this->widgetUrlTemplate(),
+            'layoutUrl' => $this->namedUrl('admin.dashboard.layout'),
+            'dashboardUrl' => $this->namedUrl('admin.dashboard') ?? url()->current(),
+            'timezone' => $range->timezone(),
+            'today' => CarbonImmutable::now($range->timezone()),
+            'canCustomise' => $user !== null && $available->isNotEmpty(),
         ]);
     }
 
     /*
     |--------------------------------------------------------------------------
-    | Stat cards
+    | GET /admin/dashboard/widget/{key}
     |--------------------------------------------------------------------------
     */
 
     /**
-     * One flat list of KPI cards, already filtered by permission so the view only loops.
+     * One card's JSON: its data, and the same Blade body the server-rendered cards use.
      *
-     * @param  array<string, bool>  $permissions
-     * @param  array<string, int>  $userCounts
-     * @param  array<string, int>  $loginCounts
-     * @param  array{enabled: int, total: int}|array{}  $moduleCounts
-     * @return array<int, array<string, mixed>>
-     */
-    private function statCards(array $permissions, array $userCounts, array $loginCounts, array $moduleCounts): array
-    {
-        $cards = [];
-
-        if ($permissions['users']) {
-            $usersUrl = $this->urlFor('admin.users.index');
-
-            $cards[] = [
-                'label' => 'Total users',
-                'value' => number_format((float) ($userCounts['total'] ?? 0)),
-                'icon' => 'users',
-                'color' => 'brand',
-                'href' => $usersUrl,
-                'deltaLabel' => number_format((float) ($userCounts[UserStatus::Pending->value] ?? 0)).' pending',
-            ];
-
-            $cards[] = [
-                'label' => 'Active users',
-                'value' => number_format((float) ($userCounts[UserStatus::Active->value] ?? 0)),
-                'icon' => 'check-circle',
-                'color' => UserStatus::Active->color(),
-                'href' => $usersUrl === null ? null : $usersUrl.'?status='.UserStatus::Active->value,
-                'deltaLabel' => 'may sign in',
-            ];
-
-            $cards[] = [
-                'label' => 'Suspended users',
-                'value' => number_format((float) ($userCounts[UserStatus::Suspended->value] ?? 0)),
-                'icon' => 'lock-closed',
-                'color' => UserStatus::Suspended->color(),
-                'href' => $usersUrl === null ? null : $usersUrl.'?status='.UserStatus::Suspended->value,
-                'deltaLabel' => number_format((float) ($userCounts[UserStatus::Inactive->value] ?? 0)).' inactive',
-            ];
-        }
-
-        if ($permissions['roles']) {
-            $cards[] = [
-                'label' => 'Roles',
-                'value' => number_format((float) $this->roleCount()),
-                'icon' => 'shield-check',
-                'color' => 'violet',
-                'href' => $this->urlFor('admin.roles.index'),
-                'deltaLabel' => 'permission sets',
-            ];
-        }
-
-        if ($permissions['modules'] && $moduleCounts !== []) {
-            $cards[] = [
-                'label' => 'Enabled modules',
-                'value' => number_format((float) $moduleCounts['enabled']).' / '.number_format((float) $moduleCounts['total']),
-                'icon' => 'puzzle-piece',
-                'color' => 'indigo',
-                'href' => $this->urlFor('admin.modules.index'),
-                'deltaLabel' => $moduleCounts['total'] - $moduleCounts['enabled'] === 0
-                    ? 'all switched on'
-                    : number_format((float) ($moduleCounts['total'] - $moduleCounts['enabled'])).' disabled',
-            ];
-        }
-
-        if ($permissions['logins']) {
-            $loginUrl = $this->urlFor('admin.login-history.index');
-
-            $cards[] = [
-                'label' => 'Logins today',
-                'value' => number_format((float) ($loginCounts[LoginStatus::Success->value] ?? 0)),
-                'icon' => 'arrow-left-on-rectangle',
-                'color' => LoginStatus::Success->color(),
-                'href' => $loginUrl === null ? null : $loginUrl.'?status='.LoginStatus::Success->value,
-                'deltaLabel' => 'successful sign-ins',
-            ];
-
-            $failed = (int) ($loginCounts[LoginStatus::Failed->value] ?? 0);
-            $blocked = (int) ($loginCounts[LoginStatus::Blocked->value] ?? 0);
-
-            $cards[] = [
-                'label' => 'Failed logins today',
-                'value' => number_format((float) $failed),
-                'icon' => 'exclamation-triangle',
-                'color' => $failed > 0 ? LoginStatus::Failed->color() : 'slate',
-                'href' => $loginUrl === null ? null : $loginUrl.'?status='.LoginStatus::Failed->value,
-                'deltaLabel' => $blocked > 0
-                    ? number_format((float) $blocked).' blocked'
-                    : 'no blocked attempts',
-            ];
-        }
-
-        return $cards;
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Queries
-    |--------------------------------------------------------------------------
-    */
-
-    /**
-     * status => count, plus `total`. One grouped query; soft-deleted users excluded.
+     * Three things are deliberate here.
      *
-     * The raw alias keeps the enum cast off the grouping key, so the map is keyed by the
-     * stored string and lines up with UserStatus::*->value.
-     *
-     * @return array<string, int>
+     *  1. **The key is never trusted.** `DashboardRegistry::findFor()` re-runs the module and
+     *     permission check for this viewer, so a user who edits the URL to a card their role
+     *     excludes gets a 404 — not a 403, because a 403 would confirm the card exists (§8 row 5
+     *     of the resolutions: 404 on an ownership failure, everywhere).
+     *  2. **The body is rendered server-side** and shipped as `html`, so the markup for a widget
+     *     lives in exactly one place — its Blade view — instead of being duplicated in
+     *     JavaScript. `data` travels alongside it for anything that wants the raw figures.
+     *  3. **It is rate-limited even without route middleware.** The contract puts `throttle` on
+     *     the route and `routes/admin.php` carries it, so the counter below normally does nothing
+     *     and deliberately costs nothing — it only engages when the route it is reached through
+     *     has no throttle at all. Running both would double the cache round-trips on every card,
+     *     which on the database cache driver means real queries.
      */
-    private function userCounts(): array
+    public function widget(Request $request, string $key): JsonResponse
     {
-        $counts = ['total' => 0];
+        $user = $this->user($request);
 
-        foreach (UserStatus::cases() as $case) {
-            $counts[$case->value] = 0;
+        if ($user === null) {
+            return response()->json(['message' => 'Unauthenticated.'], 401);
         }
 
-        try {
-            $rows = User::query()
-                ->selectRaw('status as status_value, count(*) as aggregate')
-                ->groupBy('status')
-                ->pluck('aggregate', 'status_value');
-        } catch (Throwable) {
-            return $counts;
-        }
+        if (! $this->routeIsThrottled($request)) {
+            $limiterKey = 'dashboard-widget:'.$user->getAuthIdentifier();
 
-        foreach ($rows as $status => $aggregate) {
-            $counts[(string) $status] = (int) $aggregate;
-            $counts['total'] += (int) $aggregate;
-        }
-
-        return $counts;
-    }
-
-    /**
-     * Login outcomes recorded inside the viewer's "today".
-     *
-     * @return array<string, int>
-     */
-    private function loginCounts(CarbonImmutable $from, CarbonImmutable $to): array
-    {
-        $counts = [];
-
-        foreach (LoginStatus::cases() as $case) {
-            $counts[$case->value] = 0;
-        }
-
-        try {
-            $rows = LoginHistory::query()
-                ->whereBetween('created_at', [$from, $to])
-                ->selectRaw('status as status_value, count(*) as aggregate')
-                ->groupBy('status')
-                ->pluck('aggregate', 'status_value');
-        } catch (Throwable) {
-            return $counts;
-        }
-
-        foreach ($rows as $status => $aggregate) {
-            $counts[(string) $status] = (int) $aggregate;
-        }
-
-        return $counts;
-    }
-
-    /**
-     * @return array{enabled: int, total: int}
-     */
-    private function moduleCounts(): array
-    {
-        $modules = Modules::all();
-
-        return [
-            'enabled' => $modules->filter(static fn (array $module): bool => (bool) ($module['is_enabled'] ?? false))->count(),
-            'total' => $modules->count(),
-        ];
-    }
-
-    private function roleCount(): int
-    {
-        try {
-            return Role::query()->count();
-        } catch (Throwable) {
-            return 0;
-        }
-    }
-
-    /**
-     * @return EloquentCollection<int, Activity>
-     */
-    private function recentActivity(): EloquentCollection
-    {
-        return Activity::query()
-            ->with('causer')
-            ->latestFirst()
-            ->limit(self::RECENT_LIMIT)
-            ->get();
-    }
-
-    /**
-     * @return EloquentCollection<int, LoginHistory>
-     */
-    private function recentLogins(): EloquentCollection
-    {
-        return LoginHistory::query()
-            ->with('user')
-            ->latestFirst()
-            ->limit(self::RECENT_LIMIT)
-            ->get();
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | System health
-    |--------------------------------------------------------------------------
-    */
-
-    /**
-     * Facts about the running installation — read from the framework and the `migrations`
-     * table, never hardcoded.
-     *
-     * @return array<int, array{label: string, value: string, icon: string, meta: string|null}>
-     */
-    private function systemHealth(): array
-    {
-        $database = $this->databaseInfo();
-        $migration = $this->lastMigration();
-
-        return [
-            [
-                'label' => 'App version',
-                'value' => $this->appVersion(),
-                'icon' => 'sparkles',
-                'meta' => config('app.name') === null ? null : (string) config('app.name'),
-            ],
-            [
-                'label' => 'PHP version',
-                'value' => PHP_VERSION,
-                'icon' => 'server-stack',
-                'meta' => PHP_OS_FAMILY,
-            ],
-            [
-                'label' => 'Database',
-                'value' => $database['name'],
-                'icon' => 'table-cells',
-                'meta' => $database['driver'],
-            ],
-            [
-                'label' => 'Queue driver',
-                'value' => (string) config('queue.default', 'sync'),
-                'icon' => 'queue-list',
-                'meta' => null,
-            ],
-            [
-                'label' => 'Cache driver',
-                'value' => (string) config('cache.default', 'file'),
-                'icon' => 'rectangle-stack',
-                'meta' => 'sessions: '.(string) config('session.driver', 'file'),
-            ],
-            [
-                'label' => 'Last migration',
-                'value' => $migration['value'],
-                'icon' => 'clock',
-                'meta' => $migration['meta'],
-            ],
-            [
-                'label' => 'Environment',
-                'value' => (string) config('app.env', 'production'),
-                'icon' => 'cog-6-tooth',
-                'meta' => config('app.debug') ? 'debug on' : 'debug off',
-            ],
-            [
-                'label' => 'Timezone',
-                'value' => (string) config('app.timezone', 'UTC'),
-                'icon' => 'globe-alt',
-                'meta' => 'locale: '.(string) config('app.locale', 'en'),
-            ],
-        ];
-    }
-
-    private function appVersion(): string
-    {
-        $version = config('app.version');
-
-        if (is_string($version) && trim($version) !== '') {
-            return trim($version);
-        }
-
-        return 'Laravel '.app()->version();
-    }
-
-    /**
-     * @return array{name: string, driver: string}
-     */
-    private function databaseInfo(): array
-    {
-        try {
-            $connection = DB::connection();
-
-            return [
-                'name' => (string) $connection->getDatabaseName(),
-                'driver' => (string) $connection->getDriverName(),
-            ];
-        } catch (Throwable) {
-            return ['name' => 'unavailable', 'driver' => 'unknown'];
-        }
-    }
-
-    /**
-     * The newest row in `migrations`. The table stores no timestamp, so the stamp comes from
-     * the filename prefix — which is exactly the migration's own version.
-     *
-     * @return array{value: string, meta: string|null}
-     */
-    private function lastMigration(): array
-    {
-        try {
-            $row = DB::table('migrations')->orderByDesc('id')->first();
-        } catch (Throwable) {
-            return ['value' => 'unavailable', 'meta' => null];
-        }
-
-        if ($row === null) {
-            return ['value' => 'none yet', 'meta' => null];
-        }
-
-        $name = (string) ($row->migration ?? '');
-        $batch = isset($row->batch) ? (int) $row->batch : null;
-        $stamp = 'unknown';
-
-        if (preg_match('/^(\d{4})_(\d{2})_(\d{2})_(\d{6})_/', $name, $matches) === 1) {
-            try {
-                $stamp = CarbonImmutable::createFromFormat(
-                    'Y_m_d_His',
-                    $matches[1].'_'.$matches[2].'_'.$matches[3].'_'.$matches[4],
-                    (string) config('app.timezone', 'UTC'),
-                )->format('d M Y H:i');
-            } catch (Throwable) {
-                $stamp = 'unknown';
-            }
-        }
-
-        return [
-            'value' => $stamp,
-            'meta' => $batch === null ? $name : 'batch '.$batch.' · '.$name,
-        ];
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Later-phase placeholders
-    |--------------------------------------------------------------------------
-    */
-
-    /**
-     * What each module group's dashboard will contain once the phase that owns it is built.
-     * The module counts are real (they come from the registry + `modules` table), so the card
-     * says something true instead of drawing a fake chart.
-     *
-     * @return array<int, array{title: string, message: string, icon: string, color: string, badge: string|null}>
-     */
-    private function upcomingDashboards(): array
-    {
-        $blurbs = [
-            ModuleGroup::SoftwareHouse->value => ['briefcase', 'Lead pipeline, live projects, milestone burndown and task load per developer.'],
-            ModuleGroup::Institute->value => ['academic-cap', 'Admissions, batch occupancy, attendance and fee collection against what is due.'],
-            ModuleGroup::Finance->value => ['banknotes', 'Invoiced versus received, expenses by category and outstanding balances.'],
-            ModuleGroup::Collaborator->value => ['user-plus', 'Referrals, commission earned against money actually received, wallet and payout queue.'],
-            ModuleGroup::Hr->value => ['user-group', 'Headcount, attendance, leave balances and the payroll run.'],
-            ModuleGroup::Website->value => ['globe-alt', 'Content freshness, contact and course inquiries, job applications and SEO coverage.'],
-            ModuleGroup::Shared->value => ['lifebuoy', 'Support tickets, meetings, messages and the cross-module report builder.'],
-        ];
-
-        $grouped = Modules::all()->groupBy(static fn (array $module): string => (string) ($module['group'] ?? ''));
-
-        $cards = [[
-            'title' => 'Widget framework',
-            'message' => 'Phase 2 turns these fixed cards into widgets you can reorder, hide and scope per role, alongside system settings and module management.',
-            'icon' => 'squares-2x2',
-            'color' => 'brand',
-            'badge' => 'Phase 2',
-        ]];
-
-        foreach ($blurbs as $group => [$icon, $message]) {
-            $case = ModuleGroup::tryFrom($group);
-
-            if ($case === null) {
-                continue;
+            if (RateLimiter::tooManyAttempts($limiterKey, self::WIDGET_RATE_LIMIT)) {
+                return response()->json([
+                    'message' => 'Too many dashboard refreshes. Try again shortly.',
+                    'retry_after' => RateLimiter::availableIn($limiterKey),
+                ], 429);
             }
 
-            $count = $grouped->has($group) ? $grouped->get($group)->count() : 0;
-
-            $cards[] = [
-                'title' => $case->label().' dashboard',
-                'message' => $message,
-                'icon' => $icon,
-                'color' => $case->color(),
-                'badge' => $count === 0 ? null : $count.' modules ready',
-            ];
+            RateLimiter::hit($limiterKey);
         }
 
-        return $cards;
+        $descriptor = DashboardRegistry::findFor($user, $key);
+
+        if ($descriptor === null) {
+            return response()->json(['message' => 'Widget not found.'], 404);
+        }
+
+        $range = $this->range($request, $user);
+
+        try {
+            $data = $descriptor->data($range);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return response()->json([
+                'key' => $descriptor->key,
+                'message' => 'This widget could not be loaded.',
+            ], 500);
+        }
+
+        return response()->json([
+            'key' => $descriptor->key,
+            'widget' => $descriptor->toArray(),
+            'range' => $range->toArray(),
+            'data' => $data,
+            'html' => $this->renderBody($descriptor, $data, $range),
+            'generated_at' => CarbonImmutable::now()->toIso8601String(),
+        ]);
     }
 
     /*
     |--------------------------------------------------------------------------
-    | Helpers
+    | PUT /admin/dashboard/layout
     |--------------------------------------------------------------------------
     */
 
-    private function allows(?Authenticatable $user, string $permission): bool
+    /**
+     * Save the signed-in user's arrangement.
+     *
+     * Written to `$request->user()` and nowhere else, through `User::setPreferences()` — one save,
+     * one UPDATE, both dot paths at once — so two users can never share a layout and no request
+     * can nominate whose layout it is editing. The Form Request has already dropped any key this
+     * viewer may not see.
+     *
+     * Answers JSON to the customise panel and a redirect + toast to a plain form post, so the
+     * feature degrades to a normal submit when JavaScript is off.
+     */
+    public function layout(UpdateDashboardLayoutRequest $request): JsonResponse|RedirectResponse
     {
-        if (! $user instanceof User) {
+        $user = $this->user($request);
+
+        if ($user === null) {
+            return response()->json(['message' => 'Unauthenticated.'], 401);
+        }
+
+        $layout = $request->layout();
+
+        $user->setPreferences($layout->toPreferences());
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'saved' => true,
+                'layout' => $layout->toArray(),
+                'message' => 'Dashboard layout saved.',
+            ]);
+        }
+
+        session()->flash('toast', ['type' => 'success', 'message' => 'Dashboard layout saved.']);
+
+        return redirect()->to($this->namedUrl('admin.dashboard') ?? url()->previous());
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Internals
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * Group the viewer's cards into sections, running `data()` only for the ones rendered inline.
+     *
+     * The user's own order wins inside a section; the sections themselves follow
+     * `WidgetGroup::sort()`. Three kinds of card come out of here:
+     *
+     *  · **inline** — `data()` ran, the figures are in the HTML;
+     *  · **deferred** — expensive, or hidden by this user: no query ran, the card ships its
+     *    skeleton and the browser fetches the body if and when it is needed. Switching a hidden
+     *    card back on therefore costs one request and no page reload, and a hidden card costs the
+     *    server nothing at all;
+     *  · **failed** — `data()` threw. Reported and rendered as a retryable card, because one
+     *    broken later-phase widget must never take the whole dashboard down.
+     *
+     * @param  Collection<string, WidgetDescriptor>  $arranged  every card this viewer may see
+     * @return list<array{group: string, label: string, sort: int, widgets: list<array<string, mixed>>}>
+     */
+    private function sections(Collection $arranged, Layout $layout, DateRange $range, bool $eager): array
+    {
+        $sections = [];
+
+        foreach ($arranged as $descriptor) {
+            $isHidden = $layout->isHidden($descriptor->key);
+            $defer = $isHidden || ($descriptor->deferred && ! $eager);
+
+            $card = [
+                'descriptor' => $descriptor,
+                'deferred' => $defer,
+                'hidden' => $isHidden,
+                'data' => null,
+                'failed' => false,
+            ];
+
+            if (! $defer) {
+                try {
+                    $card['data'] = $descriptor->data($range);
+                } catch (Throwable $exception) {
+                    report($exception);
+                    $card['failed'] = true;
+                }
+            }
+
+            $sections[$descriptor->group] ??= [
+                'group' => $descriptor->group,
+                'label' => $descriptor->groupLabel(),
+                'sort' => $descriptor->groupSort,
+                'widgets' => [],
+            ];
+
+            $sections[$descriptor->group]['widgets'][] = $card;
+        }
+
+        usort($sections, static fn (array $a, array $b): int => $a['sort'] <=> $b['sort']);
+
+        return array_values($sections);
+    }
+
+    /**
+     * Render one card's body view. Used by both the inline grid and the JSON endpoint, so the
+     * markup for a widget exists exactly once.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function renderBody(WidgetDescriptor $descriptor, array $data, DateRange $range): string
+    {
+        return view('admin.dashboard.partials.body', [
+            'widget' => $descriptor,
+            'data' => $data,
+            'range' => $range,
+        ])->render();
+    }
+
+    /**
+     * The range every widget on the page is handed.
+     *
+     * Read from the query string (`?range=month`, or `?range=custom&from=…&to=…`) in the viewer's
+     * own timezone, so two people in different timezones looking at "today" each see their own
+     * day. `DateRange::make()` falls back to the default preset on anything unreadable, so a
+     * hand-edited URL cannot 500 the dashboard.
+     */
+    private function range(Request $request, ?User $user): DateRange
+    {
+        $timezone = $user?->effectiveTimezone();
+
+        // A hostile `?range[]=x` is an array: read only strings, so it falls back to the default
+        // preset instead of raising "Array to string conversion".
+        $scalar = static fn (mixed $value): ?string => is_string($value) ? $value : null;
+
+        return DateRange::make(
+            $scalar($request->query('range')),
+            $scalar($request->query('from')),
+            $scalar($request->query('to')),
+            $timezone,
+        );
+    }
+
+    /**
+     * Does the route this request arrived on already carry `throttle` middleware?
+     *
+     * When it does — which is the contracted arrangement — the controller's own limiter stands
+     * down rather than paying for a second counter.
+     */
+    private function routeIsThrottled(Request $request): bool
+    {
+        $route = $request->route();
+
+        if ($route === null) {
             return false;
         }
 
-        try {
-            return $user->can($permission);
-        } catch (Throwable) {
-            // Permission tables not seeded yet: deny rather than leak.
-            return false;
+        foreach ($route->gatherMiddleware() as $middleware) {
+            if (is_string($middleware) && str_starts_with($middleware, 'throttle')) {
+                return true;
+            }
         }
+
+        return false;
+    }
+
+    private function user(Request $request): ?User
+    {
+        $user = $request->user();
+
+        return $user instanceof User ? $user : null;
     }
 
     /**
-     * A route URL only when that route has been registered (later phases add some of them).
+     * The widget JSON URL with a `__key__` placeholder for the browser to substitute.
+     *
+     * Null until the routes agent registers `admin.dashboard.widget`, which is what lets the grid
+     * fall back to rendering everything inline rather than breaking.
      */
-    private function urlFor(string $name): ?string
+    private function widgetUrlTemplate(): ?string
+    {
+        $url = $this->namedUrl('admin.dashboard.widget', ['key' => '__key__']);
+
+        return $url === null ? null : str_replace('%5F%5Fkey%5F%5F', '__key__', $url);
+    }
+
+    /**
+     * A route URL, but only when that route exists.
+     */
+    private function namedUrl(string $name, mixed $parameters = []): ?string
     {
         if (! Route::has($name)) {
             return null;
         }
 
         try {
-            return route($name);
+            return route($name, $parameters);
         } catch (Throwable) {
             return null;
         }

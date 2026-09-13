@@ -16,8 +16,10 @@ use Illuminate\Support\Facades\Gate;
  * Used by the user forms: every role id in the payload is resolved and checked against
  * `UserPolicy::assignRoles()`, which requires `users.assign`, that the actor outranks the
  * **target user**, and — through `RolePolicy::assign()` — `roles.assign` plus a role level strictly
- * below the actor's own. A Super Admin passes through `Gate::before` and may grant anything, which
- * is why the requests repeat the self-grant check outside the Gate.
+ * below the actor's own, and finally that the actor already holds every permission the role carries
+ * (T11: a level number cannot be trusted to describe what a role can do). A Super Admin passes
+ * through `Gate::before` and may grant anything, which is why the requests repeat the self-grant
+ * check outside the Gate.
  *
  * The target matters as much as the role: checking only the role's level let an actor tick a
  * stronger role on **their own** edit screen, because the role was numerically weaker than their
@@ -74,6 +76,11 @@ trait ValidatesRoleAssignment
     }
 
     /**
+     * The roles named by `$ids`, with their permission sets already loaded.
+     *
+     * `UserPolicy::assignRoles()` reads `$role->permissions` for the T11 bound, so eager loading it
+     * here turns one query per submitted role into one query for all of them.
+     *
      * @param  array<int, int>  $ids
      * @return EloquentCollection<int, Role>
      */
@@ -87,7 +94,7 @@ trait ValidatesRoleAssignment
         }
 
         /** @var EloquentCollection<int, Role> $roles */
-        $roles = Role::query()->whereIn('id', $ids)->get();
+        $roles = Role::query()->with('permissions:id,name')->whereIn('id', $ids)->get();
 
         return $roles;
     }

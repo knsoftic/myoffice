@@ -109,7 +109,8 @@ final class PermissionRegistry
      *     icon: string,
      *     is_core: bool,
      *     sort: int,
-     *     abilities: array<int, Ability|string>
+     *     abilities: array<int, Ability|string>,
+     *     depends_on: list<string>
      * }>
      */
     public static function modules(): array
@@ -118,7 +119,7 @@ final class PermissionRegistry
             return self::$modules;
         }
 
-        return self::$modules = [
+        return self::$modules = self::withDependencies([
 
             /*
             |------------------------------------------------------------------
@@ -172,7 +173,12 @@ final class PermissionRegistry
                 'icon' => 'cog-6-tooth',
                 'is_core' => true,
                 'sort' => 60,
-                'abilities' => self::merge(self::READ, self::EDIT_ONLY, self::FILES),
+                // `edit_mail` is a narrowly-scoped ability for one guarded operation, exactly like
+                // `project_payments.link_invoice` (D43): the SMTP credentials are the one setting
+                // group whose owner can read every password-reset mail in the system, so writing
+                // them and sending a test through them needs `settings.edit` *and* this. Never widen
+                // it into `edit`. RoleSeeder withholds it from Admin, leaving it to Super Admin.
+                'abilities' => self::merge(self::READ, self::EDIT_ONLY, [Ability::EditMail], self::FILES),
             ],
             'activity_log' => [
                 'name' => 'Activity Log',
@@ -913,7 +919,132 @@ final class PermissionRegistry
                     'statement_download',
                 ],
             ],
-        ];
+        ]);
+    }
+
+    /**
+     * The module dependency graph: module slug => the slugs it cannot work without
+     * (phase-02 §1 `modules.depends_on`, §3 dependency rules).
+     *
+     * **This is the single declaration site** — the same file that declares the modules, so adding
+     * a module and declaring what it needs happen in one place (CLAUDE.md §4 "Adding a module").
+     * `ModuleSeeder` projects it onto `modules.depends_on` through
+     * `ModuleService::syncDependencyGraph()`; every runtime read goes through that stored column.
+     *
+     * Every edge is implied by a contract or a recorded decision — nothing is invented, and a module
+     * whose screens merely *mention* another module is not a dependency (a dependency means "the
+     * dependent's own rows point at the other module's rows, so its screens are meaningless while
+     * that module is off"):
+     *
+     *   · software house (phase-05 / phase-06): a project belongs to a client; a milestone and a
+     *     task belong to a project; elapsed time is recorded against a task (D33).
+     *   · HR (phase-07): attendance, leave and payroll are all per employee.
+     *   · finance (phase-13): an invoice is issued to a client; a received payment belongs to a
+     *     project. The reverse is deliberately absent — `invoices.paid_amount` is a cache over the
+     *     payments (D40) and a payment may exist with no invoice at all (D43).
+     *   · collaborator spine (phase-08 … phase-12): every collaborator_* module hangs off
+     *     `collaborators`; the commission engine cannot run without an effective rule version
+     *     (CLAUDE.md §5 guard sequence); a wallet balance is a cache of the commission ledger; a
+     *     payout allocates named ledger entries through the wallet (D18).
+     *   · institute (phase-14 … phase-21): a course sits in a category; outline, materials,
+     *     inquiries, demo classes and batches are per course; an admission enrols a student on a
+     *     course (D45); a timetable rule belongs to a batch (D46); attendance and progress are per
+     *     student; a fee charge follows an admission; installments and discounts belong to a fee
+     *     charge (D49); assignments and exams are set for a batch; a result belongs to an exam; a
+     *     certificate and an ID card are issued to a student (D52).
+     *   · website (phase-03 / phase-04): a post sits in a blog category; an application answers a
+     *     job opening.
+     *
+     * @var array<string, list<string>>
+     */
+    private const DEPENDS_ON = [
+        // Software house — phase-05, phase-06.
+        'projects' => ['clients'],
+        'project_milestones' => ['projects'],
+        'tasks' => ['projects'],
+        'time_tracking' => ['tasks'],
+
+        // HR — phase-07.
+        'attendance' => ['employees'],
+        'leaves' => ['employees'],
+        'payroll' => ['employees'],
+
+        // Finance — phase-13.
+        'invoices' => ['clients'],
+        'payments' => ['projects'],
+
+        // Collaborator spine — phase-08 … phase-12.
+        'collaborator_commission_settings' => ['collaborators'],
+        'collaborator_commissions' => ['collaborators', 'collaborator_commission_settings'],
+        'collaborator_wallets' => ['collaborators', 'collaborator_commissions'],
+        'collaborator_payouts' => ['collaborators', 'collaborator_wallets'],
+        'collaborator_referrals' => ['collaborators'],
+
+        // Institute — phase-14 … phase-21.
+        'courses' => ['course_categories'],
+        'course_outline' => ['courses'],
+        'course_materials' => ['courses'],
+        'course_inquiries' => ['courses'],
+        'demo_classes' => ['courses'],
+        'admissions' => ['courses', 'students'],
+        'batches' => ['courses'],
+        'timetable' => ['batches'],
+        'student_attendance' => ['students', 'batches'],
+        'student_progress' => ['students', 'courses'],
+        'student_fees' => ['admissions'],
+        'installments' => ['student_fees'],
+        'fee_discounts' => ['student_fees'],
+        'assignments' => ['batches'],
+        'exams' => ['batches'],
+        'results' => ['exams'],
+        'certificates' => ['students', 'courses'],
+        'student_id_cards' => ['students'],
+
+        // Website — phase-03, phase-04.
+        'blog_posts' => ['blog_categories'],
+        'job_applications' => ['jobs'],
+    ];
+
+    /**
+     * Attach each module's declared `depends_on` list to its definition, keeping only edges between
+     * registered modules (a typo can never block anybody's switch).
+     *
+     * @param  array<string, array<string, mixed>>  $modules
+     * @return array<string, array<string, mixed>>
+     */
+    private static function withDependencies(array $modules): array
+    {
+        foreach ($modules as $slug => $definition) {
+            $clean = [];
+
+            foreach (self::DEPENDS_ON[$slug] ?? [] as $dependency) {
+                if ($dependency !== $slug && array_key_exists($dependency, $modules) && ! in_array($dependency, $clean, true)) {
+                    $clean[] = $dependency;
+                }
+            }
+
+            $modules[$slug]['depends_on'] = $clean;
+        }
+
+        return $modules;
+    }
+
+    /**
+     * The declared dependency graph, only for modules that declare at least one dependency.
+     *
+     * @return array<string, list<string>>
+     */
+    public static function dependencyGraph(): array
+    {
+        $graph = [];
+
+        foreach (self::modules() as $slug => $definition) {
+            if ($definition['depends_on'] !== []) {
+                $graph[$slug] = $definition['depends_on'];
+            }
+        }
+
+        return $graph;
     }
 
     /**

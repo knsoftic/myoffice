@@ -159,7 +159,10 @@ final class Sidebar
                         'icon' => 'home',
                         'route' => 'admin.dashboard',
                         'module' => 'dashboard',
-                        'permission' => 'dashboard.view_any',
+                        // Must be the ability the route itself demands (phase-02 §4:
+                        // `can:dashboard.view`), or the link would be offered to someone the
+                        // route then refuses — or hidden from someone who may open it.
+                        'permission' => 'dashboard.view',
                         'match' => 'admin.dashboard',
                     ],
                     [
@@ -207,14 +210,18 @@ final class Sidebar
                         'module' => 'login_history',
                         'permission' => 'login_history.view_logs',
                     ],
-                    // Later phases: hidden until their routes exist.
                     [
                         'label' => 'Settings',
                         'icon' => 'cog-6-tooth',
                         'route' => 'admin.settings.index',
                         'module' => 'settings',
-                        'permission' => 'settings.view_any',
+                        // view, not view_any: phase-02 §4 gates `admin.settings.index` on
+                        // `can:settings.view`, and this item must state the identical string
+                        // (same reasoning as activity_log.view_logs above). The settings screen is
+                        // one page per group rather than a list, so `view` is the read ability.
+                        'permission' => 'settings.view',
                     ],
+                    // Later phases: hidden until their routes exist.
                     [
                         'label' => 'Backups',
                         'icon' => 'server-stack',

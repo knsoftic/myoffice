@@ -214,7 +214,7 @@
             @if ($isEdit)
                 <x-ui.card title="Members" icon="users">
                     <p class="text-sm text-slate-600 dark:text-slate-300">
-                        {{ number_format((float) $memberCount) }}
+                        {{ app_number($memberCount) }}
                         {{ Str::plural('account', $memberCount) }} currently hold this role.
                     </p>
 

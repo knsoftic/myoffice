@@ -178,7 +178,7 @@ class RoleSeeder extends Seeder
             [
                 'name' => 'Admin',
                 'label' => 'Admin',
-                'description' => 'Day-to-day administration of every module except module toggles, backups and role deletion.',
+                'description' => 'Day-to-day administration of every module except module toggles, backups, role deletion and the SMTP credentials.',
                 'panel' => PanelType::Admin,
                 'level' => 5,
                 'is_system' => true,
@@ -186,6 +186,10 @@ class RoleSeeder extends Seeder
                 'permissions' => $this->everythingExcept(
                     PermissionRegistry::permissionNamesFor(['modules', 'backups']),
                     PermissionRegistry::permissionNamesFor('roles', [Ability::Delete]),
+                    // phase-02 §3 / §6 "Mail test": the mail group is Super-Admin-only. Whoever holds
+                    // the SMTP credentials can receive every password-reset mail in the system, so
+                    // Admin keeps `settings.edit` for the other twelve groups and is withheld this.
+                    PermissionRegistry::permissionNamesFor('settings', ['edit_mail']),
                 ),
             ],
             [

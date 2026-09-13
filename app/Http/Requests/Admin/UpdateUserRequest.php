@@ -11,7 +11,6 @@ use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\Rules\Password;
 
 /**
  * Update a user account.
@@ -31,6 +30,15 @@ use Illuminate\Validation\Rules\Password;
  *     which turned the role checkboxes into self-service. A `Gate` check cannot close that on its
  *     own, because `Gate::before` hands a Super Admin every ability, so the self-check is made
  *     here in plain PHP and again in `UserService`.
+ *
+ * And one field is required **conditionally**, which it previously was not (T12): `roles` is
+ * demanded only from an actor the Gate would actually let assign roles to this target. An actor
+ * holding `users.edit` but not `users.assign` is offered no role checkboxes at all — the form
+ * renders the set read-only — so a flat `required` meant their every save of somebody else's
+ * account answered "Choose at least one role" with no control on the page able to satisfy it.
+ * They could never correct a typo in a colleague's phone number. When the field is absent the
+ * existing role set is preserved: it is stripped from the payload entirely, so `UserService` never
+ * reaches its `syncRoles()` branch.
  */
 final class UpdateUserRequest extends FormRequest
 {
@@ -58,7 +66,9 @@ final class UpdateUserRequest extends FormRequest
                 Rule::unique('users', 'email')->ignore($user?->getKey()),
             ],
 
-            'password' => ['nullable', 'string', 'confirmed', Password::defaults()],
+            // Blank means "keep the current password"; anything typed faces the same policy the
+            // account owner faces on /account/password (T13).
+            'password' => StoreUserRequest::passwordRules(required: false),
 
             'phone' => ['nullable', 'string', 'max:32', 'regex:'.StoreUserRequest::PHONE_PATTERN],
             'whatsapp' => ['nullable', 'string', 'max:32', 'regex:'.StoreUserRequest::PHONE_PATTERN],
@@ -74,11 +84,14 @@ final class UpdateUserRequest extends FormRequest
 
             'branch_id' => ['nullable', 'integer', Rule::exists('branches', 'id')->whereNull('deleted_at')],
 
-            // Required for anyone else's account (an account with no role reaches no panel), and
-            // optional on your own, where the form renders the role list read-only and submits
-            // nothing. Submitting one anyway is rejected below.
+            // Required only from an actor who may actually assign roles to this target (an account
+            // with no role reaches no panel, so an assigner must name at least one). Optional on
+            // your own row, where the form renders the role list read-only, and optional for an
+            // actor without `users.assign`, who is offered no checkboxes either — demanding a
+            // field the page cannot render is a dead end, not a safeguard (T12). A role submitted
+            // anyway still faces the full rank + permission check in withValidator().
             'roles' => [
-                Rule::requiredIf(fn (): bool => ! $this->targetIsActor()),
+                Rule::requiredIf(fn (): bool => ! $this->targetIsActor() && $this->actorMayAssignRoles()),
                 'array',
                 'min:1',
             ],
@@ -220,6 +233,13 @@ final class UpdateUserRequest extends FormRequest
 
         $data['must_change_password'] = (bool) ($data['must_change_password'] ?? false);
 
+        // An actor who may not assign roles never changes the role set, whatever the payload says.
+        // Dropping the key (rather than passing the current ids back) is what "preserve the
+        // existing set" means to `UserService`: no `syncRoles()`, no audit row, no pivot write.
+        if (! $this->actorMayAssignRoles()) {
+            unset($data['roles']);
+        }
+
         // Absent means "leave the role set alone". Writing an empty array here would hand the
         // service a payload that wipes every role.
         if (array_key_exists('roles', $data)) {
@@ -243,6 +263,25 @@ final class UpdateUserRequest extends FormRequest
         $user = $this->route('user');
 
         return $user instanceof User ? $user : null;
+    }
+
+    /**
+     * May the actor assign roles to this target at all?
+     *
+     * The same `assignRoles` ability the grant itself is checked against, asked **without** a role:
+     * it answers `users.assign` plus "do you outrank this account", which is exactly the question
+     * "will this form offer role checkboxes". `UserController::edit()` hands the view the same
+     * answer, so the form and the validator cannot disagree about whether the field exists.
+     *
+     * A self-edit is excluded by the caller rather than here: you never outrank yourself, so the
+     * Gate already answers false — but `Gate::before` answers true for a Super Admin, and their own
+     * role set is still not theirs to change.
+     */
+    public function actorMayAssignRoles(): bool
+    {
+        $target = $this->target();
+
+        return $target instanceof User && Gate::allows('assignRoles', [$target]);
     }
 
     /**

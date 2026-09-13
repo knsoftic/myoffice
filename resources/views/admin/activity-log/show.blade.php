@@ -197,11 +197,26 @@
                         <dt class="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">When</dt>
                         <dd class="mt-1.5 text-sm text-slate-900 dark:text-white">
                             @if ($entry->created_at)
+                                {{--
+                                    An audit entry keeps its seconds. The time part is the configured
+                                    localization.time_format with seconds added after the minutes, so a
+                                    12-hour setting stays 12-hour ('h:i A' -> 'h:i:s A'); app_date() and
+                                    app_time() do the timezone conversion (D61: stored UTC, shown in the
+                                    display timezone). toIso8601String() is the machine-readable
+                                    datetime attribute only, and the zone named underneath is the one the
+                                    helpers actually rendered in.
+                                --}}
+                                @php
+                                    $whenTimeFormat = \App\Support\Format::timeFormat();
+                                    $whenTimeFormat = str_contains($whenTimeFormat, 's')
+                                        ? $whenTimeFormat
+                                        : str_replace('i', 'i:s', $whenTimeFormat);
+                                @endphp
                                 <time datetime="{{ $entry->created_at->toIso8601String() }}" title="{{ $entry->created_at->diffForHumans() }}">
-                                    {{ $entry->created_at->timezone($timezone)->format('d M Y · H:i:s') }}
+                                    {{ app_date($entry->created_at) }} · {{ app_time($entry->created_at, $whenTimeFormat) }}
                                 </time>
                                 <span class="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
-                                    {{ $entry->created_at->diffForHumans() }} · {{ $timezone }}
+                                    {{ $entry->created_at->diffForHumans() }} · {{ \App\Support\Format::displayTimezone() }}
                                 </span>
                             @else
                                 —

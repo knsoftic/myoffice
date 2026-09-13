@@ -10,8 +10,10 @@
         @section('title', 'Sign in')
         @section('content') … @endsection
 
-    Settings read: company.name, company.tagline, company.features (JSON array or one per line),
-    company.logo_path.
+    Settings read: company.name, company.tagline, company.features (a JSON list, or one entry per
+    line), and the logo from branding.logo_dark / branding.logo_light. Every one of them is
+    declared in App\Support\SettingsRegistry, so every one of them is editable on the settings
+    screen — a view may never read a key the registry does not declare.
 --}}
 
 @php
@@ -40,7 +42,9 @@
         ->filter()
         ->take(4);
 
-    $authLogoPath = setting('company.logo_path');
+    // The brand panel is the brand gradient in both themes, so the dark-background variant is
+    // the right one here; the light logo is the fallback when only one has been uploaded.
+    $authLogoPath = setting('branding.logo_dark') ?: setting('branding.logo_light');
     $authLogoUrl = filled($authLogoPath)
         ? (str_starts_with((string) $authLogoPath, 'http')
             ? $authLogoPath

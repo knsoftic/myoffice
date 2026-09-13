@@ -17,6 +17,12 @@ use Illuminate\Support\Facades\Gate;
  * touch accounts that are strictly weaker than your own best role level, and you can never delete
  * yourself. Viewing and editing your *own* row is always allowed once you hold the permission.
  *
+ * The rank rule is deliberately **strict** — `>`, not `>=` — so two accounts holding the same role
+ * cannot manage each other (T19). Two Admins are peers, and a peer who can suspend, reset the
+ * password of, or delete their equal is a lateral takeover with nobody senior involved. The cost is
+ * that a peer's row lists with nothing to do on it; the users index now says so out loud instead of
+ * opening an empty menu.
+ *
  * Note: `Gate::before` grants Super Admin everything, so these rules shape what *other* roles can
  * do; the self-deletion guard must therefore be repeated in the controller/service that deletes a
  * user, because a Super Admin never reaches this policy.
@@ -119,8 +125,9 @@ final class UserPolicy
     }
 
     /**
-     * Attach or detach roles. A role may only be granted when the actor outranks both the target
-     * user and the role itself, so nobody can hand out power they do not have.
+     * Attach or detach roles. A role may only be granted when the actor outranks the target user,
+     * outranks the role itself, **and** already holds every permission the role carries — so
+     * nobody can hand out power they do not have.
      *
      * This is the single enforcement point for a role grant — `StoreUserRequest` and
      * `UpdateUserRequest` both ask the Gate for it (through `ValidatesRoleAssignment`), and
@@ -133,8 +140,15 @@ final class UserPolicy
      *     still waves a Super Admin through, which is why `UpdateUserRequest` and `UserService`
      *     repeat the self-check outside the Gate.)
      *
+     * The third rule — the permission bound — is the T11 fix. `roles.level` is a number somebody
+     * types into a form; on its own it cannot stop a custom role that sits below the actor from
+     * carrying an ability the actor is deliberately denied. With the bound in place, the abilities
+     * an actor can put into circulation are exactly the abilities they already hold, whatever
+     * level the role is given. See `ChecksRoleHierarchy::holdsEveryPermissionOf()`.
+     *
      * A not-yet-created account (`$model->exists === false`) has no roles and therefore no rank to
-     * outrank; `users.create` plus the role's own level is the whole rule there.
+     * outrank; `users.create`, the role's own level and the permission bound are the whole rule
+     * there.
      */
     public function assignRoles(User $user, User $model, ?Role $role = null): bool
     {
@@ -146,10 +160,22 @@ final class UserPolicy
             return false;
         }
 
-        // The role half of the rule already has a home: `roles.assign` plus the role's level, in
+        // "May this actor assign roles to this target at all?" — asked with no role by the edit
+        // screen and by UpdateUserRequest, which uses the answer to decide whether the `roles`
+        // field is required (T12).
+        if ($role === null) {
+            return true;
+        }
+
+        // Role half one already has a home: `roles.assign` plus the role's level, in
         // RolePolicy::assign(). Evaluated for *this* actor, not for whoever is signed in, so the
         // policy stays usable outside a request.
-        return $role === null || Gate::forUser($user)->allows('assign', $role);
+        if (! Gate::forUser($user)->allows('assign', $role)) {
+            return false;
+        }
+
+        // Role half two: the permissions the role would put in the target's hands.
+        return $this->holdsEveryPermissionOf($user, $role);
     }
 
     public function export(User $user): bool

@@ -31,7 +31,10 @@ use Throwable;
  * according to the `type` column.
  *
  * Install safety: reads degrade to defaults when the `settings` table (or the cache store) does
- * not exist yet, so boot-time `setting()` calls cannot break `artisan`.
+ * not exist yet, so boot-time `setting()` calls cannot break `artisan`. What a key *is* no longer
+ * depends on whether it has been seeded either: `SettingsRegistry` declares every group and key in
+ * code, so `get('mail', 'host')` is understood as group + key on a completely empty table instead
+ * of handing back the literal string 'host' (phase-02 §2, carryover T14).
  */
 final class SettingsRepository
 {
@@ -58,13 +61,30 @@ final class SettingsRepository
      *   get('company.name')                 get('company', 'name')
      *   get('company.name', 'My Office')    get('company', 'name', 'My Office')
      *
-     * Three arguments are always (group, key, default). Two are read as (group, key) when the
-     * first names no dot and the second is a string naming a key inside an existing settings
-     * group — otherwise as (dotted key, default), which is what every existing caller and the
-     * `setting()` helper pass. The point of the rule is that the contract's
-     * `get('mail', 'host')` can never come back as the literal string 'host': either the group
-     * exists and the value (or null) is returned, or there are no settings loaded at all and
-     * every read returns its default anyway.
+     * Three arguments are always (group, key, default) — the contract's own signature, and the
+     * shape to reach for whenever a read could be read two ways. With two arguments the pair is
+     * resolved by this ladder, first match wins:
+     *
+     *   1. the first argument carries a dot                  -> (dotted key, default)
+     *   2. the second argument is not a non-empty string      -> (dotted key, default)
+     *   3. `$a.$b` is a known setting (a stored row OR a      -> (group, key)
+     *      `SettingsRegistry` field)
+     *   4. `$a` is itself a known single-segment key           -> (key, default)
+     *   5. `$a` is a known group                              -> (group, key)
+     *   6. otherwise                                          -> (key, default)
+     *
+     * Step 3 is what makes `get('mail', 'host')` mean the SMTP host rather than the literal string
+     * 'host', now even before the row is seeded — the registry knows the key exists. Step 4 is
+     * carryover **T14**: a real single-segment key always beats a group that happens to share its
+     * name, so storing a `localization` key in the default group no longer makes
+     * `get('localization', 'en')` unreadable. Step 5 keeps an unknown key inside a real group
+     * reading as "no value" instead of echoing its own name back as data — a key that does not
+     * exist must never look like a value, because that value would go on to be a currency code, a
+     * mail host or a rate.
+     *
+     * The one residual ambiguity is a dotless key whose name collides with a group name and which
+     * is not stored: `get('localization', 'en')` reads as group + key and returns null. Spell the
+     * group out — `get('general.localization', 'en')` — and the reading is never in doubt.
      *
      * @param  mixed  $keyOrDefault  the key, when the first argument is a group; the default
      *                               otherwise
@@ -87,7 +107,14 @@ final class SettingsRepository
         }
 
         if ($value === null) {
-            return $default;
+            // A stored boolean row whose value is null reads as **false**, never as the caller's
+            // default. A switch has two states: a row that exists and holds nothing is "off", and
+            // handing back `$default` instead would make the answer depend on what each caller
+            // happened to pass — so `setting('appearance.show_powered_by', true)` would report a
+            // switch an administrator turned off as still on. `SettingsService::serialise()`
+            // makes sure this row cannot be written null in the first place; this is the read-side
+            // half of the same rule, for a row an older release or a raw SQL edit left null.
+            return $row['type'] === 'boolean' ? false : $default;
         }
 
         return $this->cast($value, $row['type']);
@@ -387,12 +414,7 @@ final class SettingsRepository
 
     /**
      * Is `get($a, $b)` asking for group `$a`, key `$b` rather than for key `$a` with `$b` as the
-     * default?
-     *
-     * Only when `$a` carries no dot of its own (a group name never does; a dotted key always
-     * does) and `$a` is a group that actually holds settings. That keeps
-     * `setting('company.support_email', setting('company.email'))` and
-     * `setting('theme', 'dark')` reading exactly as they do today.
+     * default? The ladder is documented on get(); this is steps 1 to 5 of it.
      */
     private function readsAsGroupAndKey(string $first, mixed $second): bool
     {
@@ -402,11 +424,46 @@ final class SettingsRepository
 
         $first = trim($first);
 
+        // A group name never carries a dot; a dotted key always does.
         if ($first === '' || str_contains($first, '.')) {
             return false;
         }
 
-        return $this->hasGroup($first);
+        // The strongest signal there is: the pair names a setting that exists.
+        if ($this->knowsKey($first.'.'.$second)) {
+            return true;
+        }
+
+        // T14: a real single-segment key beats a group that happens to share its name, so the
+        // second argument is that key's default rather than a key of the group.
+        if ($this->knowsKey(self::DEFAULT_GROUP.'.'.$first)) {
+            return false;
+        }
+
+        return $this->knowsGroup($first);
+    }
+
+    /**
+     * Is this dotted key a setting the system knows about — stored in the table, or declared in
+     * `SettingsRegistry` and simply not seeded yet?
+     */
+    private function knowsKey(string $key): bool
+    {
+        $key = $this->normaliseKey($key);
+
+        if (array_key_exists($key, $this->items())) {
+            return true;
+        }
+
+        return SettingsRegistry::has($key);
+    }
+
+    /**
+     * Is this a group the system knows about — stored, or declared in the registry?
+     */
+    private function knowsGroup(string $group): bool
+    {
+        return $this->hasGroup($group) || SettingsRegistry::hasGroup($group);
     }
 
     /**
@@ -450,15 +507,22 @@ final class SettingsRepository
 
     /**
      * Serialise a PHP value for the `value` column.
+     *
+     * A boolean is decided before the null check, for the reason spelled out on `get()`: a switch
+     * is on or off, so a null written onto a boolean row stores '0' rather than a third state that
+     * would read back as whatever default the next caller passes.
      */
     private function serialise(mixed $value, string $type): ?string
     {
+        if ($type === 'boolean') {
+            return $value ? '1' : '0';
+        }
+
         if ($value === null) {
             return null;
         }
 
         return match ($type) {
-            'boolean' => $value ? '1' : '0',
             'integer' => (string) (int) $value,
             'json' => is_string($value)
                 ? $value

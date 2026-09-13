@@ -21,6 +21,61 @@
     Optional, from the controller:
         $breadcrumbs  overrides the derived breadcrumb bar
         $homeUrl      where the brand links to
+
+    ---------------------------------------------------------------------------------------------
+    Conditional rendering inside this shell: @module, @unlessmodule, @canany
+    ---------------------------------------------------------------------------------------------
+
+    `@module` is registered in AppServiceProvider::registerBladeDirectives() as
+    `Blade::if('module', …)` over `App\Support\Modules::enabled($slug)`, which gives four
+    directives from one registration:
+
+        @module('notifications')
+            <x-ui.icon-button icon="bell" label="Notifications" />   <-- module is on
+        @elsemodule
+            …                                                        <-- module is off
+        @endmodule
+
+        @unlessmodule('collaborators')
+            <p>Referral tracking is switched off for this installation.</p>
+        @endunlessmodule
+
+    `$slug` is a `modules.slug` value (`notifications`, `projects`, `student_fees`), never a
+    permission name and never a route name. The lookup is a cached in-memory map
+    (`modules.enabled.map`), so it costs nothing to use per row. A real use of it is the
+    notification bell in `layouts/partials/topbar`.
+
+    What it is and is not for
+    -------------------------
+    A module switch is **presentation**, not authorization. `Gate::before` already denies every
+    ability belonging to a disabled non-core module — for everyone, Super Admin included — so a
+    route behind `can:` is closed whether or not the view checks. Wrap markup in `@module` to stop
+    offering a door that is bolted (a nav item, a quick action, a dashboard card, a column of
+    later-phase data); never rely on it as the only guard, and never use it to hide something a
+    permission should be hiding.
+
+    Permissions in a view use Laravel's own gate directives, and permission names are always
+    `{module}.{ability}`:
+
+        @can('users.create')            … @endcan
+        @canany(['users.edit', 'users.change_status']) … @endcanany   <-- any one of them
+        @canany(['users.edit', 'users.delete'])
+            <x-ui.dropdown label="Row actions"> … </x-ui.dropdown>
+        @elsecanany
+            <span class="text-slate-400">No actions</span>
+        @endcanany
+
+    Use `@canany` rather than a chain of `@can`s whenever a container — a dropdown, a card, a
+    toolbar, a whole table column — should disappear when the user holds none of the abilities
+    inside it: an empty menu that opens onto nothing reads as a bug (carryover T19).
+
+    The two compose, in this order, when a block is both module-gated and permission-gated:
+
+        @module('collaborator_payouts')
+            @canany(['collaborator_payouts.view_any', 'collaborator_payouts.approve'])
+                …
+            @endcanany
+        @endmodule
 --}}
 
 <!DOCTYPE html>

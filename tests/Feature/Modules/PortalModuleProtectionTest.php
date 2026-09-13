@@ -103,9 +103,11 @@ final class PortalModuleProtectionTest extends TestCase
         $superAdmin = $this->createSuperAdmin();
         $module = Module::query()->where('slug', $slug)->firstOrFail();
 
+        // D63: a disable must carry a reason, so one is given — the refusal under test is the
+        // core-module rule, not the missing-reason rule.
         $this->actingAs($superAdmin)
             ->from('/admin/modules')
-            ->post('/admin/modules/'.$module->getKey().'/toggle', ['enabled' => false])
+            ->post('/admin/modules/'.$module->getKey().'/toggle', ['enabled' => false, 'reason' => 'Closing the whole panel'])
             ->assertRedirect('/admin/modules')
             ->assertSessionHas('toast.type', 'error');
 

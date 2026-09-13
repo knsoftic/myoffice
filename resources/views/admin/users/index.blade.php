@@ -9,6 +9,10 @@
     actions for accounts weaker than your own best role), and again on the server. Hiding a
     button is not security — it is just tidiness.
 
+    The rank rule is strict, so a row can legitimately have **no** actions at all: a peer (same
+    role level) and anyone stronger than you. That used to render as a row-actions button opening
+    an empty menu, which reads as a bug. Such a row now shows a lock and says why instead (T19).
+
     "Change status" and "Reset password" share one dialog each rather than rendering one per
     row: the clicked row writes its target into the page-level Alpine scope and the dialog
     binds its form action to it.
@@ -23,6 +27,17 @@
     // Permission strings are always {module}.{ability} — never a typed literal.
     $canChangeStatus = (bool) $actor?->can('users.'.Ability::ChangeStatus->value);
     $canResetPassword = (bool) $actor?->can('users.'.Ability::Edit->value);
+
+    /*
+     * Does the actor hold *any* per-row ability? `users.view_any` alone buys this list and nothing
+     * on it, and that is a permission story, not a ranking story — so a row with no actions must not
+     * be labelled "outranks yours" unless rank really is the reason (T19). Asked once per page: the
+     * abilities are the same for every row, only the rank changes.
+     */
+    $canActOnRows = $canChangeStatus
+        || $canResetPassword
+        || (bool) $actor?->can('users.'.Ability::View->value)
+        || (bool) $actor?->can('users.'.Ability::Delete->value);
 @endphp
 
 @section('header')
@@ -30,7 +45,7 @@
         title="Users"
         subtitle="Everyone with an account, the roles they hold and the state of their access."
         icon="users"
-        :badge="number_format((float) $counts['total']).' accounts'"
+        :badge="app_number($counts['total']).' accounts'"
         badge-color="slate"
     >
         @can('create', User::class)
@@ -51,7 +66,7 @@
         <div class="card-grid">
             <x-ui.stat-card
                 label="All accounts"
-                :value="number_format((float) $counts['total'])"
+                :value="app_number($counts['total'])"
                 icon="users"
                 color="brand"
                 :href="route('admin.users.index')"
@@ -60,7 +75,7 @@
             @foreach (App\Enums\UserStatus::cases() as $case)
                 <x-ui.stat-card
                     :label="$case->label()"
-                    :value="number_format((float) ($counts[$case->value] ?? 0))"
+                    :value="app_number($counts[$case->value] ?? 0)"
                     :icon="match ($case->value) {
                         'active' => 'check-circle',
                         'suspended' => 'lock-closed',
@@ -131,6 +146,44 @@
             </x-slot:head>
 
             @foreach ($users as $user)
+                @php
+                    /*
+                     * Every row action asked once, so the cell can tell "you may do nothing here"
+                     * from "here is a menu". `$actor->can()` is the same question `@can` asks.
+                     * The four guarded-by-!$isSelf actions are the ones UserService refuses on your
+                     * own account whatever the policy says, because `Gate::before` waves a Super
+                     * Admin past the policy.
+                     */
+                    $isSelf = $user->is($actor);
+
+                    $rowActions = [
+                        'view' => (bool) $actor?->can('view', $user),
+                        'update' => (bool) $actor?->can('update', $user),
+                        'changeStatus' => ! $isSelf && (bool) $actor?->can('changeStatus', $user),
+                        'resetPassword' => ! $isSelf && (bool) $actor?->can('resetPassword', $user),
+                        'delete' => ! $isSelf && (bool) $actor?->can('delete', $user),
+                    ];
+
+                    $hasRowActions = in_array(true, $rowActions, true);
+
+                    // The dropdown holds three of the five actions; Edit and Delete sit beside it.
+                    // Rendering it for a row whose only action is Edit would re-create the empty
+                    // menu in a smaller way.
+                    $hasMenuActions = $rowActions['view'] || $rowActions['changeStatus'] || $rowActions['resetPassword'];
+
+                    /*
+                     * actions   — there is something to do
+                     * outranked — the abilities are held, so rank is the only thing left refusing
+                     * none      — no per-row ability at all, or it is your own row (where the
+                     *             self-targeting actions are refused by design, not by rank)
+                     */
+                    $rowState = match (true) {
+                        $hasRowActions => 'actions',
+                        $isSelf, ! $canActOnRows => 'none',
+                        default => 'outranked',
+                    };
+                @endphp
+
                 <tr>
                     {{-- Identity --}}
                     <td class="px-4 py-3">
@@ -227,9 +280,11 @@
                     {{-- Last login --}}
                     <td class="px-4 py-3">
                         @if ($user->last_login_at)
-                            <p class="text-xs text-slate-700 dark:text-slate-200">{{ $user->last_login_at->diffForHumans() }}</p>
+                            <p class="text-xs text-slate-700 dark:text-slate-200">
+                                <time datetime="{{ $user->last_login_at->toIso8601String() }}" title="{{ app_datetime($user->last_login_at) }}">{{ $user->last_login_at->diffForHumans() }}</time>
+                            </p>
                             <p class="text-2xs text-slate-400 tabular-nums dark:text-slate-500">
-                                {{ $user->last_login_at->format('d M Y H:i') }}
+                                {{ app_datetime($user->last_login_at) }}
                                 @if (filled($user->last_login_ip))
                                     · {{ $user->last_login_ip }}
                                 @endif
@@ -242,23 +297,39 @@
                     {{-- Actions --}}
                     <td class="px-4 py-3">
                         <div class="flex items-center justify-end gap-1">
-                            @can('update', $user)
+                            @if ($rowState === 'outranked')
+                                {{--
+                                    Nothing on this row is yours to do, so say that rather than
+                                    offering a button that opens an empty menu. The rule is
+                                    `roles.level` and it is strict on purpose — a peer is as far out
+                                    of reach as a superior — which is why the wording covers both.
+                                --}}
+                                <span
+                                    class="inline-flex items-center gap-1.5 whitespace-nowrap text-xs text-slate-400 dark:text-slate-500"
+                                    title="Accounts are ranked by their strongest role, and the rule is strict: you can only act on an account that ranks below yours, so an equal rank is out of reach too. A higher-level administrator can manage this one."
+                                >
+                                    <x-ui.icon name="lock-closed" class="h-4 w-4" />
+                                    <span>This account outranks yours</span>
+                                </span>
+                            @elseif ($rowState === 'none')
+                                <span class="text-xs text-slate-400 dark:text-slate-600">—</span>
+                            @else
+                            @if ($rowActions['update'])
                                 <x-ui.icon-button
                                     icon="pencil"
                                     label="Edit {{ $user->name }}"
                                     size="sm"
                                     :href="route('admin.users.edit', $user)"
                                 />
-                            @endcan
+                            @endif
 
-                            @php $isSelf = $user->is($actor); @endphp
-
+                            @if ($hasMenuActions)
                             <x-ui.dropdown label="Actions for {{ $user->name }}" width="w-60">
-                                @can('view', $user)
+                                @if ($rowActions['view'])
                                     <x-ui.dropdown-item icon="eye" :href="route('admin.users.show', $user)">
                                         View profile
                                     </x-ui.dropdown-item>
-                                @endcan
+                                @endif
 
                                 {{--
                                     Hidden on your own row. `Gate::before` grants Super Admin every
@@ -267,8 +338,7 @@
                                     closes your own sessions.
                                 --}}
 
-                                @if (! $isSelf)
-                                @can('changeStatus', $user)
+                                @if ($rowActions['changeStatus'])
                                     {{--
                                         The row's data travels through data-* attributes rather than
                                         inline Blade inside the Alpine expression: it keeps the
@@ -284,9 +354,9 @@
                                     >
                                         Change status
                                     </x-ui.dropdown-item>
-                                @endcan
+                                @endif
 
-                                @can('resetPassword', $user)
+                                @if ($rowActions['resetPassword'])
                                     <x-ui.dropdown-item
                                         icon="key"
                                         data-url="{{ route('admin.users.reset-password', $user) }}"
@@ -296,12 +366,11 @@
                                     >
                                         Reset password
                                     </x-ui.dropdown-item>
-                                @endcan
                                 @endif
                             </x-ui.dropdown>
+                            @endif
 
-                            @if (! $isSelf)
-                            @can('delete', $user)
+                            @if ($rowActions['delete'])
                                 <x-ui.confirm
                                     :action="route('admin.users.destroy', $user)"
                                     method="DELETE"
@@ -318,7 +387,7 @@
                                         />
                                     </x-slot:trigger>
                                 </x-ui.confirm>
-                            @endcan
+                            @endif
                             @endif
                         </div>
                     </td>

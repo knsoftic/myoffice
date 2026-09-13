@@ -22,6 +22,11 @@ use Illuminate\Support\Str;
 | The five panel route files are loaded by bootstrap/app.php (withRouting
 | then:), each declaring its own prefix, name prefix and panel middleware.
 |
+| Every PUBLIC route carries `public_site` (phase-02 §6): the two `maintenance`
+| settings close the website with a 503 holding page and can never touch a
+| panel, because the gate is attached here rather than sniffing the URL.
+| Phase 3 applies the same alias to its own public group.
+|
 */
 
 Route::get('/', function (): Response {
@@ -180,6 +185,6 @@ Route::get('/', function (): Response {
         HTML;
 
     return response($html);
-})->name('home');
+})->middleware('public_site')->name('home');
 
 require __DIR__.'/auth.php';

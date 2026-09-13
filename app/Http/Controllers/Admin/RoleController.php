@@ -130,6 +130,12 @@ final class RoleController extends Controller
         /** @var Collection<int, User> $members */
         $members = $role->users()
             ->select('users.id', 'users.name', 'users.email', 'users.status', 'users.avatar_path')
+            // The visibility filter below asks `UserPolicy::view()` about every row, and the rank
+            // rule inside it reads `$member->roles`. Without the eager load that is one query per
+            // listed member — twenty-five of them on a full page (T15).
+            ->with(['roles' => static fn ($query) => $query
+                ->select('roles.id', 'roles.name', 'roles.label', 'roles.panel', 'roles.level')
+                ->orderBy('roles.level')])
             ->orderBy('users.name')
             ->limit(25)
             ->get();

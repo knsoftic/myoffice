@@ -21,10 +21,15 @@
         roles (your own row)    nobody assigns themselves a role
 
     A missing input is only a courtesy; the refusal itself lives on the server.
+
+    When $roles is empty on an edit screen the account's current roles are listed read-only and the
+    form says they are kept: `roles` is then not required and not submitted, so an actor without
+    users.assign can still save the rest of the account (T12).
 --}}
 
 @php
     use App\Enums\UserStatus;
+    use App\Services\Auth\PasswordPolicy;
 
     $isEdit = $user->exists;
     $isSelf = $isEdit && $user->is(auth()->user());
@@ -156,6 +161,11 @@
                         </p>
                     @else
                         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                            {{--
+                                The hint comes from PasswordPolicy, the same class /account/password
+                                validates against, so the form can never advertise a weaker rule
+                                than the server enforces (T13).
+                            --}}
                             <x-ui.form.input
                                 name="password"
                                 type="password"
@@ -163,6 +173,7 @@
                                 :required="! $isEdit"
                                 :optional="$isEdit"
                                 autocomplete="new-password"
+                                :help="PasswordPolicy::hint()"
                             />
 
                             <x-ui.form.input
@@ -214,11 +225,35 @@
                             administrator who outranks you.
                         </p>
                     </div>
+                @elseif ($roles->isEmpty() && $isEdit)
+                    {{--
+                        Nothing is grantable here, so the set is shown rather than offered — and the
+                        form says plainly that saving keeps it. `roles` is not required in this case,
+                        which is what makes the rest of the account editable at all (T12).
+                    --}}
+                    <div class="p-4 sm:p-5">
+                        <div class="mb-3 flex flex-wrap items-center gap-1.5">
+                            @forelse ($user->roles as $role)
+                                <x-ui.badge :color="$role->panelType()->color()" size="sm" icon="shield-check">
+                                    {{ $role->displayName() }}
+                                </x-ui.badge>
+                            @empty
+                                <span class="text-xs text-slate-500 dark:text-slate-400">No roles assigned.</span>
+                            @endforelse
+                        </div>
+
+                        <p class="text-xs text-slate-500 dark:text-slate-400">
+                            You cannot change this account's roles: a role you hand out has to be weaker than
+                            your own and may not carry a permission you do not hold yourself. Saving this form
+                            leaves the roles above exactly as they are — ask a higher-level administrator to
+                            change them.
+                        </p>
+                    </div>
                 @elseif ($roles->isEmpty())
                     <x-ui.empty-state
                         icon="shield-check"
                         title="No roles you can grant"
-                        message="You can only hand out roles weaker than your own, to an account weaker than your own. Ask a higher-level administrator to assign this account."
+                        message="You can only hand out roles weaker than your own, and never one carrying a permission you do not hold yourself. Ask a higher-level administrator to create this account."
                         :compact="true"
                     />
                 @else
@@ -376,7 +411,7 @@
                         <div class="flex items-baseline justify-between gap-3">
                             <dt class="text-slate-500 dark:text-slate-400">Created</dt>
                             <dd class="text-right text-slate-700 dark:text-slate-200">
-                                {{ $user->created_at?->format('d M Y') ?? '—' }}
+                                {{ $user->created_at ? app_date($user->created_at) : '—' }}
                             </dd>
                         </div>
 

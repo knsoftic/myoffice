@@ -187,7 +187,7 @@
                         <div class="flex items-baseline justify-between gap-3">
                             <dt class="text-slate-500 dark:text-slate-400">Created</dt>
                             <dd class="text-right text-slate-700 dark:text-slate-200">
-                                {{ $user->created_at?->format('d M Y') ?? '—' }}
+                                {{ $user->created_at ? app_date($user->created_at) : '—' }}
                                 @if ($user->creator)
                                     <span class="block text-2xs text-slate-400 dark:text-slate-500">by {{ $user->creator->name }}</span>
                                 @endif
@@ -401,7 +401,7 @@
                             <tr>
                                 <td class="px-4 py-2.5">
                                     <p class="text-xs text-slate-700 dark:text-slate-200">
-                                        {{ ($login->logged_in_at ?? $login->created_at)?->format('d M Y H:i') ?? '—' }}
+                                        {{ ($login->logged_in_at ?? $login->created_at) ? app_datetime($login->logged_in_at ?? $login->created_at) : '—' }}
                                     </p>
                                     <p class="text-2xs text-slate-400 dark:text-slate-500">
                                         {{ ($login->logged_in_at ?? $login->created_at)?->diffForHumans() }}
@@ -479,7 +479,7 @@
                                         <p class="text-sm text-slate-800 dark:text-slate-100">{{ $entry->description }}</p>
 
                                         <p class="mt-0.5 text-2xs text-slate-500 dark:text-slate-400">
-                                            {{ $entry->created_at?->format('d M Y H:i') }}
+                                            {{ app_datetime($entry->created_at) }}
                                             · by {{ $entry->causer?->name ?? 'system' }}
                                             @if (filled($entry->ip_address))
                                                 · {{ $entry->ip_address }}

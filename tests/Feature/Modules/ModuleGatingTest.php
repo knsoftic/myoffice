@@ -265,9 +265,11 @@ final class ModuleGatingTest extends TestCase
         $superAdmin = $this->createSuperAdmin();
         $module = Module::query()->where('slug', $slug)->firstOrFail();
 
+        // D63: a disable must carry a reason, so one is given — the refusal under test is the
+        // core-module rule, not the missing-reason rule.
         $this->actingAs($superAdmin)
             ->from('/admin/modules')
-            ->post('/admin/modules/'.$module->getKey().'/toggle', ['enabled' => false])
+            ->post('/admin/modules/'.$module->getKey().'/toggle', ['enabled' => false, 'reason' => 'Trying to switch a core module off'])
             ->assertRedirect('/admin/modules')
             ->assertSessionHas('toast.type', 'error')
             ->assertSessionHas('toast.message', sprintf('"%s" is a core module and can never be disabled.', $module->name));

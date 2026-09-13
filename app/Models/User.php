@@ -9,6 +9,7 @@ use App\Enums\ThemePreference;
 use App\Enums\UserStatus;
 use App\Models\Concerns\Blameable;
 use App\Models\Concerns\LogsActivityWithContext;
+use App\Support\Format;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -18,6 +19,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
@@ -48,6 +50,7 @@ use Throwable;
  * @property int|null $branch_id
  * @property int|null $created_by
  * @property int|null $updated_by
+ * @property array<string, mixed>|null $preferences per-user UI state — read it through preference()
  * @property-read string $avatar_url
  * @property-read \Illuminate\Database\Eloquent\Collection<int, Role> $roles
  */
@@ -68,6 +71,16 @@ class User extends Authenticatable
      * Declared once here so nothing else has to spell it out.
      */
     public const SUPER_ADMIN_ROLE = 'Super Admin';
+
+    /**
+     * Resolved `avatar_url`, memoised for the life of this instance so a 25-row users index does
+     * one `Storage::exists()` per user instead of one per read (tech debt T17). The key holds
+     * every attribute the value is derived from, so changing the path, name or email on the same
+     * instance still recomputes it.
+     */
+    private ?string $avatarUrlCache = null;
+
+    private ?string $avatarUrlCacheKey = null;
 
     /**
      * Mass-assignable attributes. Deliberately an explicit whitelist: `created_by`,
@@ -118,6 +131,7 @@ class User extends Authenticatable
             'status' => UserStatus::class,
             'theme' => ThemePreference::class,
             'must_change_password' => 'boolean',
+            'preferences' => 'array',
         ];
     }
 
@@ -159,32 +173,25 @@ class User extends Authenticatable
      * Avatar to render, always a usable src: the uploaded file on the `public` disk, or a
      * generated initials avatar (inline SVG data URI — no external service, works offline).
      *
+     * Memoised per instance (T17): resolving an uploaded path costs a `Storage::exists()` stat,
+     * and a list view reads this attribute several times per row (table cell, row dropdown,
+     * tooltip). The value and its inputs are unchanged — only the repeat stats are gone.
+     *
      * @return Attribute<string, never>
      */
     protected function avatarUrl(): Attribute
     {
         return Attribute::get(function (): string {
             $path = trim((string) $this->avatar_path);
+            $key = $path."\0".trim((string) $this->name)."\0".trim((string) $this->email);
 
-            if ($path === '') {
-                return $this->initialsAvatar();
+            if ($this->avatarUrlCache !== null && $this->avatarUrlCacheKey === $key) {
+                return $this->avatarUrlCache;
             }
 
-            if (Str::startsWith($path, ['http://', 'https://', '//', 'data:', '/'])) {
-                return $path;
-            }
+            $this->avatarUrlCacheKey = $key;
 
-            try {
-                $disk = Storage::disk('public');
-
-                if ($disk->exists($path)) {
-                    return $disk->url($path);
-                }
-            } catch (Throwable) {
-                // Disk not configured / unreachable: fall through to the generated avatar.
-            }
-
-            return $this->initialsAvatar();
+            return $this->avatarUrlCache = $this->resolveAvatarUrl($path);
         });
     }
 
@@ -212,13 +219,17 @@ class User extends Authenticatable
     }
 
     /**
-     * Timezone to render dates in; falls back to the application timezone.
+     * Timezone to render dates in for this user: their own timezone when set, otherwise the
+     * business display timezone (`localization.timezone`, via `Format::timezone()`).
+     *
+     * Never `config('app.timezone')`: that is the storage timezone, UTC, and says nothing about how
+     * a date should be shown (D61).
      */
     public function effectiveTimezone(): string
     {
         $timezone = trim((string) $this->timezone);
 
-        return $timezone !== '' ? $timezone : (string) config('app.timezone', 'UTC');
+        return $timezone !== '' ? $timezone : Format::timezone();
     }
 
     /**
@@ -229,6 +240,110 @@ class User extends Authenticatable
         $locale = trim((string) $this->locale);
 
         return $locale !== '' ? $locale : (string) config('app.locale', 'en');
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Preferences (phase-02 §1)
+    |--------------------------------------------------------------------------
+    |
+    | `users.preferences` is per-user interface state — dashboard widget order and hidden
+    | widgets, table column choices, sidebar collapsed. The column is read and written only
+    | through the four helpers below: no view ever touches it raw, and it is deliberately absent
+    | from $fillable so a request payload can never write an arbitrary preference tree.
+    |
+    | It is interface state, not an audit event: because it is not mass-assignable it is also
+    | outside the logged attribute set (LogsActivityWithContext defaults to $fillable), so
+    | dragging a widget does not write an activity row.
+    */
+
+    /**
+     * One preference by dot path, with a default:
+     *
+     *   $user->preference('dashboard.hidden_widgets', []);
+     *   $user->preference('tables.users.columns', ['name', 'email']);
+     */
+    public function preference(string $key, mixed $default = null): mixed
+    {
+        $key = trim($key);
+
+        if ($key === '') {
+            return $default;
+        }
+
+        $preferences = $this->preferences;
+
+        if (! is_array($preferences)) {
+            return $default;
+        }
+
+        return data_get($preferences, $key, $default);
+    }
+
+    /**
+     * Write one preference by dot path and persist it — one save, one UPDATE.
+     */
+    public function setPreference(string $key, mixed $value): static
+    {
+        return $this->setPreferences([$key => $value]);
+    }
+
+    /**
+     * Write several preferences (dot paths) in a single save, so "reorder and hide" is one
+     * round trip rather than two.
+     *
+     * @param  array<string, mixed>  $values
+     */
+    public function setPreferences(array $values): static
+    {
+        $preferences = is_array($this->preferences) ? $this->preferences : [];
+        $changed = false;
+
+        foreach ($values as $key => $value) {
+            $key = trim((string) $key);
+
+            if ($key === '') {
+                continue;
+            }
+
+            data_set($preferences, $key, $value);
+            $changed = true;
+        }
+
+        if (! $changed) {
+            return $this;
+        }
+
+        $this->preferences = $preferences;
+        $this->save();
+
+        return $this;
+    }
+
+    /**
+     * Drop one preference by dot path and persist — the "reset to default" path, which must not
+     * leave a null behind for preference()'s default to fight with.
+     */
+    public function forgetPreference(string $key): static
+    {
+        $key = trim($key);
+
+        if ($key === '') {
+            return $this;
+        }
+
+        $preferences = $this->preferences;
+
+        if (! is_array($preferences) || ! Arr::has($preferences, $key)) {
+            return $this;
+        }
+
+        Arr::forget($preferences, $key);
+
+        $this->preferences = $preferences === [] ? null : $preferences;
+        $this->save();
+
+        return $this;
     }
 
     /*
@@ -441,6 +556,32 @@ class User extends Authenticatable
     | Internals
     |--------------------------------------------------------------------------
     */
+
+    /**
+     * The uncached resolution behind `avatar_url` — the single `Storage::exists()` stat.
+     */
+    private function resolveAvatarUrl(string $path): string
+    {
+        if ($path === '') {
+            return $this->initialsAvatar();
+        }
+
+        if (Str::startsWith($path, ['http://', 'https://', '//', 'data:', '/'])) {
+            return $path;
+        }
+
+        try {
+            $disk = Storage::disk('public');
+
+            if ($disk->exists($path)) {
+                return $disk->url($path);
+            }
+        } catch (Throwable) {
+            // Disk not configured / unreachable: fall through to the generated avatar.
+        }
+
+        return $this->initialsAvatar();
+    }
 
     /**
      * Deterministic initials avatar as an inline SVG data URI.

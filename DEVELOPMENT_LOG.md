@@ -172,6 +172,9 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D58 | **Three separated MySQL users**: runtime DML, migration DDL, backup read-only. | Phase 25; closes tech debt T3. |
 | D59 | **`Model::shouldBeStrict()` outside production is the N+1 audit.** | Phase 24. |
 | D60 | **The four manifests are the authority for every sweep**, and `audit:manifest --check` is part of every phase's definition of done. | Phase 24 §13.2. |
+| D61 | **Storage timezone is UTC; `localization.timezone` is display-only.** `config/app.php` stays `'UTC'` and nothing changes it at runtime; `Format` helpers render in the display zone, and `DateRange` takes input in it and queries in UTC boundaries. | The Phase 2 build switched `app.timezone` at boot from the setting, so rows written after it were Asia/Karachi wall-clock while Phase 1 rows were UTC — a silent five-hour break in audit and, later, financial timestamps. `.env`'s `APP_TIMEZONE` was never read (Laravel 12 hardcodes the config value). Contract audit CRITICAL. Rows already written in local time are demo data and are counted, not rewritten. |
+| D62 | **Document counters are never admin-editable settings.** Every `*_next_number` key is readonly in `SettingsRegistry`: shown, never posted, refused by `SettingsService`. Only `DocumentNumberService` (Phase 5, D27) advances a counter, under a row lock. | A settings form posts every field: an admin saving `tax_label` with a stale `invoice_next_number=41` after INV-41 and INV-42 were issued would roll the counter back and re-issue a number — breaking D42. Contract audit CRITICAL. |
+| D63 | **Disabling a module requires a reason on the server**, not only in the browser (min 5, max 255 characters), and `ModuleService` refuses an empty reason. | `phase-02.md` §5 requires it; the Phase 2 build enforced it only in the Alpine modal, so any direct request skipped the audit reason. Four Phase 1 tests that disabled a module without a reason are updated — a correctly stricter rule, not a loosened test. |
 
 ---
 
@@ -271,6 +274,37 @@ moment Phase 1 is verified (both phases touch `Admin/DashboardController`, `Admi
 ---
 
 ## 6. Change Log
+
+### 2026-09-13 — Phase 2 finishing pass, and Phase 3 started in parallel
+
+**Where Phase 2 stood** after the finishing workflow (a network outage had killed the original verification,
+test and review agents): the split-settings-truth defect was repaired — views now read the canonical registry
+keys, the three homeless company keys were adopted into the registry, and one data migration copied 20
+relocated values forward and marked the legacy rows read-only instead of deleting them. Verification then
+proved **631 tests / 18,789 assertions green** in both orders, 67 routes, all 52 smoke checks through the real
+HTTP kernel as Super Admin and plain Admin, a dashboard of 9–13 queries with all ten widgets, and zero data rows
+changed across disabling and re-enabling nine modules.
+
+**What the two re-reviews found**, and why Phase 2 is not yet committed:
+- *Contract audit* — 2 critical, 4 high. Critical: mixed UTC / local timestamps (now **D61**) and editable
+  document counters that a stale form save could roll back (now **D62**). High: the Security group could never be
+  saved (a read-only toggle still posted a hidden value); 21 Phase 1 settings rows left un-superseded; money and
+  rate settings accepting values `Money` cannot parse (`1e3`, a 250 % rate); most §6 acceptance rows untested.
+- *Security review* — **no critical or high, no working privilege escalation.** Four mediums: the Security group
+  saved but enforced nowhere; `config:cache` serialising the decrypted SMTP password into
+  `bootstrap/cache/config.php`; decimal settings breaking bcmath; the timezone skew above.
+- Beyond the contract: the build added a `settings.edit_mail` permission (788 permissions) so the Admin role cannot
+  edit SMTP — delivering the carve-out Phase 1 §5 promised but never shipped.
+- Process note: the Phase 2 verify agent's forward `migrate` also applied Phase 3's ten CMS migrations to
+  `my_office` (batch 4, all tables empty) before Phase 3 was verified. Harmless because additive and empty, but
+  recorded.
+
+**Running now** (one workflow, two parallel chains): Phase 2 — five partitioned fix agents (D61, D62, D63,
+settings integrity, security-group enforcement, module/dashboard findings, a view-formatting sweep) → complete
+the acceptance suite → verify → adversarial re-review; Phase 3 — models + policies, controllers + requests + the
+D26 middleware, public site views, admin CMS views, `INSTALL.md` / `README.md` on new paths only → one
+integration patch list.
+
 
 ### 2026-09-12 — Phase 1 security remediation (commit `a22b7d9`)
 

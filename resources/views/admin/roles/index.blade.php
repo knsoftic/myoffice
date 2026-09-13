@@ -13,6 +13,9 @@
 @php
     use App\Enums\Ability;
     use App\Models\Role;
+    use App\Models\User;
+
+    $actor = auth()->user();
 
     $levelTone = static fn (int $level): string => match (true) {
         $level <= 5 => 'rose',
@@ -20,6 +23,10 @@
         $level <= 40 => 'sky',
         default => 'slate',
     };
+
+    // Does this actor get to see who holds a role? The link goes to the users index, so it needs
+    // that screen's own permission — not roles.view.
+    $canListUsers = (bool) $actor?->can('users.'.Ability::ViewAny->value);
 @endphp
 
 @section('header')
@@ -27,7 +34,7 @@
         title="Roles"
         subtitle="What each kind of account may do, and which panel it reaches."
         icon="shield-check"
-        :badge="number_format((float) $roles->total()).' roles'"
+        :badge="app_number($roles->total()).' roles'"
         badge-color="slate"
     >
         <x-slot:actions>
@@ -45,7 +52,18 @@
 @endsection
 
 @section('content')
-    <div class="space-y-4">
+    {{--
+        `navigating` drives the table's skeleton rows. The filter bar submits itself on every
+        select change and 400ms after the last keystroke, so the rows on screen are stale from
+        that moment until the new page paints — the skeleton says so instead of leaving the old
+        list looking current. Only GET submissions count: a POST from a confirm dialog is a
+        different kind of navigation and has its own feedback.
+    --}}
+    <div
+        x-data="{ navigating: false }"
+        x-on:submit.window="if ($event.target?.method === 'get') navigating = true"
+        class="space-y-4"
+    >
 
         <x-ui.filter-bar placeholder="Search role name, label or description…" :reset="route('admin.roles.index')">
             <x-ui.form.select
@@ -69,7 +87,7 @@
             />
         </x-ui.filter-bar>
 
-        <x-ui.table :is-empty="$roles->isEmpty()">
+        <x-ui.table :is-empty="$roles->isEmpty()" loading="navigating" :loading-rows="8">
             <x-slot:head>
                 <x-ui.th-sortable column="label" :sort="$sort" :direction="$direction">Role</x-ui.th-sortable>
                 <x-ui.th-sortable column="panel" :sort="$sort" :direction="$direction">Panel</x-ui.th-sortable>
@@ -152,7 +170,7 @@
                             <a
                                 href="{{ route('admin.users.index', ['role' => $role->id]) }}"
                                 class="font-medium tabular-nums text-brand-600 hover:underline dark:text-brand-400"
-                            >{{ number_format((float) $role->users_count) }}</a>
+                            >{{ app_number($role->users_count) }}</a>
                         @else
                             <span class="tabular-nums text-slate-400 dark:text-slate-600">0</span>
                         @endif
@@ -162,39 +180,73 @@
                     <td class="px-4 py-3 text-right">
                         <div class="inline-flex flex-col items-end">
                             <span class="font-medium tabular-nums text-slate-700 dark:text-slate-200">
-                                {{ number_format((float) $role->permissions_count) }}
+                                {{ app_number($role->permissions_count) }}
                             </span>
 
                             @if ($totalPermissions > 0)
                                 <span class="text-2xs text-slate-400 tabular-nums dark:text-slate-500">
-                                    of {{ number_format((float) $totalPermissions) }}
+                                    of {{ app_number($totalPermissions) }}
                                 </span>
                             @endif
                         </div>
                     </td>
 
-                    {{-- Actions --}}
+                    {{--
+                        Actions — the same row-actions pattern as the users index (carryover T18):
+                        the one action you reach for inline, everything else in a dropdown, the
+                        destructive one behind x-ui.confirm.
+
+                        The dropdown is rendered only when it would have something in it. A menu
+                        that opens onto nothing reads as a defect (carryover T19), and with policy
+                        rank rules ("you only manage roles weaker than your own") that is a real
+                        case, not a theoretical one.
+                    --}}
+                    @php
+                        $canViewRole = (bool) $actor?->can('view', $role);
+                        $canEditRole = (bool) $actor?->can('update', $role);
+                        $canDeleteRole = (bool) $actor?->can('delete', $role);
+                        $canSeeMembers = $canListUsers && (int) $role->users_count > 0;
+                        $hasMenu = $canViewRole || $canEditRole || $canSeeMembers;
+                    @endphp
+
                     <td class="px-4 py-3">
                         <div class="flex items-center justify-end gap-1">
-                            @can('update', $role)
+                            @if ($canEditRole)
                                 <x-ui.icon-button
                                     icon="adjustments-horizontal"
                                     label="Edit permissions for {{ $role->displayName() }}"
                                     size="sm"
                                     :href="route('admin.roles.edit', $role)"
                                 />
-                            @endcan
+                            @endif
 
-                            @can('view', $role)
-                                <x-ui.icon-button
-                                    icon="eye"
-                                    label="View {{ $role->displayName() }}"
-                                    size="sm"
-                                    :href="route('admin.roles.show', $role)"
-                                />
-                            @endcan
+                            @if ($hasMenu)
+                                <x-ui.dropdown label="Actions for {{ $role->displayName() }}" width="w-60">
+                                    @if ($canViewRole)
+                                        <x-ui.dropdown-item icon="eye" :href="route('admin.roles.show', $role)">
+                                            View role
+                                        </x-ui.dropdown-item>
+                                    @endif
 
-                            @can('delete', $role)
+                                    @if ($canEditRole)
+                                        <x-ui.dropdown-item icon="adjustments-horizontal" :href="route('admin.roles.edit', $role)">
+                                            Edit permissions
+                                        </x-ui.dropdown-item>
+                                    @endif
+
+                                    @if ($canSeeMembers)
+                                        <x-ui.dropdown-item
+                                            icon="users"
+                                            :href="route('admin.users.index', ['role' => $role->id])"
+                                            :badge="app_number($role->users_count)"
+                                        >
+                                            Accounts holding it
+                                        </x-ui.dropdown-item>
+                                    @endif
+                                </x-ui.dropdown>
+                            @endif
+
+                            @if ($canDeleteRole)
                                 <x-ui.confirm
                                     :action="route('admin.roles.destroy', $role)"
                                     method="DELETE"
@@ -212,11 +264,26 @@
                                         />
                                     </x-slot:trigger>
                                 </x-ui.confirm>
-                            @elseif ($role->is_system)
-                                <span class="inline-flex h-8 w-8 items-center justify-center text-slate-300 dark:text-slate-700" title="System roles cannot be deleted.">
+                            @elseif ($role->is_system && $hasMenu)
+                                <span
+                                    class="inline-flex h-8 w-8 items-center justify-center text-slate-300 dark:text-slate-700"
+                                    title="System roles cannot be deleted."
+                                >
                                     <x-ui.icon name="lock-closed" class="h-4 w-4" />
                                 </span>
-                            @endcan
+                            @endif
+
+                            @unless ($canEditRole || $hasMenu || $canDeleteRole)
+                                {{--
+                                    Nothing is available on this row: the role is at or above the
+                                    actor's own rank. Say that, rather than offering a menu with
+                                    no items in it (carryover T19).
+                                --}}
+                                <span class="inline-flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-600">
+                                    <x-ui.icon name="lock-closed" class="h-3.5 w-3.5" />
+                                    Outranks you
+                                </span>
+                            @endunless
                         </div>
                     </td>
                 </tr>

@@ -1,11 +1,19 @@
 {{--
     Shell footer. Company name and support details come from settings, never from config.
+
+    Settings read: company.name, company.website, and the contact details from `contact.*` —
+    phase-02 §2 moved email and phone out of the `company` group into `contact`, which is where
+    the Contact settings screen writes them. The Phase 1 `company.support_email` /
+    `company.email` / `company.phone` rows are superseded (see
+    `2026_09_12_060400_supersede_relocated_setting_keys`) and must not be read here: while they
+    were, an administrator changing the support address on the Contact screen saw the footer keep
+    the old one.
 --}}
 
 @php
     $footerCompany = setting('company.name', config('app.name', 'My Office'));
-    $footerEmail = setting('company.support_email', setting('company.email'));
-    $footerPhone = setting('company.phone');
+    $footerEmail = setting('contact.support_email') ?: setting('contact.email');
+    $footerPhone = setting('contact.phone');
     $footerSite = setting('company.website');
 @endphp
 

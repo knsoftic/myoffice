@@ -51,7 +51,7 @@ Types: `text` `textarea` `email` `tel` `url` `number` `decimal` `boolean` `selec
 
 | Group | Fields |
 |---|---|
-| `company` | `name` `legal_name` `tagline` `short_description` `founded_year` `registration_number` `ntn_number` `copyright_text` |
+| `company` | `name` `legal_name` `short_name` `tagline` `short_description` `founded_year` `registration_number` `ntn_number` `website` `features` `copyright_text` |
 | `branding` | `logo_light` `logo_dark` `favicon` `og_image` `email_logo` `login_background` `brand_color` `accent_color` |
 | `localization` | `currency` (select) `currency_symbol` `currency_position` (before/after) `decimal_separator` `thousand_separator` `timezone` (select) `date_format` (select) `time_format` (12/24) `week_start` `locale` |
 | `contact` | `phone` `phone_secondary` `whatsapp` `email` `support_email` `address` `city` `country` `latitude` `longitude` `map_embed` `business_hours` (json: per-day open/close/closed) |
@@ -63,6 +63,16 @@ Types: `text` `textarea` `email` `tel` `url` `number` `decimal` `boolean` `selec
 | `finance` | `invoice_prefix` `invoice_next_number` `tax_enabled` `tax_label` `default_tax_rate` `payment_terms_days` `bank_details` `invoice_footer_note` `expense_approval_required` |
 | `security` | `password_min_length` `force_password_change_days` `login_max_attempts` `lockout_minutes` `session_lifetime` `allowed_file_types` `max_upload_mb` `two_factor_enabled` *(declared, implemented later)* |
 | `maintenance` | `maintenance_mode` `maintenance_message` `public_site_enabled` `admission_form_enabled` `contact_form_enabled` |
+| `appearance` | `default_theme` `sidebar_collapsed_by_default` `table_page_size` `show_powered_by` |
+
+> **Amendment (2026-09-12, from the build).** Thirteen groups, not twelve. `appearance` carries four keys Phase 1
+> already seeded and which live code reads; dropping them would leave real settings permanently uneditable, so the
+> group is kept rather than the keys orphaned. `company` likewise keeps `short_name`, `website` and `features`:
+> three live Blade partials read them, and the first draft of this contract gave them no home — which produced the
+> **split-truth defect** the finishing pass had to repair, where an administrator's logo and contact edits changed
+> one row while every page rendered another. **The rule that follows: a key a view reads must be declared by the
+> registry, and a relocated key is superseded — its value copied forward and the old row marked read-only — never
+> orphaned.**
 
 `SettingSeeder` (Phase 1) is rewritten to read this registry, keeping any value an admin already
 changed (`firstOrCreate` on value, `update` on metadata only).

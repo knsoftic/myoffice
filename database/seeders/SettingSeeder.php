@@ -4,76 +4,124 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
-use App\Enums\ThemePreference;
 use App\Models\Setting;
+use App\Support\SettingsRegistry;
 use Database\Seeders\Concerns\WritesToConsole;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use RuntimeException;
 
 /**
- * Phase 1 · §1.4 / §5 — the settings catalogue.
+ * The settings catalogue, seeded from `App\Support\SettingsRegistry` (phase-02 §2).
  *
- * Groups: company · localization · appearance · social · seo · mail · collaborator · institute.
- * Defaults follow DEVELOPMENT_LOG §9: currency PKR, timezone Asia/Karachi, commission bases
- * `paid`, approval mode `manual`, minimum payout 1000, payout requests / referral system /
- * automatic commission all enabled.
+ * Definitions live in code and values live in the table — the same relationship
+ * `PermissionRegistry` has with the `permissions` table. This seeder is the one place those two
+ * halves meet, and it is built around a single promise:
  *
- * Idempotent and non-destructive — this is the important part of this seeder:
+ *   **A value an administrator has changed is never overwritten.**
+ *
+ * How that promise is kept:
+ *
  *   · rows are matched on the natural key (`group`, `key`);
- *   · the **value is written only when the row is created**, so re-running the seeder can never
- *     reset a company name, an SMTP host or a commission rate an administrator has changed;
- *   · the meta columns (type, options, is_encrypted, is_public, label, description, sort_order)
- *     are refreshed every run, so the settings screen always renders the current catalogue;
- *   · nothing is ever deleted; a key removed from this file simply stops being maintained.
+ *   · `value` is written **only on insert**, from the registry default. Re-running the seeder can
+ *     never reset a company name, an SMTP host, a commission rate or an uploaded logo path;
+ *   · the metadata columns — `type`, `options`, `label`, `description`, `sort_order`,
+ *     `is_encrypted`, `is_public`, `is_readonly` — are refreshed every run, so the settings screen
+ *     always renders the current catalogue even for a row seeded by an older release;
+ *   · nothing is ever deleted. A key the registry no longer declares (a Phase 1 row whose owning
+ *     phase has not redeclared it yet: `localization.currency_decimals`,
+ *     `collaborator.wallet_hold_days`, …) keeps its value and is reported in the console as
+ *     "unmaintained", exactly as `PermissionSeeder` reports a permission that left the registry.
  *
- * `is_encrypted` is reserved for secrets (the SMTP password) — the Setting model encrypts and
- * decrypts that column transparently. `is_public` marks what the public website may read.
+ * **Every registry key is declared here and nothing else is.** `run()` walks
+ * `SettingsRegistry::all()`, so the catalogue in the table is the catalogue in code — there is no
+ * hand-written key list to drift. Two things follow from that, and both are enforced rather than
+ * assumed:
+ *
+ *   · a **superseded** row is never handed back its editability.
+ *     `2026_09_12_060400_supersede_relocated_setting_keys` marks every relocated Phase 1 key
+ *     `is_readonly = true` and renames its label
+ *     "Deprecated - use <canonical key>"; those keys are absent from the registry, so this seeder
+ *     never touches them and the marker survives every re-seed. Should a future phase re-declare
+ *     one of them, refreshing metadata would silently clear `is_readonly` and restore the label —
+ *     resurrecting a key whose concept now lives somewhere else, and recreating the split-truth
+ *     defect. `assertNotResurrectingDeprecatedKey()` refuses that by name instead;
+ *   · the console reports superseded rows separately from genuinely unmaintained ones, so the
+ *     output says which stored keys have a home elsewhere and which are simply waiting for their
+ *     owning phase.
+ *
+ * Idempotent: `php artisan db:seed --class=SettingSeeder` can run on a live database as often as
+ * you like. The whole pass is one transaction, and the cached settings payload is flushed at the
+ * end so the next read matches the table.
+ *
+ * Secrets: `is_encrypted` comes from the registry's `encrypted` flag, and the `Setting` model
+ * encrypts and decrypts that column transparently — which is why model events are deliberately not
+ * suppressed here (see `DatabaseSeeder`).
  */
 class SettingSeeder extends Seeder
 {
     use WritesToConsole;
 
+    /** `settings.label` is varchar(150). */
+    private const LABEL_LENGTH = 150;
+
+    /** `settings.description` is varchar(255); the registry's help text can be longer. */
+    private const DESCRIPTION_LENGTH = 255;
+
+    /**
+     * The label prefix `2026_09_12_060400_supersede_relocated_setting_keys` writes onto a row
+     * whose concept moved to another key. Recognised here so a superseded row can never be
+     * re-seeded as an editable field.
+     */
+    private const DEPRECATED_PREFIX = 'Deprecated - use ';
+
+    /**
+     * The label prefix `2026_09_12_060500_supersede_or_reserve_remaining_legacy_setting_keys`
+     * writes onto a Phase 1 row whose owning phase has not declared it yet. Unlike a superseded
+     * row, a reserved row may be declared: the metadata refresh then replaces the marker.
+     */
+    private const RESERVED_PREFIX = 'Reserved for ';
+
     public function run(): void
     {
-        $catalogue = $this->catalogue();
+        $catalogue = SettingsRegistry::all();
 
-        DB::transaction(function () use ($catalogue): void {
-            $created = 0;
-            $updated = 0;
-            $total = 0;
+        $hasReadonly = Schema::hasColumn('settings', 'is_readonly');
 
-            foreach ($catalogue as $group => $rows) {
-                $sortOrder = 0;
+        $created = 0;
+        $updated = 0;
+        $total = 0;
 
-                foreach ($rows as $row) {
-                    $sortOrder += 10;
+        DB::transaction(function () use ($catalogue, $hasReadonly, &$created, &$updated, &$total): void {
+            foreach ($catalogue as $group => $fields) {
+                foreach ($fields as $key => $field) {
                     $total++;
 
+                    /** @var Setting $setting */
                     $setting = Setting::query()->firstOrNew([
                         'group' => (string) $group,
-                        'key' => (string) $row['key'],
+                        'key' => (string) $key,
                     ]);
 
                     $existed = $setting->exists;
 
-                    $setting->fill([
-                        'type' => (string) $row['type'],
-                        'options' => $row['options'] ?? null,
-                        'is_encrypted' => (bool) ($row['is_encrypted'] ?? false),
-                        'is_public' => (bool) ($row['is_public'] ?? false),
-                        'label' => (string) $row['label'],
-                        'description' => $row['description'] ?? null,
-                        'sort_order' => $sortOrder,
-                    ]);
+                    if ($existed) {
+                        $this->assertNotResurrectingDeprecatedKey($setting);
+                    }
+
+                    $setting->fill($this->metadata($field, $hasReadonly));
 
                     if (! $existed) {
-                        // Only a brand new row gets the default value.
-                        $setting->value = $this->serialise($row['value'] ?? null, (string) $row['type']);
+                        // Only a brand new row is given the registry default.
+                        $setting->value = $this->serialise($field['default'], (string) $field['storage']);
                     }
 
                     $isDirty = $setting->isDirty();
 
-                    $setting->save();
+                    if (! $existed || $isDirty) {
+                        $setting->save();
+                    }
 
                     if (! $existed) {
                         $created++;
@@ -82,799 +130,197 @@ class SettingSeeder extends Seeder
                     }
                 }
             }
-
-            $this->seedInfo(sprintf(
-                'Settings: %d keys in %d groups, %d created, %d refreshed (existing values preserved).',
-                $total,
-                count($catalogue),
-                $created,
-                $updated,
-            ));
         });
 
-        // The Setting model flushes this on save; flush again so a no-op run still leaves the
-        // cached payload consistent with the table.
+        // The Setting model flushes on save; flush again so a no-op run still leaves the cached
+        // payload consistent with the table.
         settings_repo()->flush();
+
+        $this->seedInfo(sprintf(
+            'Settings: %d keys declared in %d groups — %d created, %d metadata refreshed, %d already current (no value overwritten).',
+            $total,
+            count($catalogue),
+            $created,
+            $updated,
+            $total - $created - $updated,
+        ));
+
+        $this->reportUnmaintained();
     }
 
     /**
-     * group => list of rows.
+     * The metadata columns one registry field writes, every run.
      *
-     * @return array<string, array<int, array{
-     *     key: string,
-     *     value: mixed,
-     *     type: string,
-     *     label: string,
-     *     description?: string|null,
-     *     options?: array<string, string>|null,
-     *     is_encrypted?: bool,
-     *     is_public?: bool
-     * }>>
+     * @param  array<string, mixed>  $field
+     * @return array<string, mixed>
      */
-    private function catalogue(): array
+    private function metadata(array $field, bool $hasReadonly): array
     {
-        return [
-            'company' => $this->companySettings(),
-            'localization' => $this->localizationSettings(),
-            'appearance' => $this->appearanceSettings(),
-            'social' => $this->socialSettings(),
-            'seo' => $this->seoSettings(),
-            'mail' => $this->mailSettings(),
-            'collaborator' => $this->collaboratorSettings(),
-            'institute' => $this->instituteSettings(),
-        ];
-    }
-
-    /**
-     * Identity of the business. Read by the auth shell, the admin brand block, the footer and
-     * the public website — hence mostly public.
-     *
-     * @return array<int, array<string, mixed>>
-     */
-    private function companySettings(): array
-    {
-        return [
-            [
-                'key' => 'name',
-                'value' => 'MyOffice ERP',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Company name',
-                'description' => 'Shown in the browser title, the sidebar brand block and on the website.',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'short_name',
-                'value' => 'MyOffice',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Short name',
-                'description' => 'Compact brand used when the sidebar is collapsed.',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'tagline',
-                'value' => 'One system for your software house and training institute.',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Tagline',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'description',
-                'value' => 'Custom software development and job-ready IT training under one roof.',
-                'type' => Setting::TYPE_TEXT,
-                'label' => 'Description',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'features',
-                'value' => [
-                    'Projects, tasks and client billing in one place',
-                    'Admissions, batches, attendance and fees for the institute',
-                    'Role-based access with a full audit trail',
-                ],
-                'type' => Setting::TYPE_JSON,
-                'label' => 'Highlights',
-                'description' => 'Bullet points shown on the sign-in screen.',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'email',
-                'value' => 'info@myoffice.test',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Contact email',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'support_email',
-                'value' => 'support@myoffice.test',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Support email',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'phone',
-                'value' => '+92 42 0000000',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Phone',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'whatsapp',
-                'value' => '+92 300 0000000',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'WhatsApp',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'website',
-                'value' => 'https://myoffice.test',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Website',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'address',
-                'value' => 'Main Boulevard, Gulberg III',
-                'type' => Setting::TYPE_TEXT,
-                'label' => 'Address',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'city',
-                'value' => 'Lahore',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'City',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'country',
-                'value' => 'Pakistan',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Country',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'registration_number',
-                'value' => null,
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Registration number',
-                'description' => 'Printed on invoices and certificates when set.',
-            ],
-            [
-                'key' => 'logo_path',
-                'value' => null,
-                'type' => Setting::TYPE_FILE,
-                'label' => 'Logo',
-                'description' => 'Stored on the public disk; falls back to generated initials.',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'logo_dark_path',
-                'value' => null,
-                'type' => Setting::TYPE_FILE,
-                'label' => 'Logo (dark background)',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'favicon_path',
-                'value' => null,
-                'type' => Setting::TYPE_FILE,
-                'label' => 'Favicon',
-                'is_public' => true,
-            ],
-        ];
-    }
-
-    /**
-     * Locale, timezone and money presentation (DEVELOPMENT_LOG §9 Q3).
-     *
-     * @return array<int, array<string, mixed>>
-     */
-    private function localizationSettings(): array
-    {
-        return [
-            [
-                'key' => 'locale',
-                'value' => 'en',
-                'type' => Setting::TYPE_SELECT,
-                'options' => ['en' => 'English', 'ur' => 'Urdu'],
-                'label' => 'Default language',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'timezone',
-                'value' => 'Asia/Karachi',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Timezone',
-                'description' => 'Used when a user has no timezone of their own.',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'date_format',
-                'value' => 'd M Y',
-                'type' => Setting::TYPE_SELECT,
-                'options' => [
-                    'd M Y' => '12 Sep 2026',
-                    'd/m/Y' => '12/09/2026',
-                    'Y-m-d' => '2026-09-12',
-                    'm/d/Y' => '09/12/2026',
-                ],
-                'label' => 'Date format',
-            ],
-            [
-                'key' => 'time_format',
-                'value' => 'h:i A',
-                'type' => Setting::TYPE_SELECT,
-                'options' => ['h:i A' => '03:45 PM (12-hour)', 'H:i' => '15:45 (24-hour)'],
-                'label' => 'Time format',
-            ],
-            [
-                'key' => 'week_start',
-                'value' => 'monday',
-                'type' => Setting::TYPE_SELECT,
-                'options' => ['monday' => 'Monday', 'saturday' => 'Saturday', 'sunday' => 'Sunday'],
-                'label' => 'First day of the week',
-            ],
-            [
-                'key' => 'currency',
-                'value' => 'PKR',
-                'type' => Setting::TYPE_SELECT,
-                'options' => [
-                    'PKR' => 'Pakistani Rupee (PKR)',
-                    'USD' => 'US Dollar (USD)',
-                    'EUR' => 'Euro (EUR)',
-                    'GBP' => 'Pound Sterling (GBP)',
-                    'AED' => 'UAE Dirham (AED)',
-                    'SAR' => 'Saudi Riyal (SAR)',
-                    'INR' => 'Indian Rupee (INR)',
-                ],
-                'label' => 'Currency',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'currency_symbol',
-                'value' => 'Rs',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Currency symbol',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'currency_position',
-                'value' => 'before',
-                'type' => Setting::TYPE_SELECT,
-                'options' => ['before' => 'Before the amount (Rs 1,000.00)', 'after' => 'After the amount (1,000.00 Rs)'],
-                'label' => 'Symbol position',
-            ],
-            [
-                'key' => 'currency_decimals',
-                'value' => 2,
-                'type' => Setting::TYPE_INTEGER,
-                'label' => 'Decimal places',
-            ],
-            [
-                'key' => 'thousand_separator',
-                'value' => ',',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Thousand separator',
-            ],
-            [
-                'key' => 'decimal_separator',
-                'value' => '.',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Decimal separator',
-            ],
-        ];
-    }
-
-    /**
-     * Shell and theme defaults.
-     *
-     * @return array<int, array<string, mixed>>
-     */
-    private function appearanceSettings(): array
-    {
-        return [
-            [
-                'key' => 'default_theme',
-                'value' => ThemePreference::System->value,
-                'type' => Setting::TYPE_SELECT,
-                'options' => ThemePreference::options(),
-                'label' => 'Default theme',
-                'description' => 'Applied to accounts that have not picked a theme of their own.',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'brand_color',
-                'value' => '#4f46e5',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Brand colour',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'accent_color',
-                'value' => '#0ea5e9',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Accent colour',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'sidebar_collapsed_by_default',
-                'value' => false,
-                'type' => Setting::TYPE_BOOLEAN,
-                'label' => 'Collapse the sidebar by default',
-            ],
-            [
-                'key' => 'table_page_size',
-                'value' => 15,
-                'type' => Setting::TYPE_INTEGER,
-                'label' => 'Rows per page',
-                'description' => 'Default pagination size for list screens.',
-            ],
-            [
-                'key' => 'login_illustration_path',
-                'value' => null,
-                'type' => Setting::TYPE_FILE,
-                'label' => 'Sign-in illustration',
-            ],
-            [
-                'key' => 'show_powered_by',
-                'value' => true,
-                'type' => Setting::TYPE_BOOLEAN,
-                'label' => 'Show the footer credit line',
-                'is_public' => true,
-            ],
-        ];
-    }
-
-    /**
-     * Social profiles — all public, all optional.
-     *
-     * @return array<int, array<string, mixed>>
-     */
-    private function socialSettings(): array
-    {
-        $networks = [
-            'facebook' => 'Facebook',
-            'instagram' => 'Instagram',
-            'linkedin' => 'LinkedIn',
-            'twitter' => 'X / Twitter',
-            'youtube' => 'YouTube',
-            'tiktok' => 'TikTok',
-            'whatsapp' => 'WhatsApp',
-            'github' => 'GitHub',
+        $metadata = [
+            'type' => (string) $field['storage'],
+            'options' => $this->options($field),
+            'is_encrypted' => $field['encrypted'] === true,
+            'is_public' => $field['public'] === true,
+            'label' => mb_substr((string) $field['label'], 0, self::LABEL_LENGTH),
+            'description' => $field['help'] === null
+                ? null
+                : mb_substr((string) $field['help'], 0, self::DESCRIPTION_LENGTH),
+            'sort_order' => (int) $field['sort'],
         ];
 
-        $rows = [];
-
-        foreach ($networks as $key => $label) {
-            $rows[] = [
-                'key' => $key,
-                'value' => null,
-                'type' => Setting::TYPE_STRING,
-                'label' => $label.' URL',
-                'is_public' => true,
-            ];
+        if ($hasReadonly) {
+            $metadata['is_readonly'] = $field['readonly'] === true;
         }
 
-        return $rows;
+        return $metadata;
     }
 
     /**
-     * Public-website metadata and tracking ids.
+     * Static option lists are mirrored into the column; a provider-backed list (timezones,
+     * currencies, branches) is not.
      *
-     * @return array<int, array<string, mixed>>
+     * Mirroring a live list would make the seeder's output depend on the `branches` table and
+     * report a metadata change on every run. The screen resolves options through the registry
+     * anyway — the column is a convenience for an admin reading the table directly.
+     *
+     * @param  array<string, mixed>  $field
+     * @return array<array-key, mixed>|null
      */
-    private function seoSettings(): array
+    private function options(array $field): ?array
     {
-        return [
-            [
-                'key' => 'meta_title',
-                'value' => 'MyOffice ERP — Software House & IT Training Institute',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Default meta title',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'meta_description',
-                'value' => 'Custom software development, web and mobile apps, and job-ready IT training courses.',
-                'type' => Setting::TYPE_TEXT,
-                'label' => 'Default meta description',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'meta_keywords',
-                'value' => 'software house, web development, mobile apps, IT training, courses',
-                'type' => Setting::TYPE_TEXT,
-                'label' => 'Default meta keywords',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'canonical_url',
-                'value' => 'https://myoffice.test',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Canonical base URL',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'og_image_path',
-                'value' => null,
-                'type' => Setting::TYPE_FILE,
-                'label' => 'Social share image',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'robots',
-                'value' => 'index,follow',
-                'type' => Setting::TYPE_SELECT,
-                'options' => [
-                    'index,follow' => 'Index and follow',
-                    'noindex,nofollow' => 'Hide from search engines',
-                ],
-                'label' => 'Robots directive',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'sitemap_enabled',
-                'value' => true,
-                'type' => Setting::TYPE_BOOLEAN,
-                'label' => 'Publish sitemap.xml',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'google_analytics_id',
-                'value' => null,
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Google Analytics ID',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'google_tag_manager_id',
-                'value' => null,
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Google Tag Manager ID',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'facebook_pixel_id',
-                'value' => null,
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Facebook Pixel ID',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'google_site_verification',
-                'value' => null,
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Google site verification token',
-                'is_public' => true,
-            ],
-        ];
+        $options = $field['options'] ?? null;
+
+        if (! is_array($options) || is_callable($options)) {
+            return null;
+        }
+
+        return $options === [] ? null : $options;
     }
 
     /**
-     * Outgoing mail. `password` is the only encrypted setting in the catalogue and is never
-     * public (DEVELOPMENT_LOG §9 Q7: MAIL_MAILER=log in development).
+     * A key may be canonical or superseded, never both.
      *
-     * @return array<int, array<string, mixed>>
+     * A row carrying the deprecation marker has had its concept moved to another key, and its
+     * value has already been carried forward. Refreshing the registry metadata over the top of it
+     * would set `is_readonly` back to false and overwrite the "Deprecated - use …" label, handing
+     * the settings screen a field that writes a row nothing reads — the exact defect the
+     * supersede migration closed. Refuse it, loudly, naming the way out.
+     *
+     * @throws RuntimeException
      */
-    private function mailSettings(): array
+    private function assertNotResurrectingDeprecatedKey(Setting $setting): void
     {
-        return [
-            [
-                'key' => 'mailer',
-                'value' => 'log',
-                'type' => Setting::TYPE_SELECT,
-                'options' => [
-                    'log' => 'Write to the log (development)',
-                    'smtp' => 'SMTP',
-                    'sendmail' => 'Sendmail',
-                    'array' => 'Discard (testing)',
-                ],
-                'label' => 'Mail transport',
-            ],
-            [
-                'key' => 'host',
-                'value' => '127.0.0.1',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'SMTP host',
-            ],
-            [
-                'key' => 'port',
-                'value' => 2525,
-                'type' => Setting::TYPE_INTEGER,
-                'label' => 'SMTP port',
-            ],
-            [
-                'key' => 'encryption',
-                'value' => 'tls',
-                'type' => Setting::TYPE_SELECT,
-                'options' => ['tls' => 'TLS', 'ssl' => 'SSL', 'none' => 'None'],
-                'label' => 'Encryption',
-            ],
-            [
-                'key' => 'username',
-                'value' => null,
-                'type' => Setting::TYPE_STRING,
-                'label' => 'SMTP username',
-            ],
-            [
-                'key' => 'password',
-                'value' => null,
-                'type' => Setting::TYPE_STRING,
-                'label' => 'SMTP password',
-                'description' => 'Stored encrypted and never rendered back into the form.',
-                'is_encrypted' => true,
-            ],
-            [
-                'key' => 'from_address',
-                'value' => 'hello@myoffice.test',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'From address',
-            ],
-            [
-                'key' => 'from_name',
-                'value' => 'MyOffice ERP',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'From name',
-            ],
-            [
-                'key' => 'reply_to_address',
-                'value' => null,
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Reply-to address',
-            ],
-        ];
+        if (! str_starts_with((string) $setting->label, self::DEPRECATED_PREFIX)) {
+            return;
+        }
+
+        throw new RuntimeException(sprintf(
+            'Setting [%s.%s] is stored as superseded (%s) but SettingsRegistry declares it again. '.
+            'A key has one home: either drop the declaration, or — if the key really is canonical '.
+            'again — clear the deprecation marker on that row first (label and is_readonly).',
+            (string) $setting->group,
+            (string) $setting->key,
+            (string) $setting->label,
+        ));
     }
 
     /**
-     * Commission engine and payout policy (DEVELOPMENT_LOG §9 Q4–Q6).
+     * Name the stored keys the registry does not declare. Reported, never deleted — a value the
+     * business entered outlives the code that used to read it.
      *
-     * Commission only ever follows money actually received (CLAUDE.md §1.5), so the default
-     * base is `paid` for both students and projects.
-     *
-     * @return array<int, array<string, mixed>>
+     * Two lists, because they mean different things to whoever reads the console: a **superseded**
+     * key has a home somewhere else and is kept only as history, while an **unmaintained** key is
+     * still waiting for the phase that owns it to declare it.
      */
-    private function collaboratorSettings(): array
+    private function reportUnmaintained(): void
     {
-        $bases = [
-            'gross' => 'Gross amount invoiced',
-            'net_after_discount' => 'Net amount after discount',
-            'paid' => 'Amount actually received',
-        ];
+        $declared = SettingsRegistry::keys();
 
-        $types = ['percentage' => 'Percentage of the base', 'fixed' => 'Fixed amount'];
+        $rows = DB::table('settings')
+            ->select('group', 'key', 'label')
+            ->orderBy('group')
+            ->orderBy('key')
+            ->get();
 
-        return [
-            [
-                'key' => 'referral_system_enabled',
-                'value' => true,
-                'type' => Setting::TYPE_BOOLEAN,
-                'label' => 'Referral system enabled',
-            ],
-            [
-                'key' => 'automatic_commission_enabled',
-                'value' => true,
-                'type' => Setting::TYPE_BOOLEAN,
-                'label' => 'Create commissions automatically',
-                'description' => 'Commission rows are generated when a payment is received.',
-            ],
-            [
-                'key' => 'commission_approval_mode',
-                'value' => 'manual',
-                'type' => Setting::TYPE_SELECT,
-                'options' => ['manual' => 'Manual approval', 'automatic' => 'Approve automatically'],
-                'label' => 'Commission approval mode',
-            ],
-            [
-                'key' => 'student_commission_base',
-                'value' => 'paid',
-                'type' => Setting::TYPE_SELECT,
-                'options' => $bases,
-                'label' => 'Student commission base',
-            ],
-            [
-                'key' => 'project_commission_base',
-                'value' => 'paid',
-                'type' => Setting::TYPE_SELECT,
-                'options' => $bases,
-                'label' => 'Project commission base',
-            ],
-            [
-                'key' => 'default_student_commission_type',
-                'value' => 'percentage',
-                'type' => Setting::TYPE_SELECT,
-                'options' => $types,
-                'label' => 'Default student commission type',
-            ],
-            [
-                'key' => 'default_student_commission_rate',
-                'value' => '10.00',
-                'type' => Setting::TYPE_DECIMAL,
-                'label' => 'Default student commission rate',
-            ],
-            [
-                'key' => 'default_project_commission_type',
-                'value' => 'percentage',
-                'type' => Setting::TYPE_SELECT,
-                'options' => $types,
-                'label' => 'Default project commission type',
-            ],
-            [
-                'key' => 'default_project_commission_rate',
-                'value' => '5.00',
-                'type' => Setting::TYPE_DECIMAL,
-                'label' => 'Default project commission rate',
-            ],
-            [
-                'key' => 'payout_request_enabled',
-                'value' => true,
-                'type' => Setting::TYPE_BOOLEAN,
-                'label' => 'Collaborators may request payouts',
-            ],
-            [
-                'key' => 'minimum_payout',
-                'value' => '1000.00',
-                'type' => Setting::TYPE_DECIMAL,
-                'label' => 'Minimum payout amount',
-            ],
-            [
-                'key' => 'payout_approval_required',
-                'value' => true,
-                'type' => Setting::TYPE_BOOLEAN,
-                'label' => 'Payouts require approval',
-            ],
-            [
-                'key' => 'wallet_hold_days',
-                'value' => 0,
-                'type' => Setting::TYPE_INTEGER,
-                'label' => 'Hold period before a commission becomes available (days)',
-            ],
-            [
-                'key' => 'statement_download_enabled',
-                'value' => true,
-                'type' => Setting::TYPE_BOOLEAN,
-                'label' => 'Collaborators may download statements',
-            ],
-            [
-                'key' => 'referral_code_prefix',
-                'value' => 'CLB',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Referral code prefix',
-            ],
-        ];
+        $superseded = [];
+        $reserved = [];
+        $unmaintained = [];
+
+        foreach ($rows as $row) {
+            $key = $row->group.'.'.$row->key;
+
+            if (in_array($key, $declared, true)) {
+                continue;
+            }
+
+            if (str_starts_with((string) $row->label, self::DEPRECATED_PREFIX)) {
+                $superseded[] = $key;
+
+                continue;
+            }
+
+            if (str_starts_with((string) $row->label, self::RESERVED_PREFIX)) {
+                $reserved[] = $key;
+
+                continue;
+            }
+
+            $unmaintained[] = $key;
+        }
+
+        if ($superseded !== []) {
+            $this->seedComment(sprintf(
+                'Settings: %d stored key(s) are superseded — kept as history, readonly, not editable: %s',
+                count($superseded),
+                $this->keyList($superseded),
+            ));
+        }
+
+        if ($reserved !== []) {
+            $this->seedComment(sprintf(
+                'Settings: %d stored key(s) are reserved for a later phase — readonly until that phase declares them: %s',
+                count($reserved),
+                $this->keyList($reserved),
+            ));
+        }
+
+        if ($unmaintained !== []) {
+            $this->seedComment(sprintf(
+                'Settings: %d stored key(s) are not declared in SettingsRegistry and were left untouched: %s',
+                count($unmaintained),
+                $this->keyList($unmaintained),
+            ));
+        }
     }
 
     /**
-     * Training institute policy and numbering.
+     * At most fifteen keys, then a count.
      *
-     * @return array<int, array<string, mixed>>
+     * @param  list<string>  $keys
      */
-    private function instituteSettings(): array
+    private function keyList(array $keys): string
     {
-        return [
-            [
-                'key' => 'name',
-                'value' => 'MyOffice Institute',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Institute name',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'tagline',
-                'value' => 'Job-ready IT training with real project experience.',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Institute tagline',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'student_id_prefix',
-                'value' => 'STD',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Student ID prefix',
-            ],
-            [
-                'key' => 'student_id_next_number',
-                'value' => 1000,
-                'type' => Setting::TYPE_INTEGER,
-                'label' => 'Next student number',
-            ],
-            [
-                'key' => 'admission_number_prefix',
-                'value' => 'ADM',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Admission number prefix',
-            ],
-            [
-                'key' => 'fee_invoice_prefix',
-                'value' => 'FEE',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Fee invoice prefix',
-            ],
-            [
-                'key' => 'certificate_number_prefix',
-                'value' => 'CERT',
-                'type' => Setting::TYPE_STRING,
-                'label' => 'Certificate number prefix',
-            ],
-            [
-                'key' => 'academic_year_start_month',
-                'value' => 1,
-                'type' => Setting::TYPE_INTEGER,
-                'label' => 'Academic year starts in month',
-            ],
-            [
-                'key' => 'default_installment_count',
-                'value' => 3,
-                'type' => Setting::TYPE_INTEGER,
-                'label' => 'Default number of fee installments',
-            ],
-            [
-                'key' => 'fee_due_day',
-                'value' => 5,
-                'type' => Setting::TYPE_INTEGER,
-                'label' => 'Monthly fee due day',
-            ],
-            [
-                'key' => 'late_fee_enabled',
-                'value' => false,
-                'type' => Setting::TYPE_BOOLEAN,
-                'label' => 'Charge a late fee',
-            ],
-            [
-                'key' => 'late_fee_amount',
-                'value' => '0.00',
-                'type' => Setting::TYPE_DECIMAL,
-                'label' => 'Late fee amount',
-            ],
-            [
-                'key' => 'minimum_attendance_percentage',
-                'value' => 75,
-                'type' => Setting::TYPE_INTEGER,
-                'label' => 'Minimum attendance percentage',
-            ],
-            [
-                'key' => 'passing_percentage',
-                'value' => 50,
-                'type' => Setting::TYPE_INTEGER,
-                'label' => 'Passing percentage',
-            ],
-            [
-                'key' => 'demo_class_enabled',
-                'value' => true,
-                'type' => Setting::TYPE_BOOLEAN,
-                'label' => 'Offer demo classes',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'online_admission_enabled',
-                'value' => true,
-                'type' => Setting::TYPE_BOOLEAN,
-                'label' => 'Accept online admissions',
-                'is_public' => true,
-            ],
-            [
-                'key' => 'student_review_requires_approval',
-                'value' => true,
-                'type' => Setting::TYPE_BOOLEAN,
-                'label' => 'Student reviews need approval before publishing',
-            ],
-        ];
+        $shown = array_slice($keys, 0, 15);
+
+        return implode(', ', $shown)
+            .(count($keys) > count($shown) ? sprintf(' … and %d more', count($keys) - count($shown)) : '');
     }
 
     /**
-     * Turn a PHP default into the string stored in `settings.value`.
+     * Turn a registry default into the string stored in `settings.value`.
      *
      * Decimals stay strings so money never meets a float (CLAUDE.md §1.4).
      */
-    private function serialise(mixed $value, string $type): ?string
+    private function serialise(mixed $value, string $storage): ?string
     {
         if ($value === null) {
             return null;
         }
 
-        return match ($type) {
-            Setting::TYPE_BOOLEAN => $value ? '1' : '0',
-            Setting::TYPE_INTEGER => (string) (int) $value,
-            Setting::TYPE_JSON => is_string($value)
+        return match ($storage) {
+            'boolean' => $value ? '1' : '0',
+            'integer' => (string) (int) $value,
+            'json' => is_string($value)
                 ? $value
                 : (string) json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
             default => is_array($value)

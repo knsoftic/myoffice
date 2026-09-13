@@ -2,6 +2,7 @@
     'variant' => 'text',
     'count' => 1,
     'columns' => 5,
+    'leading' => 'none',
 ])
 
 {{--
@@ -11,6 +12,16 @@
         <x-ui.skeleton variant="row" :count="8" :columns="6" />   // inside a <tbody>
         <x-ui.skeleton variant="stat" :count="4" />
         <x-ui.skeleton variant="card" :count="2" />
+
+    The `row` variant is what x-ui.table renders from its `loading` prop, so a loading list is
+    the real table with grey bars in it rather than a spinner that moves the layout.
+
+    `leading` shapes the first cell so the placeholder matches the row it stands in for — a
+    mismatch is worse than no skeleton, because the page visibly jumps when the data lands:
+
+        leading="none"    a text bar (the default)
+        leading="check"   a small square, for a table rendered with :selectable="true"
+        leading="avatar"  a circle plus two lines, for a list whose first column is a person
 --}}
 
 @php
@@ -19,14 +30,28 @@
     $bar = 'relative overflow-hidden rounded bg-slate-200/80 dark:bg-slate-800 skeleton-sweep';
     // Varied widths read as real content rather than a grey block.
     $widths = ['w-full', 'w-11/12', 'w-4/5', 'w-5/6', 'w-3/4'];
+    $leading = in_array($leading, ['check', 'avatar'], true) ? $leading : 'none';
 @endphp
 
 @if ($variant === 'row')
     @for ($i = 0; $i < $count; $i++)
-        <tr class="border-b border-slate-100 last:border-0 dark:border-slate-800">
+        {{-- aria-hidden: a screen reader gets the wrapper's aria-busy, not a row of nothing. --}}
+        <tr class="border-b border-slate-100 last:border-0 dark:border-slate-800" aria-hidden="true">
             @for ($c = 0; $c < $columns; $c++)
                 <td class="px-4 py-3.5">
-                    <div class="{{ $bar }} h-3 {{ $c === 0 ? 'w-3/4' : $widths[($i + $c) % count($widths)] }}"></div>
+                    @if ($c === 0 && $leading === 'check')
+                        <div class="{{ $bar }} h-4 w-4 rounded"></div>
+                    @elseif ($c === 0 && $leading === 'avatar')
+                        <div class="flex items-center gap-3">
+                            <div class="{{ $bar }} h-8 w-8 shrink-0 rounded-full"></div>
+                            <div class="min-w-0 flex-1 space-y-1.5">
+                                <div class="{{ $bar }} h-3 w-2/3"></div>
+                                <div class="{{ $bar }} h-2.5 w-1/2"></div>
+                            </div>
+                        </div>
+                    @else
+                        <div class="{{ $bar }} h-3 {{ $c === 0 ? 'w-3/4' : $widths[($i + $c) % count($widths)] }}"></div>
+                    @endif
                 </td>
             @endfor
         </tr>

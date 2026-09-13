@@ -161,9 +161,10 @@ final class SidebarVisibilityTest extends TestCase
                 'Modules',
                 'Activity Log',
                 'Login History',
+                'Settings',
             ],
             $labels,
-            'Only the Phase-1 admin screens have routes, so only they may appear.'
+            'Only the screens whose phase has actually shipped its routes may appear — Phase 1 plus Phase 2\'s Settings.'
         );
     }
 

@@ -40,6 +40,14 @@ final class AuditTrailTest extends TestCase
 
         $this->ensureSeeded();
         $this->treatRequestsAsWeb();
+
+        // Phase 2 / T13: the admin user forms now build their password rules from
+        // App\Services\Auth\PasswordPolicy, which includes `uncompromised()`. The fixture password
+        // below is in the haveibeenpwned corpus, so without this stub the create-user post 422s on
+        // a password rule that has nothing to do with what this file asserts (the audit rows) — and
+        // the assertion would also depend on the network. Every other rule in the policy still runs.
+        $this->withoutCompromisedPasswordCheck();
+
         $this->withHeader('User-Agent', self::BROWSER);
     }
 
@@ -219,11 +227,21 @@ final class AuditTrailTest extends TestCase
     |--------------------------------------------------------------------------
     */
 
+    /**
+     * The subject is `project_milestones`, not `projects`.
+     *
+     * Phase 2 gave `projects` three enabled dependents (`project_milestones`, `tasks`, `payments`),
+     * and `ModuleService::toggle()` now correctly refuses a disable that would strand them unless a
+     * cascade is asked for explicitly. A cascade would move four modules and write four "Module
+     * disabled" rows, so `latest('Module disabled')` would no longer name the module under test.
+     * This test is about the *shape of the audit row*, not about dependency handling — phase-02 has
+     * its own tests for that — so it uses a module nothing depends on.
+     */
     #[Test]
     public function disabling_a_module_records_an_entry_with_the_reason(): void
     {
         $actor = $this->createSuperAdmin();
-        $module = Module::query()->where('slug', 'projects')->firstOrFail();
+        $module = Module::query()->where('slug', 'project_milestones')->firstOrFail();
 
         $this->actingAs($actor)
             ->from('/admin/modules')
@@ -245,7 +263,7 @@ final class AuditTrailTest extends TestCase
 
         $this->assertSame(true, $entry->oldValues()['is_enabled'] ?? null);
         $this->assertSame(false, $entry->newValues()['is_enabled'] ?? null);
-        $this->assertSame('projects', $entry->properties->toArray()['slug'] ?? null);
+        $this->assertSame('project_milestones', $entry->properties->toArray()['slug'] ?? null);
     }
 
     #[Test]
@@ -268,19 +286,35 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * Without a reason the service still has to explain itself, so the trail is never blank.
+     * D63 (updated in the Phase 2 finishing pass). This used to assert that a disable posted with
+     * no reason was accepted and given a generated one. A disable now requires a human reason on the
+     * server — the stricter rule — so the same request is refused and writes nothing. An *enable*
+     * still needs no reason, and the service still explains itself so that trail is never blank.
      */
     #[Test]
-    public function a_toggle_without_a_reason_records_a_generated_one(): void
+    public function a_disable_without_a_reason_is_refused_and_an_enable_records_a_generated_one(): void
     {
         $actor = $this->createSuperAdmin();
         $module = Module::query()->where('slug', 'leads')->firstOrFail();
+        $before = Activity::query()->count();
 
         $this->actingAs($actor)
             ->from('/admin/modules')
-            ->post('/admin/modules/'.$module->getKey().'/toggle', ['enabled' => false]);
+            ->post('/admin/modules/'.$module->getKey().'/toggle', ['enabled' => false])
+            ->assertRedirect('/admin/modules')
+            ->assertSessionHasErrors('reason');
 
-        $entry = $this->latest('Module disabled');
+        $this->assertTrue((bool) $module->fresh()->is_enabled);
+        $this->assertSame($before, Activity::query()->count());
+
+        $this->switchModule('leads', false);
+
+        $this->actingAs($actor)
+            ->from('/admin/modules')
+            ->post('/admin/modules/'.$module->getKey().'/toggle', ['enabled' => true])
+            ->assertSessionHasNoErrors();
+
+        $entry = $this->latest('Module enabled');
 
         $this->assertNotNull($entry);
         $this->assertNotNull($entry->reason);
@@ -355,7 +389,11 @@ final class AuditTrailTest extends TestCase
     public function the_activity_log_screen_renders_the_recorded_entry(): void
     {
         $actor = $this->createSuperAdmin();
-        $module = Module::query()->where('slug', 'projects')->firstOrFail();
+
+        // `project_milestones` rather than `projects`: see the note on
+        // disabling_a_module_records_an_entry_with_the_reason — a no-cascade disable of `projects`
+        // is now correctly blocked by its three enabled dependents.
+        $module = Module::query()->where('slug', 'project_milestones')->firstOrFail();
 
         $this->actingAs($actor)->post('/admin/modules/'.$module->getKey().'/toggle', [
             'enabled' => false,

@@ -7,11 +7,11 @@ namespace App\Http\Requests\Admin;
 use App\Enums\UserStatus;
 use App\Http\Requests\Admin\Concerns\ValidatesRoleAssignment;
 use App\Models\User;
+use App\Services\Auth\PasswordPolicy;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\Rules\Password;
 
 /**
  * Create a user account.
@@ -33,6 +33,34 @@ final class StoreUserRequest extends FormRequest
     }
 
     /**
+     * The strength rules for a password an **administrator** types for somebody else.
+     *
+     * One policy everywhere (T13). These forms validated with `Password::defaults()` — which
+     * nothing configures, so it means "at least 8 characters, no complexity at all" — while
+     * `/account/password` and the reset-link flow have always enforced
+     * `App\Services\Auth\PasswordPolicy`: 10 characters, mixed case, a number, a symbol and a check
+     * against the haveibeenpwned corpus. An administrator must not be able to set a weaker
+     * password than the account owner could set for themselves: the admin-set password is the one
+     * that gets dictated over the phone and is most likely to be something like "welcome1".
+     *
+     * `PasswordPolicy::rules()` leads with `required`, which is right on create and wrong on the
+     * edit form (blank there means "keep the current password"), so the presence rule is swapped
+     * rather than the strength rules being restated. `UpdateUserRequest` calls this too, the same
+     * way it borrows `PHONE_PATTERN`, so the two forms cannot drift apart.
+     *
+     * @return array<int, mixed>
+     */
+    public static function passwordRules(bool $required): array
+    {
+        $strength = array_values(array_filter(
+            PasswordPolicy::rules(),
+            static fn (mixed $rule): bool => $rule !== 'required' && $rule !== 'nullable',
+        ));
+
+        return array_merge([$required ? 'required' : 'nullable', 'confirmed'], $strength);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function rules(): array
@@ -44,7 +72,8 @@ final class StoreUserRequest extends FormRequest
             // not exclude them — a trashed account still owns its address.
             'email' => ['required', 'string', 'email:rfc', 'max:255', Rule::unique('users', 'email')],
 
-            'password' => ['required', 'string', 'confirmed', Password::defaults()],
+            // One password policy for the whole system — see passwordRules() (T13).
+            'password' => self::passwordRules(required: true),
 
             'phone' => ['nullable', 'string', 'max:32', 'regex:'.self::PHONE_PATTERN],
             'whatsapp' => ['nullable', 'string', 'max:32', 'regex:'.self::PHONE_PATTERN],

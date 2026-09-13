@@ -9,6 +9,54 @@
     Identical to layouts/admin except for a slimmer nav and a panel chip under the brand.
     The nav comes from the same App\Support\Sidebar — forUser() returns the portal tree for
     these roles, so there is exactly one place menus are declared.
+
+    ---------------------------------------------------------------------------------------------
+    Conditional rendering inside this shell: @module, @unlessmodule, @canany
+    ---------------------------------------------------------------------------------------------
+
+    `@module` is registered in AppServiceProvider::registerBladeDirectives() as
+    `Blade::if('module', …)` over `App\Support\Modules::enabled($slug)`, which gives four
+    directives from one registration:
+
+        @module('collaborator_payouts')
+            <x-ui.button :href="route('collaborator.payouts.create')">Request a payout</x-ui.button>
+        @elsemodule
+            <p class="text-slate-500">Payout requests are currently closed.</p>
+        @endmodule
+
+        @unlessmodule('messages')
+            <p>Messaging is switched off for this installation.</p>
+        @endunlessmodule
+
+    `$slug` is a `modules.slug` value, never a permission name and never a route name. The lookup
+    is a cached in-memory map (`modules.enabled.map`), so it costs nothing to use per row. A real
+    use of it is the notification bell in `layouts/partials/topbar`, which this shell shares.
+
+    What it is and is not for
+    -------------------------
+    A module switch is **presentation**, not authorization: `Gate::before` already denies every
+    ability belonging to a disabled non-core module, for everyone. Wrap markup in `@module` so a
+    portal stops offering a door that is bolted; never rely on it as the only guard.
+
+    Note the one asymmetry that matters here: the four portal permission namespaces
+    (`collaborator_portal.*`, `student_portal.*`, `teacher_portal.*`, `client_portal.*`) are
+    **core** modules, so a `@module` check on them is always true and switching a module off can
+    never close a whole panel (D20). Gate a portal feature on the business module whose data it
+    shows — `collaborator_payouts`, `student_fees`, `messages` — not on the portal prefix.
+
+    Permissions in a view use Laravel's own gate directives, and a portal permission is always
+    `{portal}.{thing}`:
+
+        @can('collaborator_portal.payout_request')  … @endcan
+        @canany(['collaborator_portal.projects', 'collaborator_portal.project_value'])
+            <x-ui.card title="Projects"> … </x-ui.card>
+        @elsecanany
+            <x-ui.empty-state title="Nothing shared with you yet" />
+        @endcanany
+
+    Use `@canany` rather than a chain of `@can`s whenever a container — a card, a toolbar, a whole
+    table column — should disappear when the user holds none of the abilities inside it: an empty
+    card that explains nothing reads as a bug (carryover T19).
 --}}
 
 @php

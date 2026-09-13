@@ -7,6 +7,7 @@ namespace App\Services\Core;
 use App\Enums\UserStatus;
 use App\Models\Role;
 use App\Models\User;
+use App\Policies\Concerns\ChecksRoleHierarchy;
 use App\Services\Auth\PasswordChangeService;
 use App\Services\Core\Concerns\WritesAuditTrail;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -30,14 +31,21 @@ use Throwable;
  *   · nobody changes their own roles;
  *   · `status` is never written by `update()` — activating, deactivating and suspending is
  *     `changeStatus()`, which demands an actor who is not the target and records a reason;
- *   · the system always keeps at least one Super Admin.
+ *   · the system always keeps at least one Super Admin;
+ *   · **nobody grants a role carrying a permission they do not themselves hold** (T11) — whenever
+ *     the caller names the actor making the change.
  *
  * The role and status rules are re-stated here rather than left to `UpdateUserRequest` because later
  * phases will call this class from places that have no Form Request at all — a console command, an
  * importer, a queued job. A guard that only lives in HTTP validation is not an invariant.
+ *
+ * The rank and permission comparison itself is **not** re-implemented here: it comes from
+ * `App\Policies\Concerns\ChecksRoleHierarchy`, the same trait the policies use. A duplicated
+ * security control is a security defect — the two copies drift and only one of them gets fixed.
  */
 final class UserService
 {
+    use ChecksRoleHierarchy;
     use WritesAuditTrail;
 
     /** Module slug stamped on the audit entries this service writes. */
@@ -67,11 +75,24 @@ final class UserService
     /**
      * Create an account and attach its roles.
      *
+     * `$actor` is optional because a seeder and an installer legitimately have nobody signed in.
+     * When it *is* given — every HTTP path gives it — the roles in the payload face the same
+     * permission bound the Gate applies, so a console caller cannot mint a puppet account holding
+     * abilities its creator is denied.
+     *
      * @param  array<string, mixed>  $data  validated payload from StoreUserRequest
+     *
+     * @throws ActionNotAllowedException when a role would hand out a permission the actor lacks
      */
-    public function create(array $data, ?UploadedFile $avatar = null): User
+    public function create(array $data, ?UploadedFile $avatar = null, ?User $actor = null): User
     {
-        return DB::transaction(function () use ($data, $avatar): User {
+        $roles = $this->resolveRoles($data['roles'] ?? []);
+
+        if ($actor instanceof User) {
+            $this->assertRolesAreWithinReach($roles, $actor);
+        }
+
+        return DB::transaction(function () use ($data, $avatar, $roles): User {
             $user = new User;
 
             $user->fill($this->profileAttributes($data));
@@ -96,7 +117,6 @@ final class UserService
 
             $user->save();
 
-            $roles = $this->resolveRoles($data['roles'] ?? []);
             $user->syncRoles($roles);
 
             $this->auditRoleChange($user, [], $roles->pluck('name')->all());
@@ -114,13 +134,15 @@ final class UserService
      *
      * @param  array<string, mixed>  $data  validated payload from UpdateUserRequest
      *
-     * @throws ActionNotAllowedException when the payload would change the status, or when the actor
-     *                                   is editing their own role set
+     * @throws ActionNotAllowedException when the payload would change the status, when the actor
+     *                                   is editing their own role set, or when a newly granted role
+     *                                   carries a permission the actor does not hold
      */
     public function update(User $user, array $data, User $actor, ?UploadedFile $avatar = null, bool $removeAvatar = false): User
     {
         $this->assertStatusIsNotChangedHere($user, $data);
         $this->assertRolesAreNotSelfAssigned($user, $data, $actor);
+        $this->assertGrantedRolesAreWithinReach($user, $data, $actor);
 
         if (filled($data['password'] ?? null)) {
             // Same rule the Reset-password button already follows: an administrator does not set
@@ -364,6 +386,59 @@ final class UserService
     }
 
     /**
+     * Nobody hands out an ability they do not hold (T11), with no Gate involved.
+     *
+     * `UserPolicy::assignRoles()` is the rule's home and the Form Requests ask for it, but a policy
+     * is only consulted when somebody asks: a console command, an importer or a queued job calling
+     * `update()` directly would never have been bounded at all. Only the roles being **added** are
+     * checked — giving a role back is a grant, taking one away is not — so an administrator who may
+     * not hand out a strong role can still strip it from an account, which is the safe direction.
+     *
+     * A Super Admin actor passes by definition (they hold every permission there is); the exception
+     * lives inside `holdsEveryPermissionOf()` so the policy and the service cannot disagree.
+     *
+     * @param  array<string, mixed>  $data
+     *
+     * @throws ActionNotAllowedException
+     */
+    private function assertGrantedRolesAreWithinReach(User $user, array $data, User $actor): void
+    {
+        if (! array_key_exists('roles', $data)) {
+            return;
+        }
+
+        $current = $this->normaliseIds($user->roles->pluck('id')->all());
+        $added = array_values(array_diff($this->normaliseIds((array) $data['roles']), $current));
+
+        if ($added === []) {
+            return;
+        }
+
+        $this->assertRolesAreWithinReach($this->resolveRoles($added), $actor);
+    }
+
+    /**
+     * @param  EloquentCollection<int, Role>  $roles
+     *
+     * @throws ActionNotAllowedException
+     */
+    private function assertRolesAreWithinReach(EloquentCollection $roles, User $actor): void
+    {
+        foreach ($roles as $role) {
+            if ($this->holdsEveryPermissionOf($actor, $role)) {
+                continue;
+            }
+
+            // Constructed directly rather than through a named factory: ActionNotAllowedException
+            // is owned elsewhere in this review and must not be edited from here.
+            throw new ActionNotAllowedException(sprintf(
+                'The "%s" role carries permissions you do not hold yourself, so you cannot grant it.',
+                $role->displayName(),
+            ));
+        }
+    }
+
+    /**
      * The one place a password is written from the admin panel.
      *
      * `PasswordChangeService` owns the whole side-effect list — hash, `password_changed_at`, a fresh
@@ -434,6 +509,11 @@ final class UserService
     }
 
     /**
+     * Roles named by id, with their permission sets loaded.
+     *
+     * The permissions are eager loaded because `holdsEveryPermissionOf()` reads them: one query for
+     * the whole payload instead of one per role.
+     *
      * @param  array<int, int|string>  $ids
      * @return EloquentCollection<int, Role>
      */
@@ -449,7 +529,7 @@ final class UserService
         }
 
         /** @var EloquentCollection<int, Role> $roles */
-        $roles = Role::query()->whereIn('id', $ids)->get();
+        $roles = Role::query()->with('permissions:id,name')->whereIn('id', $ids)->get();
 
         return $roles;
     }

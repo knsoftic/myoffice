@@ -17,8 +17,9 @@ use Tests\TestCase;
  * The arithmetic lives in Tests\Unit\Support\MoneyTest, which runs without a container and therefore
  * against the fallback currency. This is the other half: the settings an administrator can actually
  * edit have to reach the formatter. SettingSeeder stores them in the `localization` group
- * (`localization.currency_symbol`, `.currency_position`, `.currency_decimals`,
- * `.thousand_separator`, `.decimal_separator`), so those are the keys asserted here.
+ * (`localization.currency`, `.currency_symbol`, `.currency_position`, `.thousand_separator`,
+ * `.decimal_separator`), so those are the keys asserted here — and only those: an undeclared row
+ * never reaches the formatter.
  */
 final class CurrencyFormattingTest extends TestCase
 {
@@ -73,15 +74,20 @@ final class CurrencyFormattingTest extends TestCase
         $this->assertSame('Rs 1.234.567,89', Money::format('1234567.891'));
     }
 
+    /**
+     * Updated in the Phase 2 finishing pass. This used to assert that a `currency_decimals` row
+     * reshaped every amount. That key is not declared by SettingsRegistry (no screen can edit it),
+     * and phase-02 §2's amendment makes "a key a view reads must be declared" binding — an
+     * undeclared row that silently reshapes every amount is the split-truth defect. Money columns
+     * are decimal(15,2), so an amount is always shown at money scale.
+     */
     #[Test]
-    public function the_decimal_places_are_settings_driven(): void
+    public function an_undeclared_decimals_row_never_changes_the_money_scale(): void
     {
         $this->setCurrency(['currency_decimals' => 0]);
 
-        $this->assertSame('Rs 1,251', Money::format('1250.5'), 'Zero decimals still round half up.');
-        $this->assertSame('Rs 1,250', Money::format('1250.49'));
-
-        // The stored amounts themselves are untouched: only the presentation changed.
+        $this->assertSame('Rs 1,250.50', Money::format('1250.5'));
+        $this->assertSame('Rs 1,250.49', Money::format('1250.49'));
         $this->assertSame('1250.50', Money::of('1250.5'));
     }
 
@@ -113,16 +119,21 @@ final class CurrencyFormattingTest extends TestCase
     }
 
     /**
-     * A finance-group override has to win over the localization default, so a later phase can move
-     * the setting without breaking anything.
+     * Updated in the Phase 2 finishing pass. This used to assert that an undeclared
+     * `finance.currency_symbol` row won over the Localization screen's value. That is the
+     * split-truth defect phase-02 §2's amendment forbids: a row no screen can edit silently
+     * overriding what the administrator saved (SettingsSplitTruthRegressionTest). A later phase
+     * that needs its own currency declares the key in SettingsRegistry first.
      */
     #[Test]
-    public function a_finance_group_override_takes_precedence(): void
+    public function an_undeclared_finance_group_row_never_overrides_the_localization_screen(): void
     {
         settings_repo()->set('finance.currency_symbol', '₹');
+        settings_repo()->set('company.currency', 'INR');
 
-        $this->assertSame('₹', Money::symbol());
-        $this->assertSame('₹ 1,250.50', Money::format('1250.5'));
+        $this->assertSame('Rs', Money::symbol());
+        $this->assertSame('PKR', Money::currencyCode());
+        $this->assertSame('Rs 1,250.50', Money::format('1250.5'));
     }
 
     /**

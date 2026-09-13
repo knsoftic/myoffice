@@ -6,6 +6,7 @@ namespace App\Http\Requests\Admin;
 
 use App\Enums\LoginStatus;
 use App\Models\User;
+use App\Support\Format;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -169,7 +170,8 @@ final class LogFilterRequest extends FormRequest
             return $user->effectiveTimezone();
         }
 
-        return (string) config('app.timezone', 'UTC');
+        // The business display timezone, never the UTC storage timezone (D61).
+        return Format::timezone();
     }
 
     /**

@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Policies\ModulePolicy;
 use App\Policies\RolePolicy;
 use App\Policies\UserPolicy;
+use App\Support\ConfigureFromSettings;
 use App\Support\Modules;
 use App\Support\SettingsRepository;
 use Closure;
@@ -54,6 +55,29 @@ class AppServiceProvider extends ServiceProvider
         $this->registerGateRules();
         $this->registerPolicies();
         $this->registerBladeDirectives();
+        $this->configureFromSettings();
+    }
+
+    /**
+     * Saved settings -> runtime configuration (phase-02 §3): mail transport and credentials (the
+     * secret only once the mail manager is built), `app.locale`, and the derived brand palette.
+     * Never `app.timezone`: storage is UTC and `localization.timezone` is display-only (D61).
+     *
+     * Registered last on purpose. It is the only thing in boot() that reads data, and nothing
+     * above it may depend on it, so an install with no `settings` table — or with an unreadable
+     * cache store — still boots with exactly the Phase 1 behaviour.
+     *
+     * `ConfigureFromSettings::apply()` already contains every step in its own try/catch and reads
+     * through the cached settings payload rather than querying per key; this second net is here
+     * because "the app must never fail to boot because of a setting" is worth stating twice.
+     */
+    private function configureFromSettings(): void
+    {
+        try {
+            ConfigureFromSettings::apply();
+        } catch (Throwable $exception) {
+            report($exception);
+        }
     }
 
     /**

@@ -7,6 +7,12 @@
 
     Failed and blocked attempts are tinted so a burst of them is visible without reading the
     status column. The summary strip counts the whole filtered range, not just this page.
+
+    Formatting: every visible date goes through app_datetime() and every count through app_number(),
+    so localization.date_format / time_format / timezone / separators restyle this screen (D61:
+    stored timestamps are UTC, the helpers convert to the display timezone). The only raw calls
+    left are toIso8601String() inside <time datetime="…">: that attribute is the machine-readable
+    HTML value, carries its own UTC offset, and is never shown to the reader.
 --}}
 
 @php
@@ -35,7 +41,7 @@
         title="Login history"
         subtitle="Every successful, failed, blocked and sign-out event, with the IP, device and session length."
         icon="finger-print"
-        :badge="number_format($entries->total()).' events'"
+        :badge="app_number($entries->total()).' events'"
         badge-color="slate"
     >
         @if ($canExport && $exportUrl)
@@ -49,7 +55,16 @@
 @endsection
 
 @section('content')
-    <div class="space-y-4">
+    {{--
+        `navigating` drives the table's skeleton rows while a filter change is in flight: the
+        filter bar submits itself, so the rows on screen belong to the previous query from that
+        moment on. GET submissions only — see x-ui.table.
+    --}}
+    <div
+        x-data="{ navigating: false }"
+        x-on:submit.window="if ($event.target?.method === 'get') navigating = true"
+        class="space-y-4"
+    >
 
         {{-- ── Summary strip over the filtered range ─────────────────────────────────── --}}
         <x-ui.card :padded="false">
@@ -60,7 +75,7 @@
                         Successful
                     </dt>
                     <dd class="mt-1 text-xl font-semibold tabular-nums text-slate-900 dark:text-white">
-                        {{ number_format((float) $successes) }}
+                        {{ app_number($successes) }}
                     </dd>
                 </div>
 
@@ -70,10 +85,10 @@
                         Failed
                     </dt>
                     <dd class="mt-1 text-xl font-semibold tabular-nums text-slate-900 dark:text-white">
-                        {{ number_format((float) $failures) }}
+                        {{ app_number($failures) }}
                     </dd>
                     @if ($blocked > 0)
-                        <dd class="text-xs text-amber-600 dark:text-amber-400">+ {{ number_format((float) $blocked) }} blocked</dd>
+                        <dd class="text-xs text-amber-600 dark:text-amber-400">+ {{ app_number($blocked) }} blocked</dd>
                     @endif
                 </div>
 
@@ -83,7 +98,7 @@
                         Unique IPs
                     </dt>
                     <dd class="mt-1 text-xl font-semibold tabular-nums text-slate-900 dark:text-white">
-                        {{ number_format((float) $summary['unique_ips']) }}
+                        {{ app_number($summary['unique_ips']) }}
                     </dd>
                 </div>
 
@@ -94,9 +109,9 @@
                     </dt>
                     <dd class="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{{ $rangeLabel }}</dd>
                     <dd class="text-xs text-slate-500 dark:text-slate-400">
-                        {{ number_format((float) $summary['total']) }} events
+                        {{ app_number($summary['total']) }} events
                         @if ($logouts > 0)
-                            · {{ number_format((float) $logouts) }} sign-outs
+                            · {{ app_number($logouts) }} sign-outs
                         @endif
                     </dd>
                 </div>
@@ -162,7 +177,7 @@
             />
         </x-ui.filter-bar>
 
-        <x-ui.table :is-empty="$entries->isEmpty()">
+        <x-ui.table :is-empty="$entries->isEmpty()" loading="navigating" :loading-rows="10">
             <x-slot:head>
                 <x-ui.th-sortable column="email" :sort="$sort" :direction="$direction">User</x-ui.th-sortable>
 
@@ -249,7 +264,7 @@
                             <time
                                 datetime="{{ $entry->logged_in_at->toIso8601String() }}"
                                 title="{{ $entry->logged_in_at->diffForHumans() }}"
-                            >{{ $entry->logged_in_at->timezone($timezone)->format('d M Y H:i') }}</time>
+                            >{{ app_datetime($entry->logged_in_at) }}</time>
                         @else
                             <span class="text-slate-400 dark:text-slate-600">—</span>
                         @endif
@@ -260,7 +275,7 @@
                             <time
                                 datetime="{{ $entry->logged_out_at->toIso8601String() }}"
                                 title="{{ $entry->logged_out_at->diffForHumans() }}"
-                            >{{ $entry->logged_out_at->timezone($timezone)->format('d M Y H:i') }}</time>
+                            >{{ app_datetime($entry->logged_out_at) }}</time>
                         @elseif ($entry->isOpen())
                             <x-ui.badge color="emerald" size="xs" :dot="true">Open</x-ui.badge>
                         @else
@@ -277,7 +292,7 @@
                             <time
                                 datetime="{{ $entry->created_at->toIso8601String() }}"
                                 title="{{ $entry->created_at->diffForHumans() }}"
-                            >{{ $entry->created_at->timezone($timezone)->format('d M Y H:i') }}</time>
+                            >{{ app_datetime($entry->created_at) }}</time>
                         @else
                             —
                         @endif

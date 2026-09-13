@@ -33,6 +33,26 @@ enum Ability: string
     case ViewReports = 'view_reports';
     case ViewLogs = 'view_logs';
 
+    /*
+    |--------------------------------------------------------------------------
+    | Narrowly-scoped abilities
+    |--------------------------------------------------------------------------
+    |
+    | CLAUDE.md §4: beyond the general abilities above, a module may declare a narrow ability for
+    | ONE guarded operation, and it must never be widened into a general `edit`. They are declared
+    | last so the general list keeps the contract's order, and they are enum cases rather than bare
+    | strings because App\Support\PermissionRegistry's integrity tests require every ability of a
+    | real (non-portal) module to resolve back through this enum — that is what keeps a renamed
+    | ability a compile-time problem instead of a silent 403.
+    |
+    |  · `edit_mail` (Phase 2, settings) — writing the SMTP credentials and sending a test through
+    |    them. Their owner can read every password-reset mail in the system, so phase-01 §5 gives
+    |    Admin "everything except `settings.edit` of SMTP"; this is that carve-out.
+    |  · `link_invoice` (Phase 10, project_payments, decision D43) lands here the same way.
+    |
+    */
+    case EditMail = 'edit_mail';
+
     public function label(): string
     {
         return match ($this) {
@@ -54,6 +74,7 @@ enum Ability: string
             self::ViewFinancial => 'View Financial Data',
             self::ViewReports => 'View Reports',
             self::ViewLogs => 'View Logs',
+            self::EditMail => 'Edit Mail',
         };
     }
 
@@ -74,6 +95,7 @@ enum Ability: string
             self::Restore => 'indigo',
 
             self::Edit,
+            self::EditMail,
             self::Assign,
             self::ChangeStatus => 'amber',
 

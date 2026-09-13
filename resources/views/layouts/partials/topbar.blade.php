@@ -130,13 +130,26 @@
                 <x-ui.icon name="sun" class="h-[1.125rem] w-[1.125rem]" x-show="$store.theme.resolved === 'dark'" x-cloak />
             </button>
 
-            {{-- Notifications (placeholder until the notifications module ships) --}}
-            <x-ui.icon-button
-                icon="bell"
-                label="Notifications"
-                variant="ghost"
-                :badge="true"
-            />
+            {{--
+                Notifications.
+
+                A real @module use, and the shape every later phase should copy: the bell belongs
+                to the `notifications` module (Shared group, not core), so switching that module
+                off has to take the bell with it. Leaving it behind would advertise a feature
+                whose routes Gate::before already denies to everyone, Super Admin included.
+
+                The panel it opens ships with the notifications module itself (phase-22); until
+                then this is the trigger with no panel behind it, which is why it has no href.
+                See the directive notes at the top of layouts/admin.blade.php.
+            --}}
+            @module('notifications')
+                <x-ui.icon-button
+                    icon="bell"
+                    label="Notifications"
+                    variant="ghost"
+                    :badge="true"
+                />
+            @endmodule
 
             <span class="mx-0.5 hidden h-6 w-px bg-slate-200 sm:block dark:bg-slate-700" aria-hidden="true"></span>
 

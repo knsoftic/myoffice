@@ -13,6 +13,7 @@ declare(strict_types=1);
 */
 
 use App\Models\User;
+use App\Support\Format;
 use App\Support\Money;
 use App\Support\SettingsRepository;
 use App\Support\Sidebar;
@@ -51,6 +52,51 @@ if (! function_exists('money')) {
     function money(?string $amount, bool $withSymbol = true): string
     {
         return Money::format($amount ?? '0', $withSymbol);
+    }
+}
+
+if (! function_exists('app_date')) {
+    /**
+     * A date in the configured format: app_date($invoice->issued_on) // '12 Sep 2026'.
+     *
+     * Takes a Carbon instance, a model datetime, a date string or a timestamp; renders the empty
+     * string for null. Pass `$format` only when a document genuinely needs a fixed format.
+     */
+    function app_date(mixed $value, ?string $format = null): string
+    {
+        return Format::date($value, $format);
+    }
+}
+
+if (! function_exists('app_time')) {
+    /**
+     * A time in the configured format: app_time($session->starts_at) // '03:45 PM'.
+     */
+    function app_time(mixed $value, ?string $format = null): string
+    {
+        return Format::time($value, $format);
+    }
+}
+
+if (! function_exists('app_datetime')) {
+    /**
+     * Date and time together: app_datetime($activity->created_at) // '12 Sep 2026 03:45 PM'.
+     */
+    function app_datetime(mixed $value, ?string $format = null): string
+    {
+        return Format::dateTime($value, $format);
+    }
+}
+
+if (! function_exists('app_number')) {
+    /**
+     * A plain number with the configured separators: app_number(1248) // '1,248'.
+     *
+     * For an amount of money use money() — it adds the currency and honours its position.
+     */
+    function app_number(string|int|float|null $value, int $decimals = 0): string
+    {
+        return Format::number($value, $decimals);
     }
 }
 

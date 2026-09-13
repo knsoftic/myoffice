@@ -5,8 +5,17 @@ import forms from '@tailwindcss/forms';
 /**
  * Design tokens for the whole product.
  *
- * Rebranding is a one-file job: replace the `brand` scale below and every button, badge,
- * active nav item, focus ring and gradient follows. Never hardcode indigo-* in a view.
+ * Rebranding is not even a code change any more: the `brand` scale below resolves through the
+ * `--brand-50 … --brand-950` CSS variables, so `branding.brand_color` repaints every button,
+ * badge, active nav item, focus ring and gradient at runtime with no rebuild (phase-02 §5).
+ *
+ * The contract for those variables — do not break either half:
+ *   · each one holds three space-separated 0-255 channels, "79 70 229", never a hex or rgb()
+ *     string, because Tailwind wraps them as `rgb(var(--brand-500) / <alpha-value>)` so that
+ *     `bg-brand-500/25` and `ring-brand-500/40` keep working;
+ *   · `resources/css/app.css` defines the whole Phase 1 indigo scale on bare `:root` as the
+ *     fallback, and `layouts/partials/brand-theme.blade.php` overrides it from the setting.
+ *     A page that renders before the settings table exists still gets indigo, not black.
  *
  * @type {import('tailwindcss').Config}
  */
@@ -53,19 +62,23 @@ export default {
     theme: {
         extend: {
             colors: {
-                // Indigo-based brand scale. 500/600/700 are fixed by the design contract.
+                /*
+                 * Runtime brand scale. The values live in CSS variables (indigo by default,
+                 * derived from `branding.brand_color` when one is set) — see the file header.
+                 * `<alpha-value>` is what keeps the `/opacity` modifiers working.
+                 */
                 brand: {
-                    50: '#eef2ff',
-                    100: '#e0e7ff',
-                    200: '#c7d2fe',
-                    300: '#a5b4fc',
-                    400: '#818cf8',
-                    500: '#6366f1',
-                    600: '#4f46e5',
-                    700: '#4338ca',
-                    800: '#3730a3',
-                    900: '#312e81',
-                    950: '#1e1b4b',
+                    50: 'rgb(var(--brand-50) / <alpha-value>)',
+                    100: 'rgb(var(--brand-100) / <alpha-value>)',
+                    200: 'rgb(var(--brand-200) / <alpha-value>)',
+                    300: 'rgb(var(--brand-300) / <alpha-value>)',
+                    400: 'rgb(var(--brand-400) / <alpha-value>)',
+                    500: 'rgb(var(--brand-500) / <alpha-value>)',
+                    600: 'rgb(var(--brand-600) / <alpha-value>)',
+                    700: 'rgb(var(--brand-700) / <alpha-value>)',
+                    800: 'rgb(var(--brand-800) / <alpha-value>)',
+                    900: 'rgb(var(--brand-900) / <alpha-value>)',
+                    950: 'rgb(var(--brand-950) / <alpha-value>)',
                 },
                 // Semantic aliases so intent is readable in markup.
                 success: colors.emerald,

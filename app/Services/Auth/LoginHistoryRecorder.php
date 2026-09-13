@@ -10,6 +10,7 @@ use App\Models\LoginHistory;
 use App\Models\User;
 use App\Support\Device;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
@@ -38,6 +39,17 @@ final class LoginHistoryRecorder
      * Module slug the activity entries belong to.
      */
     private const MODULE = 'login_history';
+
+    /**
+     * How much of a `User-Agent` header is kept.
+     *
+     * `login_histories.user_agent` is a TEXT column, so this is not about fitting the column — it is
+     * about every other column on the row being clamped while this one was not (T16). A real client
+     * sends a few hundred characters; a hostile one sends 64 kB of them on every failed sign-in
+     * attempt, which is a free write amplifier against the audit table and, on a strict server, an
+     * error thrown from inside the login listener. 1 kB keeps every genuine agent string intact.
+     */
+    private const USER_AGENT_MAX_LENGTH = 1024;
 
     /**
      * Primary key of the `success` row written during this request, if any.
@@ -157,7 +169,9 @@ final class LoginHistoryRecorder
                 ->whereKey($this->currentRowId)
                 ->update(['session_id' => $sessionId]);
         } catch (Throwable $exception) {
-            report($exception);
+            $this->reportSwallowed($exception, 'could not re-stamp the session id', [
+                'login_history_id' => $this->currentRowId,
+            ]);
         }
     }
 
@@ -186,7 +200,9 @@ final class LoginHistoryRecorder
                 ->limit(1)
                 ->update(['logged_out_at' => now()]);
         } catch (Throwable $exception) {
-            report($exception);
+            $this->reportSwallowed($exception, 'could not close the open sign-in row', [
+                'user_id' => $user->getKey(),
+            ]);
         }
     }
 
@@ -225,9 +241,47 @@ final class LoginHistoryRecorder
         try {
             return LoginHistory::query()->create($attributes);
         } catch (Throwable $exception) {
-            report($exception);
+            // Swallowed on purpose — a sign-in must not fail because its history row could not be
+            // written — but never silently: a login history that quietly stops recording is a
+            // missing audit trail nobody would notice (T16).
+            $this->reportSwallowed($exception, 'could not write a history row', [
+                'status' => $status->value,
+                'user_id' => $user?->getKey(),
+            ]);
 
             return null;
+        }
+    }
+
+    /**
+     * Leave a trace of a failure this class deliberately absorbs.
+     *
+     * Everything in here runs inside the authentication request, so the logging itself must be
+     * incapable of breaking a login: `report()` goes through the application's exception handler,
+     * which can throw on its own when the log channel is misconfigured or the disk is full. Both
+     * calls are therefore individually guarded, and in the worst case the failure is lost rather
+     * than propagated.
+     *
+     * `Log::warning()` carries the context (which row, whose account) and `report()` carries the
+     * stack trace plus anything an external reporter is wired to.
+     *
+     * @param  array<string, mixed>  $context
+     */
+    private function reportSwallowed(Throwable $exception, string $what, array $context = []): void
+    {
+        try {
+            Log::warning('Login history: '.$what.'.', array_merge($context, [
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]));
+        } catch (Throwable) {
+            // The logger is the broken part. There is nowhere left to report it.
+        }
+
+        try {
+            report($exception);
+        } catch (Throwable) {
+            // Same reason. A swallowed failure must never become a failed sign-in.
         }
     }
 
@@ -243,7 +297,9 @@ final class LoginHistoryRecorder
                 'last_login_ip' => $ip,
             ])->save();
         } catch (Throwable $exception) {
-            report($exception);
+            $this->reportSwallowed($exception, 'could not stamp last_login_at', [
+                'user_id' => $user->getKey(),
+            ]);
         }
     }
 
@@ -274,7 +330,7 @@ final class LoginHistoryRecorder
 
         return [
             'ip_address' => $this->clamp($ip, 45),
-            'user_agent' => $userAgent,
+            'user_agent' => $this->clamp($userAgent, self::USER_AGENT_MAX_LENGTH),
             'device' => $this->clamp($parsed['device'], 64),
             'platform' => $this->clamp($parsed['platform'], 64),
             'browser' => $this->clamp($parsed['browser'], 64),

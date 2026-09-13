@@ -18,9 +18,12 @@
                           description="Disabling hides it everywhere and denies its permissions."
                           :checked="$module->is_enabled" />
 
-    Always posts a value: a hidden 0 precedes the checkbox, so an "off" switch submits 0
-    rather than nothing. No JavaScript — the switch is pure CSS driven by `peer-checked`,
-    with the real checkbox kept accessible but visually hidden.
+    An enabled switch always posts a value: a hidden 0 precedes the checkbox, so an "off" switch
+    submits 0 rather than nothing. A **disabled** switch posts nothing at all — neither the hidden 0
+    nor the checkbox — exactly like any other disabled control. Emitting the hidden 0 there made a
+    read-only key (security.two_factor_enabled) ride along on every save, so the server refused the
+    whole group. No JavaScript — the switch is pure CSS driven by `peer-checked`, with the real
+    checkbox kept accessible but visually hidden.
 --}}
 
 @php
@@ -46,7 +49,7 @@
         <label
             class="relative inline-flex shrink-0 items-center {{ $disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer' }}"
         >
-            @if ($name)
+            @if ($name && ! $disabled)
                 <input type="hidden" name="{{ $name }}" value="0" />
             @endif
 

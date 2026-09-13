@@ -8,6 +8,14 @@
     Permissions are generated from App\Support\PermissionRegistry and written by the seeder, so
     there is nothing to create or edit here. This screen answers two questions: what abilities
     exist, and which roles currently hold each one. Grants are made on the role editor.
+
+    Why this screen has no sortable headers, unlike every other index: it is not a table. The rows
+    are grouped module group → module → ability and ordered by `Permission::ordered()`, which is
+    the registry's own order — the same order as the role editor's matrix, so the two screens read
+    the same way round. Sorting the page by name or by holder count would break that pairing while
+    only ever sorting the 60 rows of the current page. The filters (group, module, ability) and the
+    search are the way to narrow it; `ability` is effectively the "sort by ability" a table header
+    would have given.
 --}}
 
 @php
@@ -20,7 +28,7 @@
         title="Permissions"
         subtitle="Every ability the system knows about, grouped by module, and who holds it."
         icon="key"
-        :badge="number_format((float) $stats['permissions']).' permissions'"
+        :badge="app_number($stats['permissions']).' permissions'"
         badge-color="slate"
     >
         <x-slot:actions>
@@ -34,27 +42,37 @@
 @endsection
 
 @section('content')
-    <div class="space-y-4">
+    {{--
+        The catalogue is rendered as cards rather than one table, so the skeleton here is the card
+        variant instead of x-ui.table's `loading` prop — same contract, same component: while a
+        filter change is in flight the 787-row catalogue stops pretending to be current. GET
+        submissions only, exactly as on the other index screens.
+    --}}
+    <div
+        x-data="{ navigating: false }"
+        x-on:submit.window="if ($event.target?.method === 'get') navigating = true"
+        class="space-y-4"
+    >
 
         {{-- ── Figures ──────────────────────────────────────────────────────────────── --}}
         <div class="card-grid">
             <x-ui.stat-card
                 label="Permissions"
-                :value="number_format((float) $stats['permissions'])"
+                :value="app_number($stats['permissions'])"
                 icon="key"
                 color="brand"
             />
 
             <x-ui.stat-card
                 label="Modules covered"
-                :value="number_format((float) $stats['modules'])"
+                :value="app_number($stats['modules'])"
                 icon="puzzle-piece"
                 color="sky"
             />
 
             <x-ui.stat-card
                 label="Roles"
-                :value="number_format((float) $stats['roles'])"
+                :value="app_number($stats['roles'])"
                 icon="shield-check"
                 color="violet"
                 :href="Route::has('admin.roles.index') ? route('admin.roles.index') : null"
@@ -62,7 +80,7 @@
 
             <x-ui.stat-card
                 label="Matching the filters"
-                :value="number_format((float) $stats['matching'])"
+                :value="app_number($stats['matching'])"
                 icon="funnel"
                 color="slate"
             />
@@ -104,7 +122,13 @@
             />
         </x-ui.filter-bar>
 
+        {{-- ── Loading ──────────────────────────────────────────────────────────────── --}}
+        <div x-show="navigating" x-cloak aria-busy="true" class="space-y-4">
+            <x-ui.skeleton variant="card" :count="2" />
+        </div>
+
         {{-- ── Grouped catalogue ────────────────────────────────────────────────────── --}}
+        <div x-show="! navigating" class="space-y-4">
         @if ($permissionGroups === [])
             <x-ui.card>
                 <x-ui.empty-state
@@ -214,6 +238,7 @@
                 <x-ui.pagination-summary :paginator="$permissions" label="permissions" />
             </x-ui.card>
         @endif
+        </div>{{-- /catalogue --}}
 
         <p class="px-1 text-xs text-slate-500 dark:text-slate-400">
             A permission is always <code class="font-mono">module.ability</code>. The catalogue is generated from

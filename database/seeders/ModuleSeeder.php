@@ -6,6 +6,7 @@ namespace Database\Seeders;
 
 use App\Enums\ModuleGroup;
 use App\Models\Module;
+use App\Services\Core\ModuleService;
 use App\Support\Modules;
 use App\Support\PermissionRegistry;
 use Database\Seeders\Concerns\WritesToConsole;
@@ -96,6 +97,21 @@ class ModuleSeeder extends Seeder
                     implode(', ', $reEnabled),
                 ));
             }
+
+            // phase-02 §1 / §3: `modules.depends_on` is the column ModuleService reads to block a
+            // disable that would strand an enabled dependent. Nothing else in the install sequence
+            // writes it, so without this line every fresh install — the test database included —
+            // carries no dependency rules at all and the whole feature is silently inert.
+            //
+            // Safe to run here: it writes through the query builder, touches only `depends_on`,
+            // fires no model event, writes no activity row, and cannot move anybody's switch.
+            $changed = app(ModuleService::class)->syncDependencyGraph();
+
+            $this->seedInfo(sprintf(
+                'Modules: dependency graph projected onto depends_on — %d edge list(s) declared, %d row(s) changed.',
+                count(ModuleService::dependencyGraph()),
+                count($changed),
+            ));
         });
 
         // The Module model flushes this on save; flush again so a run that changed nothing

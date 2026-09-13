@@ -170,6 +170,18 @@ final class EnumContractTest extends TestCase
     |--------------------------------------------------------------------------
     */
 
+    /**
+     * The eighteen general abilities of phase-01 §2, in contract order, followed by the
+     * narrowly-scoped ones CLAUDE.md §4 allows a single module to declare for one guarded
+     * operation. Phase 2 adds the first of those: `settings.edit_mail`, the SMTP carve-out that
+     * makes phase-01 §5's "Admin: everything except `settings.edit` of SMTP" enforceable as a
+     * permission instead of a role check. `project_payments.link_invoice` (D43 / BT-1) joins the
+     * same tail in Phase 10.
+     *
+     * A narrow ability is an enum case rather than a bare string because
+     * PermissionRegistryTest requires every ability of a real module to resolve back through this
+     * enum; the tail placement keeps the general list in its contracted order.
+     */
     #[Test]
     public function the_ability_enum_holds_exactly_the_contracted_abilities(): void
     {
@@ -177,6 +189,7 @@ final class EnumContractTest extends TestCase
             'view_any', 'view', 'create', 'edit', 'delete', 'restore', 'approve', 'reject',
             'assign', 'print', 'export', 'import', 'upload', 'download', 'change_status',
             'view_financial', 'view_reports', 'view_logs',
+            'edit_mail',
         ], Ability::values());
     }
 

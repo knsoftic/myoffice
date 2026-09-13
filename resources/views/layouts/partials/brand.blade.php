@@ -4,22 +4,36 @@
     Included with variables:
         @include('layouts.partials.brand', ['href' => route('admin.dashboard'), 'size' => 'md'])
 
-    Settings read: company.name, company.short_name, company.logo_path, company.tagline.
+    Settings read: company.name, company.short_name, company.tagline, and the logo from
+    `branding.logo_light` / `branding.logo_dark` (phase-02 §2) — the only rows the Branding screen
+    writes. The Phase 1 `company.logo_path` / `company.logo_dark_path` rows are NOT read any more:
+    they are superseded, marked readonly and labelled "Deprecated - use …" by
+    `2026_09_12_060400_supersede_relocated_setting_keys`, which carried their values into the
+    branding rows. Reading both halves was the bug — an uploaded logo changed one row while the
+    shell rendered the other.
+
+    When a dark logo is configured the two images are both rendered and swapped by the theme
+    class, so the shell never shows a dark-on-dark wordmark; with only one logo that single image
+    is used in both themes.
 --}}
 
 @php
     $brandName = setting('company.name', config('app.name', 'My Office'));
     $brandShort = setting('company.short_name');
     $brandTagline = ($showTagline ?? false) ? setting('company.tagline') : null;
-    $logoPath = setting('company.logo_path');
 
-    $logoUrl = null;
+    $brandAssetUrl = static function (mixed $path): ?string {
+        if (! is_string($path) || trim($path) === '') {
+            return null;
+        }
 
-    if (filled($logoPath)) {
-        $logoUrl = str_starts_with((string) $logoPath, 'http')
-            ? $logoPath
-            : \Illuminate\Support\Facades\Storage::disk('public')->url((string) $logoPath);
-    }
+        return str_starts_with($path, 'http')
+            ? $path
+            : \Illuminate\Support\Facades\Storage::disk('public')->url($path);
+    };
+
+    $logoUrl = $brandAssetUrl(setting('branding.logo_light'));
+    $logoDarkUrl = $brandAssetUrl(setting('branding.logo_dark'));
 
     // "My Office ERP" => "MO"; single word => first two letters.
     $words = preg_split('/\s+/', trim((string) $brandName)) ?: [];
@@ -39,12 +53,27 @@
     href="{{ $href }}"
     class="rail-trigger rail-center group relative flex min-w-0 items-center gap-3 rounded-lg px-1 py-1 transition-colors hover:bg-slate-100/70 dark:hover:bg-slate-800/60"
 >
-    @if ($logoUrl)
+    @if ($logoUrl || $logoDarkUrl)
+        @php
+            // One logo: used by both themes. Two: each hidden in the other's theme.
+            $logoLight = $logoUrl ?: $logoDarkUrl;
+            $logoDark = $logoDarkUrl ?: $logoUrl;
+            $swap = $logoLight !== $logoDark;
+        @endphp
+
         <img
-            src="{{ $logoUrl }}"
+            src="{{ $logoLight }}"
             alt="{{ $brandName }}"
-            class="{{ $markSize }} shrink-0 rounded-lg object-contain"
+            class="{{ $markSize }} shrink-0 rounded-lg object-contain {{ $swap ? 'dark:hidden' : '' }}"
         />
+
+        @if ($swap)
+            <img
+                src="{{ $logoDark }}"
+                alt="{{ $brandName }}"
+                class="{{ $markSize }} hidden shrink-0 rounded-lg object-contain dark:block"
+            />
+        @endif
     @else
         <span
             class="{{ $markSize }} inline-flex shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 font-bold tracking-tight text-white shadow-sm ring-1 ring-inset ring-white/10"

@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\LogFilterRequest;
 use App\Models\Activity;
 use App\Models\User;
+use App\Support\Format;
 use App\Support\Modules;
 use Carbon\CarbonImmutable;
 use Generator;
@@ -551,7 +552,7 @@ final class ActivityLogController extends Controller
     {
         return $user instanceof User
             ? $user->effectiveTimezone()
-            : (string) config('app.timezone', 'UTC');
+            : Format::timezone(); // display timezone, never the UTC storage timezone (D61)
     }
 
     /**

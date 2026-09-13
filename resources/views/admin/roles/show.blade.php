@@ -42,14 +42,14 @@
         <div class="card-grid">
             <x-ui.stat-card
                 label="Permissions"
-                :value="number_format((float) $role->permissions_count)"
+                :value="app_number($role->permissions_count)"
                 icon="key"
                 color="brand"
             />
 
             <x-ui.stat-card
                 label="Accounts holding it"
-                :value="number_format((float) $role->users_count)"
+                :value="app_number($role->users_count)"
                 icon="users"
                 color="sky"
                 :href="$role->users_count > 0 ? route('admin.users.index', ['role' => $role->id]) : null"
@@ -110,7 +110,7 @@
             {{-- Members --}}
             <x-ui.card
                 title="Members"
-                :subtitle="$role->users_count > 25 ? 'First 25 of '.number_format((float) $role->users_count) : null"
+                :subtitle="$role->users_count > 25 ? 'First 25 of '.app_number($role->users_count) : null"
                 icon="users"
                 class="lg:col-span-2"
             >
@@ -172,7 +172,7 @@
         {{-- ── The matrix, read only ────────────────────────────────────────────────── --}}
         <x-ui.section-heading
             title="What this role grants"
-            :subtitle="number_format((float) $role->permissions_count).' permissions, grouped the way the editor groups them.'"
+            :subtitle="app_number($role->permissions_count).' permissions, grouped the way the editor groups them.'"
             icon="key"
             :divider="true"
         />

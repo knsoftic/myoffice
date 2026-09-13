@@ -7,6 +7,11 @@
 
     Filters, sort and pagination all live in the query string and are validated by
     App\Http\Requests\Admin\LogFilterRequest before they reach a query.
+
+    Formatting: the visible timestamp goes through app_datetime() and the entry count through
+    app_number() (D61: stored timestamps are UTC, the helpers render in the display timezone). The
+    only raw call left is toIso8601String() inside <time datetime="…"> — the machine-readable HTML
+    value, offset included, never shown to the reader.
 --}}
 
 @php
@@ -35,7 +40,7 @@
         title="Activity log"
         subtitle="Every create, update and delete recorded across the system, with the actor, the old and new values and the request context."
         icon="clipboard-document-list"
-        :badge="number_format($entries->total()).' entries'"
+        :badge="app_number($entries->total()).' entries'"
         badge-color="slate"
     >
         @if ($canExport && $exportUrl)
@@ -49,7 +54,17 @@
 @endsection
 
 @section('content')
-    <div class="space-y-4">
+    {{--
+        `navigating` drives the table's skeleton rows: the filter bar submits itself on every
+        select change and 400ms after the last keystroke, and this log is the slowest list in the
+        admin (seven filters over a table that only grows), so the rows on screen must stop
+        looking current the moment a filter changes. GET submissions only — see x-ui.table.
+    --}}
+    <div
+        x-data="{ navigating: false }"
+        x-on:submit.window="if ($event.target?.method === 'get') navigating = true"
+        class="space-y-4"
+    >
 
         <x-ui.filter-bar placeholder="Search descriptions, events, reasons…">
             <x-ui.form.select
@@ -120,7 +135,7 @@
             />
         </x-ui.filter-bar>
 
-        <x-ui.table :is-empty="$entries->isEmpty()">
+        <x-ui.table :is-empty="$entries->isEmpty()" loading="navigating" :loading-rows="10">
             <x-slot:head>
                 <th class="px-4 py-3">User</th>
 
@@ -239,7 +254,7 @@
                             <time
                                 datetime="{{ $entry->created_at->toIso8601String() }}"
                                 title="{{ $entry->created_at->diffForHumans() }}"
-                            >{{ $entry->created_at->timezone($timezone)->format('d M Y H:i') }}</time>
+                            >{{ app_datetime($entry->created_at) }}</time>
                         @else
                             —
                         @endif
