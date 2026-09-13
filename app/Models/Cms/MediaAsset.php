@@ -25,7 +25,7 @@ use Illuminate\Support\Carbon;
  * `GenerateImageDerivatives`; the URL helpers live in `MediaService` (§6.8) so there is exactly one
  * place that turns a row into a `<picture>`.
  *
- * `usage_count` is a cache recomputed by `MediaService::recountUsage()`. `MediaAssetPolicy::delete()`
+ * `usage_count` is a cache recomputed by `MediaService::recountUsage()`. `MediaPolicy::delete()` (the contract's name, §2.13)
  * refuses while it is above zero, so an image cannot be deleted out from under a published page.
  *
  * @property int $id
@@ -114,6 +114,15 @@ class MediaAsset extends Model
             'derivatives_generated_at' => 'datetime',
             'usage_count' => 'integer',
         ];
+    }
+
+    /**
+     * The module that owns this model, for `Gate::before`'s module rule
+     * (`App\Support\Modules::SUBJECT_MODULE_METHOD`) — the class name alone would guess `media_assets`.
+     */
+    public function moduleSlug(): string
+    {
+        return 'website_media';
     }
 
     protected function activityModule(): ?string
@@ -243,11 +252,12 @@ class MediaAsset extends Model
     /**
      * The sections that place this asset in one of their media roles (§2.4).
      *
-     * @return BelongsToMany<WebsiteSection, $this>
+     * @return BelongsToMany<WebsiteSection, $this, WebsiteSectionMedia>
      */
     public function sections(): BelongsToMany
     {
-        return $this->belongsToMany(WebsiteSection::class, 'website_section_media')
+        return $this->belongsToMany(WebsiteSection::class, 'website_section_media', 'media_asset_id', 'website_section_id')
+            ->using(WebsiteSectionMedia::class)
             ->withPivot(['role', 'sort_order'])
             ->withTimestamps()
             ->orderBy('website_section_media.sort_order');

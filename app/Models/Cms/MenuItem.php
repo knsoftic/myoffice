@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use LogicException;
 
 /**
  * One navigation link, optionally the child of another (phase-03 §2.6, §102 verbatim).
@@ -105,6 +106,45 @@ class MenuItem extends Model
             'sort_order' => 'integer',
             'depth' => 'integer',
         ];
+    }
+
+    /**
+     * INV-6 in the model, ahead of the CHECK constraints: an Eloquent write can never ask MariaDB for a
+     * depth above one, a depth that disagrees with `parent_id`, or an item that is its own parent. The
+     * cycle and "re-parent an item that has children" rules need queries and stay in `MenuService`.
+     */
+    protected static function booted(): void
+    {
+        static::saving(static function (self $item): void {
+            $attributes = $item->getAttributes();
+            // A new row without `depth` gets the column default (0); a partially selected existing row
+            // is only checked on what it actually carries.
+            $knowsDepth = array_key_exists('depth', $attributes) || ! $item->exists;
+            $depth = (int) ($attributes['depth'] ?? 0);
+
+            if ($depth < 0 || $depth > self::MAX_DEPTH) {
+                throw new LogicException(sprintf('A menu is at most two levels deep; depth %d is refused (INV-6).', $depth));
+            }
+
+            if ($knowsDepth
+                && array_key_exists('parent_id', $attributes)
+                && ($item->parent_id === null) !== ($depth === 0)) {
+                throw new LogicException('A top-level menu item has depth 0 and a child has depth 1 (chk_mi_parent).');
+            }
+
+            if ($item->exists && $item->parent_id !== null && (int) $item->parent_id === (int) $item->getKey()) {
+                throw new LogicException('A menu item cannot be its own parent.');
+            }
+        });
+    }
+
+    /**
+     * The module that owns this model, for `Gate::before`'s module rule
+     * (`App\Support\Modules::SUBJECT_MODULE_METHOD`) — the class name alone would guess `menu_items`.
+     */
+    public function moduleSlug(): string
+    {
+        return 'menus';
     }
 
     protected function activityModule(): ?string

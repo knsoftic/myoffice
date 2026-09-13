@@ -96,6 +96,15 @@ class CtaBlock extends Model
         ];
     }
 
+    /**
+     * The module that owns this model, for `Gate::before`'s module rule
+     * (`App\Support\Modules::SUBJECT_MODULE_METHOD`) — the class name alone would guess `cta_blocks`.
+     */
+    public function moduleSlug(): string
+    {
+        return 'website_cta_blocks';
+    }
+
     protected function activityModule(): ?string
     {
         return 'website_cta_blocks';
@@ -199,6 +208,23 @@ class CtaBlock extends Model
     public function scopeVisible(Builder $query): Builder
     {
         return $query->published();
+    }
+
+    /**
+     * Admin status filter.
+     *
+     * @param  Builder<CtaBlock>  $query
+     * @param  ContentStatus|string|array<int, ContentStatus|string>  $status
+     * @return Builder<CtaBlock>
+     */
+    public function scopeWithStatus(Builder $query, ContentStatus|string|array $status): Builder
+    {
+        $values = array_map(
+            static fn (ContentStatus|string $value): string => $value instanceof ContentStatus ? $value->value : $value,
+            is_array($status) ? $status : [$status]
+        );
+
+        return $query->whereIn($query->qualifyColumn('status'), $values);
     }
 
     /**

@@ -8,7 +8,7 @@
     x-site.prose — the ONLY place the public site prints CMS rich text (INV-13, D25).
 
         <x-site.prose :html="$content['company_intro'] ?? null" />
-        <x-site.prose :html="$siteSetting('contact.map_embed')" />   {{-- §12.2 Q3's map embed --}}
+        <x-site.prose :html="site_setting('contact.map_embed')" />   (§12.2 Q3's map embed)
 
     Rich text is sanitised **on write and again on render**, by `App\Support\RichText::sanitize()`
     and nothing else: the database is not a trust boundary, so a row hand-written into `content`
@@ -16,7 +16,7 @@
     that class's own closed map (`cms`, `material`) — an unknown name throws rather than being
     forwarded to the sanitiser as a config key.
 
-    Every other `{!! !!}` in `resources/views/site/**` is a bug, and FT-37 is the static scan that
+    Every other raw (unescaped) echo in `resources/views/site/**` is a bug, and FT-37 is the static scan that
     says so. Pass HTML here; never print it yourself.
 
     Until `RichText` ships, the fallback below prints the value **escaped**. That is deliberately the

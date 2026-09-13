@@ -8,7 +8,7 @@
 {{--
     x-site.accordion — the FAQ list (§100, and the `faq` section type).
 
-        <x-site.accordion :items="$faqs" :open-first="$siteSetting('website.faq_accordion_open_first', true)" />
+        <x-site.accordion :items="$faqs" :open-first="site_setting('website.faq_accordion_open_first', true)" />
 
     `items` is a list of published FAQ arrays: `['id' => 7, 'question' => '…', 'answer' => '<p>…</p>']`.
     The answer is rich text and goes through `<x-site.prose>`, which is the only sanitised output path

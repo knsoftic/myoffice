@@ -63,6 +63,15 @@ class Menu extends Model
         ];
     }
 
+    /**
+     * The module that owns this model, for `Gate::before`'s module rule
+     * (`App\Support\Modules::SUBJECT_MODULE_METHOD`).
+     */
+    public function moduleSlug(): string
+    {
+        return 'menus';
+    }
+
     protected function activityModule(): ?string
     {
         return 'menus';
@@ -178,6 +187,28 @@ class Menu extends Model
             'location',
             $location instanceof MenuLocation ? $location->value : $location
         );
+    }
+
+    /**
+     * Eager-load the two-level tree (INV-6: parents, then their children — never deeper) in two
+     * queries. `$enabledOnly` drops disabled items at both levels; target resolution and per-request
+     * visibility stay with `MenuItem::scopeVisible()` / `isVisibleTo()` (§6.3).
+     *
+     * @param  Builder<Menu>  $query
+     * @return Builder<Menu>
+     */
+    public function scopeWithTree(Builder $query, bool $enabledOnly = false): Builder
+    {
+        $constrain = static function ($relation) use ($enabledOnly): void {
+            if ($enabledOnly) {
+                $relation->where('is_enabled', true);
+            }
+        };
+
+        return $query->with([
+            'rootItems' => $constrain,
+            'rootItems.children' => $constrain,
+        ]);
     }
 
     /**

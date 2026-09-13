@@ -50,6 +50,15 @@
         'lg' => 'h-12 px-7 text-base',
         default => null,
     };
+
+    // A size REPLACES the style's default size rather than being appended to it: two height
+    // utilities on one element are decided by stylesheet order, not by intent, so `sm` would
+    // silently lose to the default h-11. The `link` style carries no size and takes none.
+    $styleClasses = $buttonStyle->classes();
+
+    if ($sizeClass !== null && str_contains($styleClasses, ButtonStyle::SIZE)) {
+        $styleClasses = str_replace(ButtonStyle::SIZE, $sizeClass, $styleClasses);
+    }
 @endphp
 
 @if ($resolvedLabel !== '' && $safeUrl !== null)
@@ -57,8 +66,7 @@
         href="{{ $safeUrl }}"
         @if ($resolvedNewTab) target="_blank" rel="noopener noreferrer" @endif
         {{ $attributes->class([
-            $buttonStyle->classes(),
-            $sizeClass,
+            $styleClasses,
             'w-full' => $block,
         ]) }}
     >

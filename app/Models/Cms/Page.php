@@ -7,6 +7,7 @@ namespace App\Models\Cms;
 use App\Enums\Cms\ContentStatus;
 use App\Enums\Cms\PageLayout;
 use App\Enums\Cms\SectionPlacement;
+use App\Models\Cms\Concerns\PublishesSnapshots;
 use App\Models\Concerns\Blameable;
 use App\Models\Concerns\LogsActivityWithContext;
 use App\Models\User;
@@ -26,10 +27,11 @@ use LogicException;
  *
  * **Snapshot-published (decision D22, INV-1):** `content` is the working draft and
  * `published_content` is the only copy an anonymous visitor may ever see. The public read path is
- * {@see self::scopeForPublic()} / {@see self::scopePublishedSnapshot()}, which does not even select
- * the draft column — so a renderer that reaches for `content` finds nothing rather than shipping an
- * unfinished edit. `has_unpublished_changes` is a STORED generated column (INV-4): it is read, never
- * written, and is deliberately absent from `$fillable`.
+ * {@see self::scopeForPublic()} / {@see self::scopePublished()} / `scopePublishedSnapshot()`, which do
+ * not even select the draft column — so a renderer that reaches for `content` finds nothing rather than
+ * shipping an unfinished edit. `has_unpublished_changes` is a STORED generated column (INV-4): it is
+ * read, never written, deliberately absent from `$fillable`, and stripped before any save
+ * ({@see PublishesSnapshots}).
  *
  * `is_system` marks the four policy pages: their content is editable, the row is never deletable
  * (`PagePolicy::delete()`), and a slug change needs `pages.change_status` (§6.4).
@@ -62,6 +64,7 @@ class Page extends Model
 {
     use Blameable;
     use LogsActivityWithContext;
+    use PublishesSnapshots;
     use SoftDeletes;
 
     /**
@@ -136,6 +139,15 @@ class Page extends Model
         ];
     }
 
+    /**
+     * The module that owns this model, for `Gate::before`'s module rule
+     * (`App\Support\Modules::SUBJECT_MODULE_METHOD`).
+     */
+    public function moduleSlug(): string
+    {
+        return 'pages';
+    }
+
     protected function activityModule(): ?string
     {
         return 'pages';
@@ -194,7 +206,7 @@ class Page extends Model
      */
     public function draftBody(): ?string
     {
-        if (! array_key_exists('content', $this->attributes)) {
+        if (! $this->draftLoaded()) {
             throw new LogicException(
                 'Page::draftBody() on a row loaded through the published-snapshot path. '
                 .'The public site renders published_content only (INV-1).'
@@ -210,14 +222,6 @@ class Page extends Model
     public function isPublic(): bool
     {
         return $this->status instanceof ContentStatus && $this->status->isPublic();
-    }
-
-    /**
-     * INV-4: derived from the hashes by the database, never set by code.
-     */
-    public function hasUnpublishedChanges(): bool
-    {
-        return (bool) $this->has_unpublished_changes;
     }
 
     /**
@@ -306,12 +310,37 @@ class Page extends Model
     */
 
     /**
+     * Published **and reading the published snapshot** (D22): `status = published` and — unless the
+     * caller already chose columns — the SELECT restricted to {@see self::PUBLIC_COLUMNS}, so the draft
+     * is never fetched. Admin filters use {@see self::scopeWithStatus()} instead, which keeps every
+     * column. (A published page always carries a `published_content`, possibly empty for a
+     * `sections` layout, so no NOT NULL filter is applied — §9 gates pages on status alone.)
+     *
      * @param  Builder<Page>  $query
      * @return Builder<Page>
      */
     public function scopePublished(Builder $query): Builder
     {
-        return $query->where('status', ContentStatus::Published->value);
+        $query->where($query->qualifyColumn('status'), ContentStatus::Published->value);
+
+        return $this->restrictToSnapshotColumns($query);
+    }
+
+    /**
+     * Admin status filter — keeps every column (unlike {@see self::scopePublished()}).
+     *
+     * @param  Builder<Page>  $query
+     * @param  ContentStatus|string|array<int, ContentStatus|string>  $status
+     * @return Builder<Page>
+     */
+    public function scopeWithStatus(Builder $query, ContentStatus|string|array $status): Builder
+    {
+        $values = array_map(
+            static fn (ContentStatus|string $value): string => $value instanceof ContentStatus ? $value->value : $value,
+            is_array($status) ? $status : [$status]
+        );
+
+        return $query->whereIn($query->qualifyColumn('status'), $values);
     }
 
     /**
@@ -324,19 +353,6 @@ class Page extends Model
     public function scopeVisible(Builder $query): Builder
     {
         return $query->published();
-    }
-
-    /**
-     * Restrict the SELECT to the snapshot columns of {@see self::PUBLIC_COLUMNS} (INV-1, D22).
-     *
-     * The draft column is not fetched at all, so `draftBody()` throws instead of leaking it.
-     *
-     * @param  Builder<Page>  $query
-     * @return Builder<Page>
-     */
-    public function scopePublishedSnapshot(Builder $query): Builder
-    {
-        return $query->select(self::PUBLIC_COLUMNS);
     }
 
     /**
@@ -381,7 +397,7 @@ class Page extends Model
      */
     public function scopeWithUnpublishedChanges(Builder $query): Builder
     {
-        return $query->where('has_unpublished_changes', true);
+        return $query->where($query->qualifyColumn(self::UNPUBLISHED_CHANGES_COLUMN), true);
     }
 
     /**

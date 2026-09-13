@@ -695,3 +695,618 @@ beyond §5.1a / §5.2 themselves.**
 `database/seeders/**`, `tests/**` or `docs/**` by the services** — only §1 (composer and the optional
 `config/purifier.php`), §2 (one `scoped` binding), §3 (the five models), §4 (jobs), §5 (exception
 rendering in `bootstrap/app.php`) and §7 (`routes/console.php`).
+
+---
+
+### Phase 3 models and policies (app/Models/Cms/**, app/Policies/Cms/**)
+
+**Delivered.** `php -l` clean, `./vendor/bin/pint --test app/Models/Cms app/Policies/Cms` passes. Verified
+with two scratch scripts that compile every scope with `toSql()` and exercise helpers, guards and every
+policy rule in memory inside `DB::pretend()` (zero statements reached MariaDB). No test or migration run.
+
+```
+app/Models/Cms/WebsiteSection.php        NEW   website_sections
+app/Models/Cms/WebsiteSectionItem.php    NEW   website_section_items
+app/Models/Cms/WebsiteSectionMedia.php   NEW   website_section_media (Pivot, used by ->using())
+app/Models/Cms/Faq.php                   NEW   faqs
+app/Models/Cms/FaqCategory.php           NEW   faq_categories
+app/Models/Cms/FaqWebsiteSection.php     NEW   faq_website_section (Pivot, used by ->using())
+app/Models/Cms/SeoMeta.php               NEW   seo_meta            (no SoftDeletes, delete throws)
+app/Models/Cms/CmsRevision.php           NEW   cms_revisions       (no SoftDeletes, write-once)
+app/Models/Cms/SitemapGeneration.php     NEW   sitemap_generations (no SoftDeletes, write-once)
+app/Models/Cms/Concerns/{PublishesSnapshots,ForbidsDeletion,ForbidsUpdates}.php   NEW
+app/Models/Cms/{Page,Menu,MenuItem,CtaBlock,MediaAsset}.php                        COMPLETED (see 4)
+app/Policies/Cms/{WebsiteSection,WebsiteSectionItem,Menu,MenuItem,Page,CtaBlock,Faq,FaqCategory,
+                  SeoMeta,Media,CmsRevision,SitemapGeneration}Policy.php + Concerns/ChecksCmsPermissions.php
+```
+
+#### 1. `app/Providers/AppServiceProvider.php` — append to the `POLICIES` constant
+
+Integration list E.2 plus one row (`SitemapGenerationPolicy`, for the sitemap history / regenerate screen).
+`MediaPolicy` is the contract's name, so explicit registration is mandatory for it.
+
+```php
+        \App\Models\Cms\WebsiteSection::class => \App\Policies\Cms\WebsiteSectionPolicy::class,
+        \App\Models\Cms\WebsiteSectionItem::class => \App\Policies\Cms\WebsiteSectionItemPolicy::class,
+        \App\Models\Cms\Menu::class => \App\Policies\Cms\MenuPolicy::class,
+        \App\Models\Cms\MenuItem::class => \App\Policies\Cms\MenuItemPolicy::class,
+        \App\Models\Cms\Page::class => \App\Policies\Cms\PagePolicy::class,
+        \App\Models\Cms\CtaBlock::class => \App\Policies\Cms\CtaBlockPolicy::class,
+        \App\Models\Cms\Faq::class => \App\Policies\Cms\FaqPolicy::class,
+        \App\Models\Cms\FaqCategory::class => \App\Policies\Cms\FaqCategoryPolicy::class,
+        \App\Models\Cms\SeoMeta::class => \App\Policies\Cms\SeoMetaPolicy::class,
+        \App\Models\Cms\MediaAsset::class => \App\Policies\Cms\MediaPolicy::class,
+        \App\Models\Cms\CmsRevision::class => \App\Policies\Cms\CmsRevisionPolicy::class,
+        \App\Models\Cms\SitemapGeneration::class => \App\Policies\Cms\SitemapGenerationPolicy::class,
+```
+
+#### 2. `app/Support/Modules.php` — append to `MODEL_MODULES` (closes integration M-17 for class-level checks)
+
+Every Phase 3 model now declares `moduleSlug()` (integration C.4), but `Modules::moduleForSubject()` calls
+it on **objects only**. A class-string check — `can('viewAny', CtaBlock::class)`, `can('create',
+MediaAsset::class)` — falls back to the map / naming convention, which guesses `cta_blocks`,
+`media_assets`, `menu_items`, `website_section_items`, `seo_metas`, so rule 1 of `Gate::before` does not fire
+and a Super Admin passes a disabled module. Apply **after** integration C.2 has registered
+`website_cta_blocks` and `website_media`:
+
+```php
+        \App\Models\Cms\MenuItem::class => 'menus',
+        \App\Models\Cms\WebsiteSectionItem::class => 'website_sections',
+        \App\Models\Cms\CtaBlock::class => 'website_cta_blocks',
+        \App\Models\Cms\MediaAsset::class => 'website_media',
+        \App\Models\Cms\SeoMeta::class => 'seo',
+        \App\Models\Cms\SitemapGeneration::class => 'seo',
+```
+
+(`Page`, `Menu`, `Faq`, `FaqCategory`, `WebsiteSection` resolve by convention. `CmsRevision` has no fixed
+module: its `moduleSlug()` returns the revisionable's module per instance, and `CmsRevisionPolicy::viewAny`
+checks `website_sections.view_logs` / `pages.view_logs`, which are module-gated themselves. Every policy
+checks through `$user->can('<module>.<ability>')`, so non-Super-Admin users are module-gated either way.)
+
+#### 3. Policy methods the controllers call (`$this->authorize()` / `Gate::authorize()`)
+
+| Policy | Methods beyond viewAny / view / create / update / delete / restore / forceDelete (always false) |
+|---|---|
+| `WebsiteSectionPolicy` | `manageItems`, `reorder` (class), `publish`, `unpublish`, `toggle`, `duplicate`, `viewRevisions`, `revert`, `preview`, `flushCache` (class). `delete` false for a required type (INV-7, FT-16); `update`/`publish`/`revert`/`duplicate` false for an orphaned type; `duplicate` false for a unique type; `update` false when `archived` |
+| `WebsiteSectionItemPolicy` | `create(User, ?WebsiteSection)`, `toggle`, `reorder(User, ?WebsiteSection)` — all `website_sections.edit` |
+| `MenuPolicy` | `reorder`, `toggle`, `linkCheck` |
+| `MenuItemPolicy` | `create(User, ?Menu)` (`menus.create`), `toggle` (`menus.change_status`) |
+| `PagePolicy` | `changeSlug` (system page also needs `pages.change_status`), `publish`, `schedule`, `unpublish`, `duplicate`, `viewRevisions`, `revert`, `preview`, `manageSections` (+ `website_sections.edit`), `export` (class), `print` (class). `delete` false for `is_system` (FT-17) |
+| `CtaBlockPolicy` | `changeKey` (false while in use), `toggle`, `usage`, `viewLogs` (class). `delete` false while `usage_count > 0` |
+| `FaqPolicy` / `FaqCategoryPolicy` | `toggle`, `reorder` (class) |
+| `SeoMetaPolicy` | `bulkUpdate`, `editRobots`, `regenerateSitemap`, `export`, `viewLogs` (all class). `create` = `seo.edit`; `delete`/`restore` always false |
+| `MediaPolicy` | `upload` (class; `create` delegates to it), `regenerate` (images only), `usage`, `download`, `viewLogs` (class). `delete` false while `usage_count > 0` (FT-38) |
+| `CmsRevisionPolicy` | `revert` (revisionable module's `change_status`); `view` = its `view_logs`; create/update/delete false |
+| `SitemapGenerationPolicy` | `viewAny`/`view` = `seo.view`, `create` = `seo.edit` (a rebuild); update/delete false |
+
+A trashed row is read-only in every policy (writes false, `restore` true only when trashed). Policies
+never query: a parent is consulted only when passed as an argument or already eager-loaded.
+
+#### 4. Model contract the controllers, views and remaining services rely on
+
+- **`WebsiteSection::published()` / `Page::published()` read the snapshot (D22):** they filter
+  `status = published` (sections also `published_content IS NOT NULL`) **and restrict the SELECT to
+  `PUBLIC_COLUMNS` unless the query already selects columns** (so `whereHas`/`withCount` constraints keep
+  `*` / `count(*)`). Admin lists and badges must use `withStatus()`, which keeps every column. The public
+  reads are `WebsiteSection::forPublic($placement, $page)` (the one query of §6.9) and
+  `Page::forPublic($slug)`. `draftContent()` / `draftBody()` throw on a row loaded that way.
+- **Pages changed from the partial file:** `scopePublished()` now reads the snapshot as above (previously
+  status only); `hasUnpublishedChanges()` and `scopePublishedSnapshot()` moved into
+  `Concerns\PublishesSnapshots` (columns now table-qualified); added `moduleSlug()`, `withStatus()`.
+  `Menu` gained `moduleSlug()` and `withTree(bool $enabledOnly)`; `MenuItem` gained `moduleSlug()` and a
+  saving guard (depth > 1, depth/parent mismatch, self-parent throw `LogicException`); `CtaBlock` gained
+  `moduleSlug()` and `withStatus()`; `MediaAsset` gained `moduleSlug()` and `sections()->using(WebsiteSectionMedia)`.
+- **`has_unpublished_changes` is never written:** not fillable, and a dirty value is stripped in `saving`.
+- **Other scopes:** `enabled()` (WebsiteSection, WebsiteSectionItem, FaqCategory, MenuItem), `ordered()`
+  (all content models), `forPlacement()` (WebsiteSection; `page` without a page matches nothing),
+  `forLocation()` (Menu, MenuItem), `visible()` (anonymous rule of §9 on every public-facing model),
+  `WebsiteSection::orphaned()/ofType()/withUnpublishedChanges()`, `WebsiteSectionItem::statistics()/inGroup()/usingMetric()/auto()`,
+  `Faq::inCategory(?cat)/inCategorySlug()/featured()/standalone()/attached()/forFaqable()`,
+  `SeoMeta::forRoute()/forTarget()/indexable()/inSitemap()`, `CmsRevision::forTarget()/publishedSnapshots()/prunable()/latestFirst()`,
+  `SitemapGeneration::successful()/failures()/latestFirst()`.
+- **Casts:** `website_section_items.manual_value` is `decimal:2` (a string, `"1500.00"`; the enums block
+  §2 suggested `string` — same type, normalised scale). `seo_meta.sitemap_priority` is `decimal:1`.
+  `cms_revisions.snapshot` is **uncast** on purpose (byte-exact canonical JSON the hash was computed from);
+  read it with `$revision->snapshotPayload()`.
+- **Append-only guards:** an Eloquent `delete()` on `SeoMeta`, `CmsRevision` or `SitemapGeneration` throws;
+  an Eloquent update of `CmsRevision` or `SitemapGeneration` throws; both stamp `created_by` on insert.
+  The future `PruneCmsRevisions` job must prune through the query builder and never touch a published
+  snapshot, e.g.
+  `DB::table('cms_revisions')->where('revisionable_type', $type)->where('revisionable_id', $id)->where('is_published_snapshot', false)->whereNotIn('id', $keepIds)->delete();`
+- **`SitemapGeneration`** declares `STATUS_OK`, `STATUS_FAILED`, `TRIGGER_MANUAL`, `TRIGGER_PUBLISH`,
+  `TRIGGER_SCHEDULED` (§2.14 gives these columns no enum); use the constants, not literals.
+- **Revision ownership (integration M-19):** `$revision->belongsToTarget($sectionOrPage)` (bool) or
+  `RevisionRecorder::assertBelongsTo()` (throws) before `authorize('revert', $revision)`.
+
+#### 5. Decisions an owner may want to overrule
+
+1. **Attached FAQs** (`faqable_*` set): `FaqPolicy` update / toggle / delete / restore additionally need
+   `{owner module}.edit` resolved through `Modules::moduleForSubject(new $faqable_type)`; an unresolvable
+   owner is refused. This keeps the CMS FAQ screen from editing a Phase 14 course FAQ (§6.13).
+2. **`restore` on `website_cta_blocks`, `faq_categories`, `website_media`** checks `{module}.restore`, which
+   §4.1 does not declare — so only a Super Admin can restore those until a `RESTORE` preset is added.
+3. **`WebsiteSectionPolicy::toggle` is allowed for required types** (disabling is their only off switch)
+   and `unpublish` / `delete` are allowed for orphaned types, so an admin can clean an orphan up.
+4. **Super Admin bypasses every structural rule above** through `Gate::before`; the services already refuse
+   the same acts (`ContentActionNotAllowedException`), which is the only thing that stops a Super Admin.
+
+---
+
+### Phase 3 controllers, Form Requests and the D26 middleware (app/Http/Controllers/{Site,Admin/Cms}/**, app/Http/Requests/Cms/**, app/Http/Middleware/EnsureSiteModuleEnabled.php)
+
+**Delivered (all new files; nothing existing edited).** `php -l` clean on all 74 files;
+`./vendor/bin/pint --test app/Http/Controllers/Site app/Http/Controllers/Admin/Cms app/Http/Requests/Cms app/Http/Middleware/EnsureSiteModuleEnabled.php`
+passes. A scratch reflection script confirmed every class loads (no signature fatal), every `use` resolves and
+every service / model-scope / policy method the controllers call exists — **except the seven services of §4
+below, which are not on disk yet**. No route is registered, no test was run, nothing touched the database.
+
+```
+app/Http/Middleware/EnsureSiteModuleEnabled.php            D26 `site_module` (404, no message)
+app/Http/Controllers/Admin/Cms/                            16 controllers (integration F.1 names, verified)
+  WebsiteOverviewController SectionController SectionItemController SectionRevisionController
+  PublicCacheController StatisticController MenuController MenuItemController PageController
+  PageRevisionController CtaBlockController FaqController FaqCategoryController SeoController
+  SitemapController MediaController
+  Concerns/{RespondsForCms,ListsRevisions,StreamsCsv}.php
+app/Http/Controllers/Site/                                 HomeController PageController PreviewController
+                                                           RobotsController SitemapController
+  Concerns/{ComposesSite,RendersPages}.php
+app/Http/Requests/Cms/                                     36 requests (incl. CmsFormRequest base, CmsListRequest) + 10 concerns + PageTemplate
+```
+
+#### 1. `bootstrap/app.php` — middleware alias (inside `$middleware->alias([...])`)
+
+```php
+            // phase-03 INV-15 / D26: a content module gates ITS OWN public routes with a 404.
+            'site_module' => \App\Http\Middleware\EnsureSiteModuleEnabled::class,
+```
+
+phase-04 §7.3 names the class `EnsurePublicModuleEnabled`; the Phase 3 path list fixed
+`EnsureSiteModuleEnabled`, which is the file that exists. Phase 4 uses the alias, never the class name.
+No Phase 3 route carries `site_module`.
+
+#### 2. Routes — every route, and the controller action that serves it
+
+`routes/admin.php`: **paste integration F.1 verbatim** — every `Controller@method`, `{parameter}` name,
+`whereNumber`/`whereIn` constraint and `withTrashed()` in it was checked against these controllers.
+`routes/web.php` + `routes/site-pages.php` + the `then:` loader: integration F.2 / F.4 / F.5, with one
+simplification allowed in F.2 (see note P-1). Group middleware on every admin route: `web`, `auth`, `active`,
+`panel:admin`. `{placement}` is bound to `SectionPlacement` by the controller type-hint (an unknown value 404s).
+
+| # | Method | URI | Name | Controller@method | Middleware (beyond the group) |
+|---|---|---|---|---|---|
+| 1 | GET | /admin/website | admin.website.index | Admin\Cms\WebsiteOverviewController@index | module:website_sections, can:website_sections.view_any |
+| 2 | GET | /admin/website/sections/{placement} | admin.website.sections.index | Admin\Cms\SectionController@index | module:website_sections, can:website_sections.view_any |
+| 3 | GET | /admin/website/sections/{placement}/available | admin.website.sections.available | Admin\Cms\SectionController@available | module:website_sections, can:website_sections.create |
+| 4 | POST | /admin/website/sections/{placement} | admin.website.sections.store | Admin\Cms\SectionController@store | module:website_sections, can:website_sections.create |
+| 5 | GET | /admin/website/sections/{section}/edit | admin.website.sections.edit | Admin\Cms\SectionController@edit | module:website_sections, can:website_sections.view |
+| 6 | PUT | /admin/website/sections/{section} | admin.website.sections.update | Admin\Cms\SectionController@update | module:website_sections, can:website_sections.edit |
+| 7 | POST | /admin/website/sections/reorder | admin.website.sections.reorder | Admin\Cms\SectionController@reorder | module:website_sections, can:website_sections.edit |
+| 8 | POST | /admin/website/sections/{section}/publish | admin.website.sections.publish | Admin\Cms\SectionController@publish | module:website_sections, can:website_sections.change_status |
+| 9 | POST | /admin/website/sections/{section}/unpublish | admin.website.sections.unpublish | Admin\Cms\SectionController@unpublish | module:website_sections, can:website_sections.change_status |
+| 10 | POST | /admin/website/sections/{section}/toggle | admin.website.sections.toggle | Admin\Cms\SectionController@toggle | module:website_sections, can:website_sections.change_status |
+| 11 | POST | /admin/website/sections/{section}/duplicate | admin.website.sections.duplicate | Admin\Cms\SectionController@duplicate | module:website_sections, can:website_sections.create |
+| 12 | DELETE | /admin/website/sections/{section} | admin.website.sections.destroy | Admin\Cms\SectionController@destroy | module:website_sections, can:website_sections.delete |
+| 13 | GET | /admin/website/sections/{section}/revisions | admin.website.sections.revisions.index | Admin\Cms\SectionRevisionController@index | module:website_sections, can:website_sections.view_logs |
+| 14 | POST | /admin/website/sections/{section}/revisions/{revision}/revert | admin.website.sections.revisions.revert | Admin\Cms\SectionRevisionController@revert | module:website_sections, can:website_sections.change_status |
+| 15 | POST | /admin/website/sections/{section}/items | admin.website.sections.items.store | Admin\Cms\SectionItemController@store | module:website_sections, can:website_sections.edit |
+| 16 | PUT | /admin/website/section-items/{item} | admin.website.section-items.update | Admin\Cms\SectionItemController@update | module:website_sections, can:website_sections.edit |
+| 17 | POST | /admin/website/section-items/{item}/toggle | admin.website.section-items.toggle | Admin\Cms\SectionItemController@toggle | module:website_sections, can:website_sections.edit |
+| 18 | DELETE | /admin/website/section-items/{item} | admin.website.section-items.destroy | Admin\Cms\SectionItemController@destroy | module:website_sections, can:website_sections.edit |
+| 19 | POST | /admin/website/sections/{section}/items/{group}/reorder | admin.website.sections.items.reorder | Admin\Cms\SectionItemController@reorder | module:website_sections, can:website_sections.edit |
+| 20 | POST | /admin/website/cache/flush | admin.website.cache.flush | Admin\Cms\PublicCacheController@flush | module:website_sections, can:website_sections.change_status, throttle:6,1 |
+| 21 | GET | /admin/website/statistics | admin.website.statistics.index | Admin\Cms\StatisticController@index | module:website_sections, can:website_sections.view_any |
+| 22 | GET | /admin/website/menus | admin.website.menus.index | Admin\Cms\MenuController@index | module:menus, can:menus.view_any |
+| 23 | GET | /admin/website/menus/{menu} | admin.website.menus.show | Admin\Cms\MenuController@show | module:menus, can:menus.view |
+| 24 | PUT | /admin/website/menus/{menu} | admin.website.menus.update | Admin\Cms\MenuController@update | module:menus, can:menus.edit |
+| 25 | POST | /admin/website/menus/{menu}/items | admin.website.menus.items.store | Admin\Cms\MenuItemController@store | module:menus, can:menus.create |
+| 26 | PUT | /admin/website/menu-items/{item} | admin.website.menu-items.update | Admin\Cms\MenuItemController@update | module:menus, can:menus.edit |
+| 27 | POST | /admin/website/menu-items/{item}/toggle | admin.website.menu-items.toggle | Admin\Cms\MenuItemController@toggle | module:menus, can:menus.change_status |
+| 28 | DELETE | /admin/website/menu-items/{item} | admin.website.menu-items.destroy | Admin\Cms\MenuItemController@destroy | module:menus, can:menus.delete |
+| 29 | POST | /admin/website/menus/{menu}/reorder | admin.website.menus.reorder | Admin\Cms\MenuController@reorder | module:menus, can:menus.edit |
+| 30 | GET | /admin/website/menus/{menu}/link-check | admin.website.menus.link-check | Admin\Cms\MenuController@linkCheck | module:menus, can:menus.view |
+| 31 | GET | /admin/website/pages | admin.website.pages.index | Admin\Cms\PageController@index | module:pages, can:pages.view_any |
+| 32 | GET | /admin/website/pages/create | admin.website.pages.create | Admin\Cms\PageController@create | module:pages, can:pages.create |
+| 33 | POST | /admin/website/pages | admin.website.pages.store | Admin\Cms\PageController@store | module:pages, can:pages.create |
+| 34 | GET | /admin/website/pages/{page}/edit | admin.website.pages.edit | Admin\Cms\PageController@edit | module:pages, can:pages.view |
+| 35 | PUT | /admin/website/pages/{page} | admin.website.pages.update | Admin\Cms\PageController@update | module:pages, can:pages.edit |
+| 36 | POST | /admin/website/pages/{page}/publish | admin.website.pages.publish | Admin\Cms\PageController@publish | module:pages, can:pages.change_status |
+| 37 | POST | /admin/website/pages/{page}/schedule | admin.website.pages.schedule | Admin\Cms\PageController@schedule | module:pages, can:pages.change_status |
+| 38 | POST | /admin/website/pages/{page}/unpublish | admin.website.pages.unpublish | Admin\Cms\PageController@unpublish | module:pages, can:pages.change_status |
+| 39 | POST | /admin/website/pages/{page}/duplicate | admin.website.pages.duplicate | Admin\Cms\PageController@duplicate | module:pages, can:pages.create |
+| 40 | DELETE | /admin/website/pages/{page} | admin.website.pages.destroy | Admin\Cms\PageController@destroy | module:pages, can:pages.delete |
+| 41 | POST | /admin/website/pages/{page}/restore | admin.website.pages.restore | Admin\Cms\PageController@restore | module:pages, can:pages.restore, route `->withTrashed()` |
+| 42 | GET | /admin/website/pages/{page}/revisions | admin.website.pages.revisions.index | Admin\Cms\PageRevisionController@index | module:pages, can:pages.view_logs |
+| 43 | POST | /admin/website/pages/{page}/revisions/{revision}/revert | admin.website.pages.revisions.revert | Admin\Cms\PageRevisionController@revert | module:pages, can:pages.change_status |
+| 44 | GET | /admin/website/pages/{page}/preview-link | admin.website.pages.preview-link | Admin\Cms\PageController@previewLink | module:pages, can:pages.view |
+| 45 | GET | /admin/website/pages/export | admin.website.pages.export | Admin\Cms\PageController@export | module:pages, can:pages.export (declare before `pages/{page}`) |
+| 46 | GET | /admin/website/cta-blocks | admin.website.cta-blocks.index | Admin\Cms\CtaBlockController@index | module:website_cta_blocks, can:website_cta_blocks.view_any |
+| 47 | POST | /admin/website/cta-blocks | admin.website.cta-blocks.store | Admin\Cms\CtaBlockController@store | module:website_cta_blocks, can:website_cta_blocks.create |
+| 48 | GET | /admin/website/cta-blocks/{ctaBlock}/edit | admin.website.cta-blocks.edit | Admin\Cms\CtaBlockController@edit | module:website_cta_blocks, can:website_cta_blocks.view |
+| 49 | PUT | /admin/website/cta-blocks/{ctaBlock} | admin.website.cta-blocks.update | Admin\Cms\CtaBlockController@update | module:website_cta_blocks, can:website_cta_blocks.edit |
+| 50 | POST | /admin/website/cta-blocks/{ctaBlock}/toggle | admin.website.cta-blocks.toggle | Admin\Cms\CtaBlockController@toggle | module:website_cta_blocks, can:website_cta_blocks.change_status |
+| 51 | GET | /admin/website/cta-blocks/{ctaBlock}/usage | admin.website.cta-blocks.usage | Admin\Cms\CtaBlockController@usage | module:website_cta_blocks, can:website_cta_blocks.view |
+| 52 | DELETE | /admin/website/cta-blocks/{ctaBlock} | admin.website.cta-blocks.destroy | Admin\Cms\CtaBlockController@destroy | module:website_cta_blocks, can:website_cta_blocks.delete |
+| 53 | GET | /admin/website/faqs | admin.website.faqs.index | Admin\Cms\FaqController@index | module:faqs, can:faqs.view_any |
+| 54 | POST | /admin/website/faqs | admin.website.faqs.store | Admin\Cms\FaqController@store | module:faqs, can:faqs.create |
+| 55 | PUT | /admin/website/faqs/{faq} | admin.website.faqs.update | Admin\Cms\FaqController@update | module:faqs, can:faqs.edit |
+| 56 | POST | /admin/website/faqs/{faq}/toggle | admin.website.faqs.toggle | Admin\Cms\FaqController@toggle | module:faqs, can:faqs.change_status |
+| 57 | POST | /admin/website/faqs/reorder | admin.website.faqs.reorder | Admin\Cms\FaqController@reorder | module:faqs, can:faqs.edit |
+| 58 | DELETE | /admin/website/faqs/{faq} | admin.website.faqs.destroy | Admin\Cms\FaqController@destroy | module:faqs, can:faqs.delete |
+| 59 | GET | /admin/website/faq-categories | admin.website.faq-categories.index | Admin\Cms\FaqCategoryController@index | module:faq_categories, can:faq_categories.view_any |
+| 60 | POST | /admin/website/faq-categories | admin.website.faq-categories.store | Admin\Cms\FaqCategoryController@store | module:faq_categories, can:faq_categories.create |
+| 61 | PUT | /admin/website/faq-categories/{category} | admin.website.faq-categories.update | Admin\Cms\FaqCategoryController@update | module:faq_categories, can:faq_categories.edit |
+| 62 | POST | /admin/website/faq-categories/reorder | admin.website.faq-categories.reorder | Admin\Cms\FaqCategoryController@reorder | module:faq_categories, can:faq_categories.edit |
+| 63 | DELETE | /admin/website/faq-categories/{category} | admin.website.faq-categories.destroy | Admin\Cms\FaqCategoryController@destroy | module:faq_categories, can:faq_categories.delete |
+| 64 | GET | /admin/website/seo | admin.website.seo.index | Admin\Cms\SeoController@index | module:seo, can:seo.view_any |
+| 65 | GET | /admin/website/seo/edit | admin.website.seo.edit | Admin\Cms\SeoController@edit | module:seo, can:seo.view (query `target=page:{id}` or `route:{name}`) |
+| 66 | PUT | /admin/website/seo | admin.website.seo.update | Admin\Cms\SeoController@update | module:seo, can:seo.edit |
+| 67 | POST | /admin/website/seo/bulk-robots | admin.website.seo.bulk-robots | Admin\Cms\SeoController@bulkRobots | module:seo, can:seo.edit |
+| 68 | POST | /admin/website/seo/sitemap/regenerate | admin.website.seo.sitemap.regenerate | Admin\Cms\SitemapController@regenerate | module:seo, can:seo.edit, throttle:6,1 |
+| 69 | GET | /admin/website/seo/sitemap/history | admin.website.seo.sitemap.history | Admin\Cms\SitemapController@history | module:seo, can:seo.view |
+| 70 | GET | /admin/website/seo/robots/preview | admin.website.seo.robots.preview | Admin\Cms\SeoController@robotsPreview | module:seo, can:seo.view |
+| 71 | GET | /admin/website/seo/export | admin.website.seo.export | Admin\Cms\SeoController@export | module:seo, can:seo.export |
+| 72 | GET | /admin/website/media | admin.website.media.index | Admin\Cms\MediaController@index | module:website_media, can:website_media.view_any |
+| 73 | POST | /admin/website/media | admin.website.media.store | Admin\Cms\MediaController@store | module:website_media, can:website_media.upload, throttle:60,1 |
+| 74 | GET | /admin/website/media/{asset} | admin.website.media.show | Admin\Cms\MediaController@show | module:website_media, can:website_media.view |
+| 75 | PUT | /admin/website/media/{asset} | admin.website.media.update | Admin\Cms\MediaController@update | module:website_media, can:website_media.edit |
+| 76 | GET | /admin/website/media/{asset}/usage | admin.website.media.usage | Admin\Cms\MediaController@usage | module:website_media, can:website_media.view |
+| 77 | POST | /admin/website/media/{asset}/regenerate | admin.website.media.regenerate | Admin\Cms\MediaController@regenerate | module:website_media, can:website_media.edit |
+| 78 | DELETE | /admin/website/media/{asset} | admin.website.media.destroy | Admin\Cms\MediaController@destroy | module:website_media, can:website_media.delete |
+| 79 | GET | / | site.home | Site\HomeController (invokable) | public_site, site.preview, site.cache |
+| 80 | GET | /robots.txt | site.robots | Site\RobotsController (invokable) | none (answers while the site is down) |
+| 81 | GET | /sitemap.xml | site.sitemap | Site\SitemapController@index | site.cache (+ public_site per integration F.2) |
+| 82 | GET | /sitemap-{index}.xml | site.sitemap.chunk | Site\SitemapController@chunk | site.cache (+ public_site), `whereNumber('index')` |
+| 83 | GET | /preview/page/{page} | site.preview.page | Site\PreviewController@page | public_site, site.preview (signature **or** session is checked inside the controller) |
+| 84 | GET | /preview/section/{section} | site.preview.section | Site\PreviewController@section | public_site, site.preview (as above) |
+| 85 | GET | /{slug} | site.page | Site\PageController (invokable) | public_site, site.preview, site.cache, slug regex of F.4, **registered last** |
+
+Contract aliases: the contract's `site` gate is the existing `public_site` (integration K-3). No public route
+carries `module:` or `can:` (INV-15).
+
+- **P-1 Preview authorisation lives in `PreviewController`.** A valid signature passes; otherwise the user must
+  hold `pages.view` / `website_sections.view`; a request carrying a bad `signature` is a 403 and one with none
+  is a 404 (FT-21, FT-23). `EnsurePreviewAuthorised` / `site.preview.auth` is therefore optional; if it is
+  written it must apply exactly this rule, never `signed` alone (that would 403 an authorised session).
+- **P-2 `?preview=1` is also resolved inside `HomeController` / `PageController`** (drafts only for a user
+  holding the area's `view` permission; everyone else gets the live page). `ResolvePreviewMode` must not render
+  drafts on its own; it only has to make `CachePublicResponse` skip the request. Preview responses already carry
+  `Cache-Control: no-store, private` and `X-Robots-Tag: noindex, nofollow`.
+
+#### 3. What the controllers need from files other owners write
+
+- **Policies are called by name** (the `can:` permission first, then the record rule): WebsiteSection
+  `view update publish unpublish toggle duplicate delete viewRevisions revert`; WebsiteSectionItem
+  `create(class, section) update toggle delete reorder(class, section)`; Menu `view update reorder linkCheck`;
+  MenuItem `create(class, menu) update toggle delete`; Page `view update changeSlug publish schedule unpublish
+  duplicate delete restore preview viewRevisions revert export(class)`; CtaBlock `view update changeKey toggle
+  usage delete`; Faq `update toggle delete`; FaqCategory `update delete`; MediaAsset `view update usage
+  regenerate delete upload(class)`; SeoMeta `bulkUpdate(class) export(class)`; SitemapGeneration
+  `viewAny(class) create(class)`. All exist in `app/Policies/Cms`. **Until the `POLICIES` rows of the models
+  handover §1 are registered, every record-level check denies everyone but Super Admin.**
+- **Views** (the view agents' paths; `admin/cms` per the Phase 3 path list, integration K-11):
+
+| View | Variables |
+|---|---|
+| `admin.cms.overview` | `siteState` (live/maintenance/disabled), `sections` (placement => label,total,enabled,published,unpublished), `orphanedCount`, `areas` (key => total,attention,route), `lastPublish` (type,label,at,by or null), `cacheVersion`, `canFlush`, `lastSitemap` |
+| `admin.cms.sections.index` | `placement`, `page`, `sections` (paginator, 100/page), `types` (key => label), `publishers` (id => name), `placementTabs` (placement,page_id,label), `addable` (see available), `canReorder`, `statusOptions`, `filters`, `can` (create,edit,publish,delete,revisions) |
+| `admin.cms.sections.available` | `placement`, `groups`, `types` (key,label,description,icon,group,unique,required,disabled,reason,existing_url); JSON: `{placement, groups, types[]}` |
+| `admin.cms.sections.edit` | `section`, `placement`, `orphaned`, `type`, `fields`, `repeaters`, `mediaRoles`, `tabs`, `draft` (`SectionService::canonicalPayload()`: fields, columns, items incl. disabled, media role => ids, faqs), `assets` (id => MediaAsset), `mediaLibrary` (id,name,alt_text,mime_type,kind,url,width,height — for `cmsMediaPicker`'s JSON), `options` (cta_blocks, menus, faq_categories, pages), `statistics` (metric => ?string), `publisher`, `revisionCount`, `previewUrl`, `can` (edit,publish,duplicate,delete,revisions) |
+| `admin.cms.sections.revisions` / `admin.cms.pages.revisions` | `section` or `page`, `revisions` (paginator), `authors`, `currentHash`, `publishedHash`, `canRevert` |
+| `admin.cms.statistics.index` | `items`, `sections` (id => WebsiteSection), `sectionLabels`, `resolved` (item id => ?string), `modeOptions`, `metricOptions`, `filters`, `canEdit` |
+| `admin.cms.menus.index` | `menus` (with items_count, enabled_items_count, child_items_count), `missingLocations` (MenuLocation[]), `filters` |
+| `admin.cms.menus.show` | `menu`, `tree` (root items with children, page), `urls` (item id => ?resolved url), `broken` (item id => reason), `options` (link_types, visibility, pages, anchors, routes, icons, parents), `can` (create,edit,toggle,delete) |
+| `admin.cms.menus.link-check` | `menu`, `items` (id,label,link_type,is_enabled,reason); JSON `{menu, items[]}` |
+| `admin.cms.pages.index` | `pages`, `completeness` (id => ?int), `trashed`, `sort`, `direction`, `filters`, `statusOptions`, `layoutOptions`, `counts` (status => n), `can` |
+| `admin.cms.pages.create` / `.edit` | `page`, `layoutOptions`, `templateOptions` (`PageTemplate::options()`), `reservedSlugs`, `seoMeta`, `seoInherited` (SeoPayload); edit adds `banner`, `sections`, `seoCompleteness`, `menuItems`, `revisionCount`, `can` (edit,changeSlug,publish,delete,duplicate,revisions,seo) |
+| `admin.cms.cta-blocks.index` / `.edit` / `.usage` | `blocks`, `backgrounds`, `statusOptions`, `variantOptions`, `styleOptions`, `filters`, `can` / `block`, `background`, `usage`, `variantOptions`, `styleOptions`, `canEdit`, `canChangeKey` / `block`, `usage` |
+| `admin.cms.faqs.index` | `questions`, `categories` (with `faqs_count`), `uncategorisedCount`, `selectedCategory`, `category` (id / `uncategorised` / null), `statusOptions`, `filters`, `canReorder`, `can` |
+| `admin.cms.faq-categories.index` | `categories` (with `faqs_count`), `filters`, `canReorder`, `can` |
+| `admin.cms.seo.index` / `.edit` / `.robots` | `rows` (paginator of `auditRows()` arrays), `ogImages`, `filters`, `sort`, `direction`, `robotsOptions`, `types`, `sitemap` (enabled,last,url), `robots` (mode,indexable), `can` / `target`, `targetKey`, `targetName`, `meta`, `inherited`, `completeness`, `ogImage`, `robotsOptions`, `changefreqOptions`, `ogTypes`, `canEdit` / `mode`, `body`, `indexable`, `maintenance`, `publicSite`, `canEditSettings` |
+| `admin.cms.sitemap.history` | `generations`, `authors`, `enabled`, `filters`, `canRegenerate` |
+| `admin.cms.media.index` / `.show` / `.usage` | `assets`, `cards` (id => card), `collectionOptions`, `derivativeOptions`, `profileOptions`, `maxUploadMb`, `filters`, `can` / `asset`, `card`, `variants`, `usage`, `can` / `asset`, `usage` |
+| `site.home` | `$site` (see below); a section preview adds `previewSection`, `previewOmitted` |
+| `site.pages.default` / `wide` / `legal` | `$site`, `$page` (id,title,slug,layout,excerpt,show_banner,banner_heading,banner_subheading,banner,body = sanitised,published_at) |
+| `site.404` | `$site` with empty `sections` |
+
+  `$site` is an object with the §6.9 `SitePayload` fields: `header`, `footer` (a section entry or null),
+  `sections` (list of entries), `seo` (`App\Services\Cms\Data\SeoPayload`), `page`, `isPreview`, `bodyClass`.
+  A section entry is the `SnapshotBuilder` array plus `view`; render it exactly as integration K.3's loop does
+  (`@include($section['view'], ['section' => $section, 'content' => $section['fields'], 'items' => …])`).
+  Every entry was already render-probed with those variables, so an orphaned, malformed or throwing section
+  never reaches the view (logged once, never a 500). When `App\Support\SitePayload` / `PublicPageService`
+  land, `ComposesSite::sitePayload()` / `liveSections()` are the two methods to swap.
+- **Responses.** Every write answers JSON (`{message, ...}`, 422 `{message, errors}`, 403 `{message}` or
+  `{message, usage}`) when `Accept: application/json`, else a redirect with `session('toast')`
+  (`['type' => success|error, 'message' => ...]`); an in-use refusal also flashes `cms_usage`. The CMS
+  exceptions are mapped inside the controllers, so integration E.4 is no longer required for them (harmless
+  if applied). `ContentActionNotAllowedException` is a 422 on the named field, a 403 on destroy routes
+  (integration M-7 solved at the call site; no `status()` needed on the exception).
+
+#### 4. Service methods the controllers call that do not exist yet — list, not invented
+
+| Class (not on disk) | Contract methods called (§6) |
+|---|---|
+| `App\Services\Cms\PageService` | `reservedSlugs(): array`, `create(array): Page`, `saveDraft(Page, array): Page` (receives title, slug, layout, excerpt, content, banner and template fields; never SEO), `duplicate(Page): Page`, `delete(Page): void` |
+| `App\Services\Cms\MenuService` | `storeItem(Menu, array): MenuItem`, `updateItem(MenuItem, array): MenuItem`, `reorder(Menu, array $tree): void`, `resolveUrl(MenuItem): ?string` |
+| `App\Services\Cms\CtaBlockService` | `save(array, ?CtaBlock): CtaBlock`, `usage(CtaBlock): Collection`, `delete(CtaBlock): void` |
+| `App\Services\Cms\FaqService` | `save(array, ?Faq): Faq`, `toggle(Faq, ContentStatus): Faq`, `reorder(?FaqCategory, array): void`, `reorderCategories(array): void` |
+| `App\Services\Cms\StatisticsProvider` | `all(): array` (metric => ?string), `valueFor(WebsiteSectionItem): ?string` |
+
+**Not in the contract, but a §7 route needs them** (names chosen to mirror the neighbouring contract methods;
+the owner may rename — each is one call site):
+
+| Needed | Called from | Why |
+|---|---|---|
+| `MenuService::updateMenu(Menu, array $data): Menu` (name, description, is_active) | `MenuController@update` | §7.2 `PUT menus/{menu}`; §6.3 has no menu write |
+| `MenuService::deleteItem(MenuItem): void` | `MenuItemController@destroy` | §7.2 `DELETE menu-items/{item}` |
+| `FaqService::delete(Faq): void` | `FaqController@destroy` | §7.4 `DELETE faqs/{faq}` |
+| `FaqService::saveCategory(array, ?FaqCategory): FaqCategory` (name, slug, description, icon, is_enabled) | `FaqCategoryController@store/update` | §7.4 category store/update |
+| `FaqService::deleteCategory(FaqCategory): void` | `FaqCategoryController@destroy` | §7.4 category destroy |
+| `PageService::restore(Page): Page` | `PageController@restore` | §7.3 `POST pages/{page}/restore` |
+
+Two contract methods are called with a **partial payload** and must accept it: `MenuService::updateItem($item,
+['is_enabled' => bool])` (the toggle route) and `CtaBlockService::save(['status' => value], $block)` (the
+toggle route). `SectionService` has no write for the `faq_website_section` picks of a `source = selected` FAQ
+section, so no request accepts picks yet.
+
+#### 5. Decisions and findings an owner may want to overrule
+
+1. **Publishing a page goes through `ContentPublisher`** (`publish`, `schedule`, `unpublish`, `revert`), the
+   real writer of the published columns, not `PageService::publish()` of §6.4.
+2. **The signed preview link is built with `URL::temporarySignedRoute('site.preview.page', …)`** in
+   `PageController@previewLink` (TTL `website.preview_ttl_minutes`, clamped 5 min–7 days); there is no
+   `PreviewService` yet. JSON `{url, expires_at}` is what `cmsCopy` reads.
+3. **Section and FAQ lists are sortable only when unfiltered and on one page** (`canReorder`): reorder must post
+   the exact current set (INV-5). The section list pages at 100.
+4. **`PageTemplate` (`app/Http/Requests/Cms/PageTemplate.php`) is the one allowlist** of `pages.template`
+   (`site.pages.default|wide|legal`); an unknown or missing template renders the default. `PageService` should
+   validate against `PageTemplate::ALLOWED` rather than restate the list.
+5. **Found in `SitemapGenerator` (services owner):** `cached(0)` uses the same cache key as `cached(null)`
+   (`[$chunk ?? 0]`), so `/sitemap-0.xml` would serve the index. `Site\SitemapController@chunk` refuses 0; the
+   generator should key the index differently.
+6. **A page's slug change and a CTA key change** are authorised with `PagePolicy::changeSlug` /
+   `CtaBlockPolicy::changeKey` before the service runs; the Form Requests also refuse a system-page slug change
+   without `pages.change_status`.
+7. **Bulk SEO** (`seo.bulk-robots`) writes each target through `SeoService::save()` inside one transaction —
+   all rows or none; the service bumps the cache once per row after commit.
+
+---
+
+### Phase 3 public website views (resources/views/site/**, resources/views/components/site/**)
+
+**Delivered.** 42 Blade files compile (`view:cache` then `view:clear`; each compiled file `php -l` clean). A
+read-only render script (array cache and session, fake snapshots, no DB write) rendered every page and every
+section partial, including each partial alone with only the K.3 variables exactly as
+`ComposesSite::usableSection()` probes it. No test was run. Static scans on the tree: FT-37 (no raw echo except
+`RichText::sanitize()`), FT-42 (no settings or config helper call in `site/`), no bare image tag in `site/`, no
+request-forgery token anywhere in a cacheable page (M-6). Checked in a browser at 375 and 1280 px, light and
+dark: no horizontal overflow, drawer focus trap / Escape / focus return, dropdown ArrowDown / ArrowUp / Escape.
+
+```
+resources/views/site/layouts/public.blade.php        the public layout (contract name layouts/site — see 1)
+resources/views/site/home.blade.php                   section-driven home (+ honest empty state, section-preview states)
+resources/views/site/pages/{default,wide,legal}.blade.php   the three PageTemplate::ALLOWED templates
+resources/views/site/pages/partials/page.blade.php   banner + body or page sections, shared by the three
+resources/views/site/404.blade.php                    branded 404, header/footer intact, menu-rich
+resources/views/site/{holding,maintenance}.blade.php  503 pages (both include site/partials/holding-page)
+resources/views/site/partials/sections.blade.php     THE renderer loop (INV-2)
+resources/views/site/partials/theme-script.blade.php pre-paint theme (appearance.default_theme)
+resources/views/site/partials/holding-page.blade.php standalone 503 document
+resources/views/site/sections/{header,hero,about,rich_content,faq,cta,footer}.blade.php   SectionRegistry::view()
+resources/views/site/sections/{services,courses}.blade.php + sections/partials/teaser.blade.php   Phase 4 / 14 types
+resources/views/site/cta/{banner,card,inline,split,full_width}.blade.php   CtaVariant::view()
+resources/views/components/site/{brand,cta,menu,preview-ribbon,seo,social-links,stats,theme-toggle}.blade.php   new
+resources/views/components/site/{accordion,prose,button}.blade.php   edited (see 4)
+```
+
+#### 1. Layout name
+
+The brief placed the layout at `site.layouts.public` because `resources/views/layouts/**` is not a Phase 3
+path. Every site view extends it; nothing references `layouts.site`. If the contract name is wanted, the
+integrator may create `resources/views/layouts/site.blade.php` containing exactly one line:
+
+```blade
+@extends('site.layouts.public')
+```
+
+The layout reuses `layouts.partials.brand-theme` (the admin shell's runtime `--brand-*` palette) and does **not**
+include `layouts.partials.head` (that partial prints a token meta tag and `noindex`, both wrong for a cached
+public page).
+
+#### 2. Prerequisites the views rely on (integration items; none are mine to write)
+
+1. **`site_setting()` helper** (integration E.1). Every normal site view calls it. The components and the
+   holding / maintenance pages read settings through a guarded closure (`function_exists` + `rescue`), because
+   Phase 2's `EnsurePublicSiteAvailable` already renders `site.maintenance` today — verified to render with the
+   helper absent, keeping `MaintenanceModeTest`'s "Scheduled maintenance", the admin's message, `noindex` and no
+   sign-in link.
+2. **Settings read, all must be `public => true` in `SettingsRegistry`** (`SiteSettings` throws otherwise):
+   `company.name company.tagline company.copyright_text branding.logo_light branding.logo_dark branding.favicon
+   appearance.default_theme contact.email contact.phone contact.whatsapp contact.address contact.city
+   contact.country contact.business_hours social.facebook social.instagram social.linkedin social.youtube
+   social.tiktok social.x_twitter social.github social.whatsapp_link seo.google_analytics_id
+   seo.google_tag_manager_id seo.facebook_pixel_id seo.google_site_verification` (all public today) and the four
+   Phase 3 keys of §5.1a that integration D must add: `website.show_theme_toggle website.hero_video_enabled
+   website.faq_accordion_open_first website.image_lazy_loading`. Until D lands those four reads are wrapped in
+   `rescue()`: an undeclared key logs the exception and falls back to its §5.1a default (`true`) instead of
+   taking the page down. Every other key is read unguarded, so a missing `public` flag fails loudly (INV-10).
+3. **Front-end build.** The views use Tailwind classes the current `public/build` CSS does not contain. Run
+   `npm run build` (or `npm run dev`) after integration; no package is added. Alpine 3.17's `x-teleport` and the
+   project's own `x-trap` directive are used; nothing else.
+4. **`StatisticsProvider`** (not on disk). `<x-site.stats>` resolves every live statistic (K-4 / M-8): it calls
+   `valueForSnapshot(array $item)` when the provider has it, otherwise `resolve(StatisticMetric)`, then falls
+   back to `manual_value`, and drops the item when still null (INV-12). With the class absent a live item shows
+   its manual value. Recommended: add `valueForSnapshot(array): ?string` beside the contract's
+   `valueFor(WebsiteSectionItem)`, since a partial holds arrays (§8.14).
+5. **404 from the exception handler.** `Site\PageController` already renders `site.404` itself. For a 404 thrown
+   anywhere else on a public URL, the handler may render it with no `$site` at all — the layout then falls back
+   to the brand, theme toggle and a settings-built footer. Optional, `bootstrap/app.php`:
+
+```php
+$exceptions->render(function (\Symfony\Component\HttpKernel\Exception\NotFoundHttpException $e, \Illuminate\Http\Request $request) {
+    if ($request->expectsJson() || $request->is('admin', 'admin/*', 'student*', 'teacher*', 'client*', 'collaborator*') || ! view()->exists('site.404')) {
+        return null;
+    }
+
+    return response()->view('site.404', [], 404)->header('X-Robots-Tag', 'noindex, nofollow');
+});
+```
+
+6. **Holding page view.** `EnsurePublicSiteAvailable` renders `site.maintenance` for both states today. Integration
+   E.3 step 1 (`site.holding` when `public_site_enabled` is off) gives the switched-off state its own icon; both
+   views accept exactly `$company`, `$heading`, `$message`. E.3 step 3's request attribute `site_state`
+   (`maintenance` | `disabled`) turns on the layout's amber staff ribbon.
+
+#### 3. Variable contract (matches `Site\Concerns\ComposesSite` / `RendersPages` / `PreviewController` as on disk)
+
+| View | Receives |
+|---|---|
+| `site.layouts.public` | `$site` object or array: `header`, `footer` (section entry or null), `sections`, `seo` (`SeoPayload`), `page`, `isPreview`, `bodyClass`; optional `$page` (title, slug), optional `$previewSection`; request attribute `site_state`. Sections: `title` (explicit title, wins over the payload), `robots` (explicit robots, also drops canonical), `content`; stacks `head`, `scripts` |
+| `site.home` | `$site`; optional `$previewSection` (int), `$previewOmitted` (bool) — header/footer-only and "cannot be previewed" states |
+| `site.pages.default` / `wide` / `legal` | `$site`, `$page` array: `title slug layout(content|sections, string or enum) show_banner banner_heading banner_subheading banner(media array|null) body(sanitised; published_content accepted as fallback) published_at` |
+| `site.404` | `$site` optional (empty `sections`) |
+| `site.holding` / `site.maintenance` | `$company`, `$heading`, `$message` |
+| `site.partials.sections` | `$sections` (entries = snapshot + id, section_key, anchor, view; a row with `published_content` also works), `$site` optional |
+| every `site.sections.{key}` | `$section`, `$content`, `$items`, `$media`, `$cta`, `$menus`, `$faqs`; optional `$index`, `$overlayHeader` (hero only) |
+| `site.sections.header` / `footer` | as above; header also optional `$overlay` (bool). Both render with `$section = null` (brand + theme toggle; footer from settings) |
+| `site.sections.services` / `courses` | as above; cards from `$section['provider']` (`list` or `['items' => list]` of `title excerpt url media icon meta`) |
+| `site.cta.{variant}` | from `<x-site.cta>`: `$cta $heading $subheading $description $buttons $background $color $tone $headingTag` |
+
+Components: `<x-site.brand logo-light logo-dark name show-name href size prefer-dark>`,
+`<x-site.menu menu variant=desktop|drawer|footer|legal label id-prefix>`, `<x-site.stats items tone variant>`,
+`<x-site.cta cta heading-level>`, `<x-site.seo seo title preview robots analytics>`,
+`<x-site.preview-ribbon mode=preview|maintenance|disabled target exit-url editor-url>`,
+`<x-site.theme-toggle variant=icon|segmented>`, `<x-site.social-links size>`.
+
+#### 4. Route names used (every one behind `Route::has()`)
+
+`site.home`, `site.page` (`['slug' => …]`, the preview ribbon's exit link), `admin.website.index` (the ribbon's
+"Back to the editor", signed-in users only). Every other public URL comes from a snapshot `url`. No `login` route
+is referenced: the header's Login button is the snapshot link, shown to guests only; the holding, maintenance
+and 404 pages carry no sign-in link.
+
+#### 5. Decisions and fixes an owner may want to overrule
+
+1. **Existing component bugs fixed (my path).** `components/site/prose.blade.php` did not compile: a nested
+   comment inside its docblock closed the comment early (PHP parse error on every render). `button.blade.php`
+   appended the `sm` / `lg` size after `ButtonStyle::SIZE`, so `sm` lost to the default `h-11` by stylesheet
+   order; a size now replaces the style's size. K-6: `$siteSetting(` in the accordion / prose examples is now
+   `site_setting(`.
+2. **K-12 / FT-28 (menu freshness):** `<x-site.menu>` drops a `page` link whose slug is no longer published —
+   one `Page::query()->visible()->pluck('slug')` per request, memoised on the request, only when the tree holds a
+   page link. D-W3-8 (the frozen tree) is otherwise untouched. Visibility is applied per request after the cache.
+3. **Forced-dark scopes.** Surfaces that are dark in both themes (hero over an image, dark CTA panels, the
+   footer, a scrolled-to-top header over a hero) wrap their content in `class="dark"`, so every `dark:` utility and
+   every `ButtonStyle::classes()` read correctly with no second class list. A light custom CTA colour yields to
+   slate in the dark theme.
+4. **Hero video** is inserted by Alpine only at `md`+ without `prefers-reduced-motion` and while
+   `website.hero_video_enabled` is on; the poster / background image paints underneath (R-7).
+5. **Business hours** are printed as the stored `HH:MM` strings, grouped by identical consecutive days — not
+   through `app_time()`, which would shift a wall-clock time through the display timezone (D61). The copyright
+   year uses `app_date(now(), 'Y')`; `{year}` and `{company}` are interpolated.
+6. **Services / courses teasers** only render once Phase 4 / 14 register those types; until they have data they
+   show an honest empty state with the real contact email and phone, never invented offerings.
+7. **SEO component:** analytics ids must match the vendor format (`GTM-…`, `G-…`, digits) or nothing renders;
+   never in preview; `@json` for every id.
+
+---
+
+### Phase 3 admin CMS screens (resources/views/admin/cms/**)
+
+**Delivered (new files only; no Phase 1/2 file, layout or `x-ui.*` component edited).** 43 Blade files. `view:cache`
+then `view:clear`; every compiled file `php -l` clean. A read-only render script (rolled-back transaction, array
+cache and session, contract routes registered in memory only, fake models shaped exactly like the Admin\Cms
+controllers pass them) rendered all 23 screens with 0 failures, no unrendered component and no leaked Blade
+syntax, and proved the repeater item-error isolation below. No route, test, seeder, npm or composer command was run.
+
+```
+admin/cms/overview.blade.php                       admin.website.index
+admin/cms/sections/{index,available,edit,revisions}.blade.php
+admin/cms/sections/partials/{add-form,repeater,item-form}.blade.php
+admin/cms/statistics/index.blade.php
+admin/cms/menus/{index,show,link-check}.blade.php   menus/partials/node.blade.php
+admin/cms/pages/{index,create,edit,revisions}.blade.php   pages/partials/form.blade.php
+admin/cms/cta-blocks/{index,edit,usage}.blade.php  cta-blocks/partials/form.blade.php
+admin/cms/faqs/index.blade.php                     admin/cms/faq-categories/index.blade.php
+admin/cms/media/{index,show,usage}.blade.php
+admin/cms/seo/{index,edit,robots}.blade.php        admin/cms/sitemap/history.blade.php
+admin/cms/partials/  scripts (the Alpine components), field (registry field switch), media-picker,
+                     media-library-json, richtext, link-field, icon-picker, length-meter, seo-fields,
+                     status-badge, revisions-table, usage-list
+```
+
+#### 1. View names and variables — they match the controllers on disk
+
+The views consume exactly the variables of the "Phase 3 controllers" block §3 table (checked against every
+`return view(...)` in `app/Http/Controllers/Admin/Cms`). Every variable is read defensively (`?? default`), so a
+missing optional one degrades instead of throwing. Nothing else is required, with **one request**:
+
+- **Pass `mediaLibrary` to five more screens** — same shape as `SectionController::mediaLibrary()` (list of
+  `id, name, alt_text, mime_type, kind, url, width, height`): `PageController@create`, `PageController@edit`,
+  `CtaBlockController@index` (create dialog), `CtaBlockController@edit`, `SeoController@edit`. Without it those
+  image pickers (page banner, OG image, CTA background) show "nothing in the library" and can only keep or clear
+  the current image — a stored id is always kept as a placeholder chip, so saving never clears an image silently.
+  Copy-paste per action: `'mediaLibrary' => $this->mediaLibrary(),` plus the private method from `SectionController`
+  (inject `MediaService` where the controller does not have it).
+
+#### 2. Every route name the views call (all declared in the controllers block §2 table)
+
+`admin.website.index`, `admin.website.cache.flush`, `admin.website.statistics.index`,
+`admin.website.sections.{index,store,edit,update,reorder,publish,unpublish,toggle,duplicate,destroy}`,
+`admin.website.sections.revisions.{index,revert}`, `admin.website.sections.items.{store,reorder}`,
+`admin.website.section-items.{update,toggle,destroy}`,
+`admin.website.menus.{index,show,update,reorder,link-check}`, `admin.website.menus.items.store`,
+`admin.website.menu-items.{update,toggle,destroy}`,
+`admin.website.pages.{index,create,store,edit,update,publish,schedule,unpublish,duplicate,destroy,restore,export,preview-link}`,
+`admin.website.pages.revisions.{index,revert}`,
+`admin.website.cta-blocks.{index,store,edit,update,toggle,usage,destroy}`,
+`admin.website.faqs.{index,store,update,toggle,reorder,destroy}`,
+`admin.website.faq-categories.{index,store,update,reorder,destroy}`,
+`admin.website.seo.{index,edit,update,bulk-robots,export,robots.preview}`, `admin.website.seo.sitemap.{regenerate,history}`,
+`admin.website.media.{index,store,show,update,regenerate,destroy}`,
+`site.preview.section`, `site.preview.page`, `site.page`, `site.home`, `admin.settings.index` (`['group' => …]`).
+The `site.*` and `admin.settings.index` links and a few optional buttons sit behind `Route::has()`.
+
+#### 3. What the forms post (each matches its Form Request)
+
+| Screen | Posts |
+|---|---|
+| section editor | `content[field]…`, `media[role]` (id or `''`) / `media[role][]`, `name`, `anchor`, `publish` 0/1 |
+| repeater item | `item[field]…` (+ `group` on store), and `_item` = item id or `new_{group}` — see §4 |
+| reorders (JSON) | sections `placement`, `page_id` (page placement only), `order[]`; items / FAQ categories `order[]`; FAQs `faq_category_id` (id or null) + `order[]`; menus `tree` = `[{id, children: [{id, children: []}]}]` |
+| toggles | sections / items / menu items `enabled` 0/1; CTA blocks and FAQs `status` (draft / published) |
+| destructive / reasoned | unpublish, remove section, revert `reason` (required, `x-ui.confirm`); media delete `reason` (optional); page schedule `publish_at` (datetime-local, display timezone) |
+| page form | `title, slug, layout, excerpt, content, show_banner, banner_media_id, banner_heading, banner_subheading, template, sort_order`, `seo[title|meta_description|meta_keywords|canonical_url|robots|og_image_media_id]`, `publish` 0/1 (`auto_slug` is UI-only, ignored) |
+| CTA form | the `ValidatesCtaBlock` fields, **no `status`** (prohibited) |
+| FAQ dialog | `question, answer, faq_category_id, is_featured`, **no `status`** (prohibited); `_faq` UI-only |
+| menu item dialog | the `ValidatesMenuItem` fields (inactive target controls are disabled, so not posted); `_item_id` UI-only |
+| SEO editor / bulk | `target`, `seo[...]` (editorRules keys), `reason` / `targets[]`, `robots`, `sitemap_include` |
+| media upload | one XHR per file: `file`, `collection`, `profile`, `Accept: application/json`; a 422 `errors.file[0]` is printed beside the file |
+| filters (GET) | only `CmsListRequest` keys: `search status layout system unpublished missing_seo trashed enabled variant unused collection type derivatives category featured attached robots gap mode metric page_id sort direction page` |
+
+Every fetch-based action (drag reorder, bulk publish/enable/disable, usage popover, share-preview link) sends
+`Accept: application/json` + `X-CSRF-TOKEN` and reads `RespondsForCms`' JSON (`message`, `errors`, `url`, `usage`).
+
+#### 4. Decisions an owner may want to overrule
+
+1. **Drag-to-reorder without SortableJS.** `partials/scripts` registers the Alpine components on `alpine:init`
+   (`cmsSortable`, `cmsMenuTree`, `cmsMediaPicker`, `cmsUploader`, `cmsSlug`, `cmsLengthMeter`, `cmsBulk`, `cmsDirty`,
+   `cmsFetchList`, `cmsCopy`) using native HTML5 drag from a handle plus Move up / Move down buttons, an `aria-live`
+   announcement, restore-on-failure and an error toast (§8.2). `sortablejs` is not installed and is not needed by
+   these views; `cmsMenuTree` refuses a third level client-side before the server does.
+2. **Rich text.** `partials/richtext` renders `<trix-editor>` only when a `resources/js/cms.js` Vite entry exists and
+   is built (or the dev server is hot) — integration B.3 — and otherwise a plain HTML textarea. The server sanitises
+   either way (INV-13). The FAQ dialog uses the textarea always (a Trix editor cannot be re-seeded per question).
+3. **Repeater item errors stay in their form.** All item forms share `item[...]` names; while the others render,
+   the repeater hides the flashed input and the error bag (restored straight after), keyed by the posted `_item`.
+   Render-verified: the refused value appears once, only in the failed form.
+4. **No draft autosave.** The section editor saves on submit; the preview iframe reloads on demand (§8.5 asks for a
+   600 ms autosave — it needs a JSON update round-trip, not added).
+5. **Not built, no route or service exists:** a menu "create" action (G-1, missing slots show an empty state), hand
+   picking FAQs for a `source = selected` FAQ section, a robots.txt editor under `seo.edit` (G-3: read-only + a link
+   to Settings → SEO for `settings.edit` holders), the metric-health cards on the statistics screen (no per-metric
+   reason is passed).
+6. **CTA previews are admin approximations** of the public variants (no `site.cta.*` partial is included in the admin).
+7. **Tailwind:** the views use new arbitrary utilities (`has-[:checked]:`, `aspect-[1200/630]`, `min-h-[10rem]`…);
+   `resources/views/**` is already in the content glob, so the next `npm run build` picks them up — nothing to edit.
