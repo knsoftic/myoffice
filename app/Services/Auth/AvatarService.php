@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Services\Auth;
 
 use App\Models\User;
+use App\Support\ImageSanitizer;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Throwable;
 
 /**
@@ -35,9 +37,12 @@ final class AvatarService
     {
         $previous = $this->currentPath($user);
 
-        $path = $file->store(self::DIRECTORY, 'public');
+        // Store decoded pixels only: a valid image header followed by a script (a polyglot) passes
+        // every validation rule, so the original bytes are never written (ImageSanitizer).
+        $clean = ImageSanitizer::reencode($file);
+        $path = self::DIRECTORY.'/'.Str::random(40).'.'.$clean['extension'];
 
-        if (! is_string($path) || $path === '') {
+        if (! Storage::disk('public')->put($path, $clean['bytes'])) {
             throw new \RuntimeException('The avatar could not be written to the public disk.');
         }
 

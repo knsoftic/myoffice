@@ -39,6 +39,7 @@ use Throwable;
  * | `label`       | the form label                                                               |
  * | `type`        | the **input** type (§2's vocabulary, see self::TYPES) — what `<x-settings.field>` switches on |
  * | `storage`     | the `settings.type` column value this input persists as (see self::storageType()) |
+ * | `scale`       | decimals a `decimal` field is stored at; more significant decimals are refused, never rounded (self::scaleFor()); null otherwise |
  * | `rules`       | Laravel rules for this field, as a list of strings                           |
  * | `item_rules`  | rules for array children, suffix => rules (`'*'`, `'*.open'`, …); empty when none |
  * | `default`     | the registry default — what the seeder writes on insert and what `resetGroup()` restores |
@@ -233,6 +234,85 @@ final class SettingsRegistry
         'collaborator.default_student_commission_rate' => ['collaborator.default_student_commission_type', 'percentage'],
         'collaborator.default_project_commission_rate' => ['collaborator.default_project_commission_type', 'percentage'],
     ];
+
+    /*
+    |--------------------------------------------------------------------------
+    | Security floors (Phase 2 security re-review)
+    |--------------------------------------------------------------------------
+    |
+    | Hard server bounds for the keys that govern the sign-in throttle, the session idle timeout and
+    | password expiry. A setting may TIGHTEN a Phase 1 floor, never loosen it: the registry rules
+    | refuse a value outside the range, and every reader clamps to the same range again
+    | (`LoginRequest`, `ConfigureFromSettings::applySecurity()`, `EnsureUserIsActive`), exactly as
+    | `PasswordPolicy::minLength()` clamps `security.password_min_length`. The second lock is what
+    | holds when a row is written by raw SQL, an older release or a console command.
+    |
+    */
+
+    /** Failed sign-in attempts per email + IP: never more than 10, never fewer than 3. */
+    public const LOGIN_MAX_ATTEMPTS_MIN = 3;
+
+    public const LOGIN_MAX_ATTEMPTS_MAX = 10;
+
+    /** Lockout after the allowed attempts: at least 5 minutes, at most a day. */
+    public const LOCKOUT_MINUTES_MIN = 5;
+
+    public const LOCKOUT_MINUTES_MAX = 1440;
+
+    /** Idle session lifetime: at least 15 minutes, never more than a day. */
+    public const SESSION_LIFETIME_MIN = 15;
+
+    public const SESSION_LIFETIME_MAX = 1440;
+
+    /** Password expiry in days; 0 switches expiry off. */
+    public const FORCE_PASSWORD_CHANGE_DAYS_MAX = 365;
+
+    /** The ceiling `security.max_upload_mb` itself may be set to. */
+    public const MAX_UPLOAD_MB_MAX = 512;
+
+    /**
+     * Extensions no upload field ever accepts, whatever `security.allowed_file_types` says and
+     * whatever a field's own rules say: server-side script, executables, server configuration and
+     * markup a browser would run in the application's own origin. Matched against every segment of
+     * an uploaded file name (`logo.php.png`) by `SettingsService`, and stripped from the allowed list
+     * by `uploadExtensions()`.
+     *
+     * `svg` is deliberately absent: no field in this registry accepts it (see brandingFields()).
+     *
+     * @var list<string>
+     */
+    public const NEVER_UPLOADABLE_EXTENSIONS = [
+        'php', 'php3', 'php4', 'php5', 'php7', 'php8', 'phps', 'phtml', 'pht', 'phar', 'pgif', 'inc',
+        'asp', 'aspx', 'jsp', 'jspx', 'cgi', 'pl', 'py', 'rb', 'sh', 'bash', 'zsh',
+        'bat', 'cmd', 'com', 'exe', 'dll', 'so', 'jar', 'msi', 'ps1', 'vbs', 'wsf',
+        'htaccess', 'htpasswd', 'ini', 'html', 'htm', 'shtml', 'xhtml', 'js', 'mjs', 'cjs',
+    ];
+
+    /**
+     * The seven day keys `contact.business_hours` holds — exactly these, no more and no fewer.
+     *
+     * @var list<string>
+     */
+    public const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+
+    /**
+     * Refuses any ASCII control character — CR, LF, NUL, TAB and the rest — in a value that ends up
+     * in a mail header. Probed against Laravel 12's real Validator: `email:rfc` already refuses a
+     * CRLF fold, but it ACCEPTS a quoted-pair carrying a bare CR or LF (`"ops\<CR>"@example.test`)
+     * and a NUL byte (even under `email:rfc,strict`), so the rule is explicit rather than assumed.
+     */
+    private const NO_CONTROL_CHARACTERS = 'not_regex:/[\x00-\x1F\x7F]/';
+
+    /**
+     * A plain decimal Money can read: optional sign, digits with an optional (possibly empty)
+     * fraction, or a bare fraction — `5000.`, `.5`, `-0`, `12.50`. Exponents, thousand separators and
+     * embedded spaces are deliberately NOT matched: they reach the validator untouched and are
+     * refused there, rather than being "helpfully" reinterpreted (`5,5` must never become `55`).
+     */
+    private const PLAIN_DECIMAL = '/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/';
+
+    /** Exponent magnitude beyond which a numeric string is treated as unboundedly large or small. */
+    private const EXPONENT_LIMIT = 40;
 
     /** Normalised definitions, built once per process. */
     private static ?array $normalised = null;
@@ -603,13 +683,17 @@ final class SettingsRegistry
             $typeValue = $effective($type);
             $rateValue = $effective($rate);
 
-            if (! is_scalar($typeValue) || (string) $typeValue !== $percentage || ! is_scalar($rateValue)) {
+            if (! is_scalar($typeValue) || (string) $typeValue !== $percentage) {
                 continue;
             }
 
-            $rateValue = trim((string) $rateValue);
+            // ANY numeric shape is compared — '5000.', '.5', '1e3', ' 150 ' — not only the shapes a
+            // regex happened to anticipate. A trailing dot used to slip past the old pattern and
+            // store a 5000 % rate; a value that is not numeric at all is left to the field's own
+            // `numeric` / `decimal` rules.
+            $comparable = self::decimalString($rateValue);
 
-            if (preg_match('/^\+?\d*\.?\d+$/', $rateValue) !== 1 || bccomp(ltrim($rateValue, '+'), '100', 4) <= 0) {
+            if ($comparable === null || bccomp($comparable, '100', 10) <= 0) {
                 continue;
             }
 
@@ -622,6 +706,263 @@ final class SettingsRegistry
         }
 
         return $errors;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Value shaping (shared by UpdateSettingsRequest and SettingsService)
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * The number of decimals a `decimal` field is stored at.
+     *
+     * An explicit `scale` in the declaration wins; otherwise the upper bound of the field's own
+     * `decimal:min,max` rule; otherwise Money's rate scale (4, matching `decimal(8,4)`).
+     *
+     * @param  array<string, mixed>  $field
+     */
+    public static function scaleFor(array $field): int
+    {
+        if (isset($field['scale']) && is_int($field['scale'])) {
+            return max(0, $field['scale']);
+        }
+
+        foreach ((array) ($field['rules'] ?? []) as $rule) {
+            if (is_string($rule) && preg_match('/^decimal:(\d+)(?:,(\d+))?$/', $rule, $matches) === 1) {
+                return (int) ($matches[2] ?? $matches[1]);
+            }
+        }
+
+        return Money::RATE_SCALE;
+    }
+
+    /**
+     * Restate a submitted `decimal` value at its field's scale through Money — BEFORE it is
+     * validated and before it is stored — so the validator, the 100 % cap and the stored column all
+     * judge the one value that will actually be kept.
+     *
+     * Only an **exact** restatement is made; nothing is ever rounded (Phase 2 review low 1). A value
+     * with more significant decimals than the scale would have to be rounded to be stored, and money
+     * is never silently rounded, so it is returned exactly as given and refused by exceedsScale():
+     *
+     *   '5000.'      => '5000.0000'   (the cap now sees 5000 and refuses it)
+     *   '100.50'     => '100.5000'
+     *   '100.500000' => '100.5000'    (trailing zeros only — the same number)
+     *   '-0'         => '0.0000'
+     *   '100.00001'  => '100.00001'   (untouched: more decimals than decimal(8,4) holds — refused)
+     *   '1e3'        => '1e3'         (untouched: not a plain decimal, so `decimal:` refuses it)
+     *
+     * Anything that is not a plain decimal (exponent, thousand separator, words, arrays) is returned
+     * exactly as given, for the field's own rules to refuse. Non-decimal fields pass through.
+     *
+     * @param  array<string, mixed>  $field
+     */
+    public static function normaliseDecimal(array $field, mixed $value): mixed
+    {
+        if (! self::isDecimalField($field)) {
+            return $value;
+        }
+
+        $plain = self::plainDecimal($value);
+
+        // Phase 2 review low 1: restate exactly or not at all — never round.
+        if ($plain === null || self::significantDecimals($plain) > self::scaleFor($field)) {
+            return $value;
+        }
+
+        return Money::round($plain, self::scaleFor($field));
+    }
+
+    /**
+     * Does a `decimal` value carry more significant decimals than its field's scale?
+     *
+     * True means the value could only be stored by rounding it, and money is never silently rounded
+     * (Phase 2 review low 1): `UpdateSettingsRequest` and `SettingsService` both refuse it with a
+     * validation error. Trailing zeros are not significant — `'100.500'` at scale 2 is exactly
+     * 100.50 and is accepted. A value that is not a plain decimal (`'1e3'`, `'5,5'`, an array)
+     * answers false: it is the field's own `numeric` / `decimal:` rules that refuse it.
+     *
+     * @param  array<string, mixed>  $field
+     */
+    public static function exceedsScale(array $field, mixed $value): bool
+    {
+        if (! self::isDecimalField($field)) {
+            return false;
+        }
+
+        $plain = self::plainDecimal($value);
+
+        return $plain !== null && self::significantDecimals($plain) > self::scaleFor($field);
+    }
+
+    /**
+     * The one message both write paths give a value exceedsScale() refuses.
+     *
+     * @param  array<string, mixed>  $field
+     */
+    public static function scaleErrorMessage(array $field): string
+    {
+        $scale = self::scaleFor($field);
+
+        return sprintf(
+            'The %s may not have more than %d decimal place%s; it is never rounded.',
+            mb_strtolower((string) ($field['label'] ?? $field['key'] ?? 'value')),
+            $scale,
+            $scale === 1 ? '' : 's',
+        );
+    }
+
+    /**
+     * Any numeric value as a plain decimal string bcmath can compare, or null when it is not
+     * numeric. Accepts every shape `is_numeric()` does — a trailing or leading dot, surrounding
+     * whitespace, a sign, exponent notation — and never routes the value through a float.
+     *
+     * An exponent beyond ±EXPONENT_LIMIT is folded to an out-of-range magnitude (or to zero), so a
+     * crafted `1e999999` cannot make bcpow() spend the request.
+     */
+    public static function decimalString(mixed $value): ?string
+    {
+        if (is_int($value)) {
+            return (string) $value;
+        }
+
+        if (is_float($value)) {
+            if (is_nan($value)) {
+                return null;
+            }
+
+            if (is_infinite($value)) {
+                return ($value < 0 ? '-1' : '1').str_repeat('0', self::EXPONENT_LIMIT + 1);
+            }
+
+            return sprintf('%.10F', $value);
+        }
+
+        if (! is_string($value) || ! is_numeric($value)) {
+            return null;
+        }
+
+        if (preg_match('/^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/', trim($value), $parts) !== 1) {
+            return null;
+        }
+
+        $sign = $parts[1] === '-' ? '-' : '';
+        $integer = ltrim($parts[2], '0');
+        $fraction = $parts[3] ?? '';
+        $mantissa = $sign.($integer === '' ? '0' : $integer).'.'.($fraction === '' ? '0' : $fraction);
+
+        if (bccomp($mantissa, '0', 50) === 0) {
+            return '0';
+        }
+
+        $exponentDigits = ltrim(ltrim($parts[4] ?? '', '+-'), '0');
+        $exponent = $exponentDigits === '' ? 0 : (strlen($exponentDigits) > 3 ? PHP_INT_MAX : (int) $exponentDigits);
+        $exponent = str_starts_with($parts[4] ?? '', '-') ? -$exponent : $exponent;
+
+        if ($exponent > self::EXPONENT_LIMIT) {
+            return $sign.'1'.str_repeat('0', self::EXPONENT_LIMIT + 1);
+        }
+
+        if ($exponent < -self::EXPONENT_LIMIT) {
+            return '0';
+        }
+
+        return bcmul($mantissa, bcpow('10', (string) $exponent, self::EXPONENT_LIMIT + 10), self::EXPONENT_LIMIT + 10);
+    }
+
+    /**
+     * The extensions an upload field may accept: its own list, narrowed to what
+     * `security.allowed_file_types` allows, never including a NEVER_UPLOADABLE extension.
+     *
+     * Pure — the caller reads the setting and passes it in. An unreadable or empty setting leaves
+     * the field's own list (minus the never-uploadable ones) in force: the setting narrows, it can
+     * never widen.
+     *
+     * @param  list<string>  $own  the field's own extensions, lower-case, without dots
+     * @return list<string>
+     */
+    public static function uploadExtensions(array $own, mixed $allowedSetting): array
+    {
+        $never = self::NEVER_UPLOADABLE_EXTENSIONS;
+
+        $own = array_values(array_unique(array_filter(
+            array_map(static fn (mixed $extension): string => strtolower(trim((string) $extension)), $own),
+            static fn (string $extension): bool => $extension !== '' && ! in_array($extension, $never, true) && preg_match('/^php\d*$/', $extension) !== 1,
+        )));
+
+        if (! is_string($allowedSetting) || trim($allowedSetting) === '') {
+            return $own;
+        }
+
+        $allowed = array_map(
+            static fn (string $extension): string => strtolower(trim($extension)),
+            explode(',', $allowedSetting),
+        );
+
+        return array_values(array_intersect($own, $allowed));
+    }
+
+    /**
+     * The largest upload a field may accept, in kilobytes: the smallest of the field's own cap,
+     * `security.max_upload_mb`, and PHP's own `upload_max_filesize` / `post_max_size` — whatever the
+     * setting says, a value above what PHP will accept is never promised.
+     */
+    public static function uploadKilobytes(int $ownKilobytes, mixed $maxUploadMb): int
+    {
+        $caps = [max(1, $ownKilobytes)];
+
+        if (is_numeric($maxUploadMb) && (int) $maxUploadMb >= 1) {
+            $caps[] = min(self::MAX_UPLOAD_MB_MAX, (int) $maxUploadMb) * 1024;
+        }
+
+        $php = self::phpUploadLimitKilobytes();
+
+        if ($php !== null) {
+            $caps[] = $php;
+        }
+
+        return max(1, min($caps));
+    }
+
+    /**
+     * PHP's effective per-file upload ceiling in kilobytes, or null when neither directive sets one.
+     */
+    public static function phpUploadLimitKilobytes(): ?int
+    {
+        $limits = [];
+
+        foreach (['upload_max_filesize', 'post_max_size'] as $directive) {
+            $bytes = self::iniBytes((string) ini_get($directive));
+
+            // post_max_size = 0 disables the limit; a non-positive value sets no ceiling here.
+            if ($bytes !== null && $bytes > 0) {
+                $limits[] = intdiv($bytes, 1024);
+            }
+        }
+
+        return $limits === [] ? null : max(1, min($limits));
+    }
+
+    /**
+     * '2M' => 2097152, '512K' => 524288, '1G' => 1073741824, '8388608' => 8388608.
+     */
+    private static function iniBytes(string $value): ?int
+    {
+        $value = strtolower(trim($value));
+
+        if (preg_match('/^(\d+)\s*([kmg]?)$/', $value, $matches) !== 1) {
+            return null;
+        }
+
+        $number = (int) $matches[1];
+
+        return match ($matches[2]) {
+            'g' => $number * 1024 * 1024 * 1024,
+            'm' => $number * 1024 * 1024,
+            'k' => $number * 1024,
+            default => $number,
+        };
     }
 
     /**
@@ -725,6 +1066,52 @@ final class SettingsRegistry
     }
 
     /**
+     * @param  array<string, mixed>  $field
+     */
+    private static function isDecimalField(array $field): bool
+    {
+        return ($field['storage'] ?? self::storageType((string) ($field['type'] ?? ''))) === 'decimal';
+    }
+
+    /**
+     * A value as a trimmed PLAIN_DECIMAL string, or null when it is not one.
+     *
+     * A float is read as the shortest string that converts back to it (`1000.01`, not
+     * `1000.0099999999`), so a programmatic float is judged on the number its caller wrote rather
+     * than on binary noise that would make exceedsScale() refuse it. A float that only prints with an
+     * exponent (`1.0E-5`) is not a plain decimal, exactly like the string `'1e3'`: it is left for the
+     * field's own `decimal:` rule to refuse, never expanded and rounded.
+     */
+    private static function plainDecimal(mixed $value): ?string
+    {
+        if (is_int($value)) {
+            return (string) $value;
+        }
+
+        if (is_float($value)) {
+            $value = is_finite($value) ? var_export($value, true) : null;
+        }
+
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $trimmed = trim($value);
+
+        return $trimmed !== '' && preg_match(self::PLAIN_DECIMAL, $trimmed) === 1 ? $trimmed : null;
+    }
+
+    /**
+     * Decimals that carry a value: '100.500' => 2, '5000.' => 0, '-0.000' => 0.
+     */
+    private static function significantDecimals(string $plain): int
+    {
+        $dot = strpos($plain, '.');
+
+        return $dot === false ? 0 : strlen(rtrim(substr($plain, $dot + 1), '0'));
+    }
+
+    /**
      * 'company.name' => ['company', 'name']; anything else => [null, null].
      *
      * @return array{0: string|null, 1: string|null}
@@ -759,14 +1146,17 @@ final class SettingsRegistry
         }
 
         $span = (int) ($field['span'] ?? self::DEFAULT_SPAN);
+        $storage = self::storageType($type);
+        $rules = array_values((array) ($field['rules'] ?? ['nullable', 'string']));
 
         return [
             'key' => $key,
             'group' => $group,
             'label' => (string) ($field['label'] ?? ucfirst(str_replace('_', ' ', $key))),
             'type' => $type,
-            'storage' => self::storageType($type),
-            'rules' => array_values((array) ($field['rules'] ?? ['nullable', 'string'])),
+            'storage' => $storage,
+            'scale' => $storage === 'decimal' ? self::scaleFor(['scale' => $field['scale'] ?? null, 'rules' => $rules]) : null,
+            'rules' => $rules,
             'item_rules' => (array) ($field['item_rules'] ?? []),
             'default' => $field['default'] ?? null,
             'options' => $field['options'] ?? null,
@@ -1153,12 +1543,21 @@ final class SettingsRegistry
                 'span' => 4,
                 'sort' => 40,
             ],
+            /*
+            | email_logo and login_background are PUBLIC artefacts by nature: a recipient's mail
+            | client fetches the email logo from a plain URL, and the sign-in background is painted
+            | for a visitor who is, by definition, not signed in. Neither can pass a permission check,
+            | so both live on the public disk like the logo and favicon. D21 forbids a PRIVATE
+            | artefact on the public disk; it does not forbid a public one. Before this they were
+            | stored on the private disk, their previews 404'd and nothing could ever serve them.
+            */
             'email_logo' => [
                 'label' => 'Email logo',
                 'type' => self::TYPE_IMAGE,
                 'rules' => ['nullable', 'image', 'mimes:png,jpg,jpeg', 'max:1024'],
                 'default' => null,
-                'help' => 'PNG only — mail clients do not render SVG.',
+                'help' => 'PNG or JPG — mail clients do not render SVG. Publicly reachable, so a mail client can load it. Takes effect when email notifications ship; nothing sends email with it yet.',
+                'public' => true,
                 'span' => 4,
                 'sort' => 50,
             ],
@@ -1167,6 +1566,8 @@ final class SettingsRegistry
                 'type' => self::TYPE_IMAGE,
                 'rules' => ['nullable', 'image', 'mimes:png,jpg,jpeg,webp', 'max:4096'],
                 'default' => null,
+                'help' => 'Shown beside the sign-in form, so it is publicly reachable.',
+                'public' => true,
                 'span' => 6,
                 'sort' => 60,
             ],
@@ -1210,7 +1611,7 @@ final class SettingsRegistry
                 'rules' => ['required', 'string'],
                 'default' => ThemePreference::System->value,
                 'options' => ThemePreference::options(),
-                'help' => 'Applied to accounts that have not picked a theme of their own.',
+                'help' => 'The theme the sign-in and password-reset pages open in, and the starting theme for any browser that has not chosen one. A signed-in user\'s own theme always wins.',
                 'public' => true,
                 'span' => 4,
                 'sort' => 10,
@@ -1226,9 +1627,11 @@ final class SettingsRegistry
             'table_page_size' => [
                 'label' => 'Rows per page',
                 'type' => self::TYPE_NUMBER,
-                'rules' => ['required', 'integer', 'min:5', 'max:200'],
+                // The same 10..100 bounds per_page() clamps to, so the screen never accepts a size
+                // that is silently ignored.
+                'rules' => ['required', 'integer', 'min:10', 'max:100'],
                 'default' => 15,
-                'help' => 'Default pagination size for list screens.',
+                'help' => 'Default pagination size for list screens, between 10 and 100.',
                 'suffix' => 'rows',
                 'span' => 4,
                 'sort' => 30,
@@ -1401,7 +1804,7 @@ final class SettingsRegistry
             'email' => [
                 'label' => 'Contact email',
                 'type' => self::TYPE_EMAIL,
-                'rules' => ['nullable', 'email:rfc', 'max:150'],
+                'rules' => ['nullable', 'email:rfc', self::NO_CONTROL_CHARACTERS, 'max:150'],
                 'default' => 'info@myoffice.test',
                 'public' => true,
                 'span' => 6,
@@ -1410,7 +1813,7 @@ final class SettingsRegistry
             'support_email' => [
                 'label' => 'Support email',
                 'type' => self::TYPE_EMAIL,
-                'rules' => ['nullable', 'email:rfc', 'max:150'],
+                'rules' => ['nullable', 'email:rfc', self::NO_CONTROL_CHARACTERS, 'max:150'],
                 'default' => 'support@myoffice.test',
                 'help' => 'Shown in the footer and on support screens. Falls back to the contact email.',
                 'public' => true,
@@ -1444,10 +1847,13 @@ final class SettingsRegistry
                 'span' => 4,
                 'sort' => 80,
             ],
+            // scale 7 (about a centimetre): more decimals are refused, never rounded, and
+            // `decimal:0,7` refuses what Money cannot read (`1e1`), as on the money fields.
             'latitude' => [
                 'label' => 'Latitude',
                 'type' => self::TYPE_DECIMAL,
-                'rules' => ['nullable', 'numeric', 'between:-90,90'],
+                'rules' => ['nullable', 'numeric', 'decimal:0,7', 'between:-90,90'],
+                'scale' => 7,
                 'default' => null,
                 'placeholder' => '31.5204',
                 'public' => true,
@@ -1457,7 +1863,8 @@ final class SettingsRegistry
             'longitude' => [
                 'label' => 'Longitude',
                 'type' => self::TYPE_DECIMAL,
-                'rules' => ['nullable', 'numeric', 'between:-180,180'],
+                'rules' => ['nullable', 'numeric', 'decimal:0,7', 'between:-180,180'],
+                'scale' => 7,
                 'default' => null,
                 'placeholder' => '74.3587',
                 'public' => true,
@@ -1477,11 +1884,18 @@ final class SettingsRegistry
             'business_hours' => [
                 'label' => 'Business hours',
                 'type' => self::TYPE_JSON,
-                // One row per weekday: an unbounded list would be folded into the single cached
-                // settings payload every request loads.
-                'rules' => ['nullable', 'array', 'max:7'],
+                // Exactly the seven weekday keys, each row exactly open / close / closed. `max:7`
+                // alone capped the row count but not the key names, so seven rows under ~140 KB keys
+                // still pushed the one cached settings payload past max_allowed_packet — and when that
+                // cache write failed, every setting silently read as its default.
+                'rules' => [
+                    'nullable',
+                    'array:'.implode(',', self::WEEKDAYS),
+                    'required_array_keys:'.implode(',', self::WEEKDAYS),
+                    'max:7',
+                ],
                 'item_rules' => [
-                    '*' => ['array'],
+                    '*' => ['array:open,close,closed', 'required_array_keys:open,close,closed'],
                     '*.open' => ['nullable', 'date_format:H:i'],
                     '*.close' => ['nullable', 'date_format:H:i'],
                     '*.closed' => ['nullable', 'boolean'],
@@ -1730,7 +2144,7 @@ final class SettingsRegistry
             'from_address' => [
                 'label' => 'From address',
                 'type' => self::TYPE_EMAIL,
-                'rules' => ['required', 'email:rfc', 'max:150'],
+                'rules' => ['required', 'email:rfc', self::NO_CONTROL_CHARACTERS, 'max:150'],
                 'default' => 'no-reply@myoffice.test',
                 'span' => 4,
                 'sort' => 70,
@@ -1738,7 +2152,8 @@ final class SettingsRegistry
             'from_name' => [
                 'label' => 'From name',
                 'type' => self::TYPE_TEXT,
-                'rules' => ['required', 'string', 'max:150'],
+                // A header value: no CR / LF / NUL, whatever the mail library does with one.
+                'rules' => ['required', 'string', self::NO_CONTROL_CHARACTERS, 'max:150'],
                 'default' => 'MyOffice ERP',
                 'span' => 4,
                 'sort' => 80,
@@ -1746,7 +2161,7 @@ final class SettingsRegistry
             'reply_to' => [
                 'label' => 'Reply-to address',
                 'type' => self::TYPE_EMAIL,
-                'rules' => ['nullable', 'email:rfc', 'max:150'],
+                'rules' => ['nullable', 'email:rfc', self::NO_CONTROL_CHARACTERS, 'max:150'],
                 'default' => null,
                 'help' => 'Leave empty to let replies go to the from address.',
                 'span' => 6,
@@ -2145,13 +2560,17 @@ final class SettingsRegistry
                 'span' => 4,
                 'sort' => 10,
             ],
+            /*
+            | Enforced by EnsureUserIsActive: a password older than this many days (measured from
+            | users.password_changed_at, or the account's creation when it was never changed) sends
+            | the next request to the existing change-password screen. 0 switches expiry off.
+            */
             'force_password_change_days' => [
                 'label' => 'Force a password change every',
                 'type' => self::TYPE_NUMBER,
-                'rules' => ['required', 'integer', 'min:0', 'max:365'],
+                'rules' => ['required', 'integer', 'min:0', 'max:'.self::FORCE_PASSWORD_CHANGE_DAYS_MAX],
                 'default' => 0,
-                'help' => 'Not enforced yet: password expiry arrives in a later phase. Read-only until then, so nobody relies on a protection that is not there.',
-                'readonly' => true,
+                'help' => 'Days a password stays valid. After that the person must choose a new one before doing anything else. 0 turns expiry off.',
                 'suffix' => 'days',
                 'span' => 4,
                 'sort' => 20,
@@ -2159,18 +2578,18 @@ final class SettingsRegistry
             'login_max_attempts' => [
                 'label' => 'Failed sign-in attempts allowed',
                 'type' => self::TYPE_NUMBER,
-                'rules' => ['required', 'integer', 'min:1', 'max:20'],
+                'rules' => ['required', 'integer', 'min:'.self::LOGIN_MAX_ATTEMPTS_MIN, 'max:'.self::LOGIN_MAX_ATTEMPTS_MAX],
                 'default' => 5,
-                'help' => 'Per email address and IP. Enforced by the sign-in form.',
+                'help' => 'Per email address and IP, between 3 and 10. Enforced by the sign-in form, which never allows more than 10 whatever is stored.',
                 'span' => 4,
                 'sort' => 30,
             ],
             'lockout_minutes' => [
                 'label' => 'Lockout duration',
                 'type' => self::TYPE_NUMBER,
-                'rules' => ['required', 'integer', 'min:1', 'max:1440'],
+                'rules' => ['required', 'integer', 'min:'.self::LOCKOUT_MINUTES_MIN, 'max:'.self::LOCKOUT_MINUTES_MAX],
                 'default' => 15,
-                'help' => 'How long the sign-in form refuses an email address and IP after the allowed attempts.',
+                'help' => 'How long the sign-in form refuses an email address and IP after the allowed attempts. Never shorter than 5 minutes.',
                 'suffix' => 'minutes',
                 'span' => 4,
                 'sort' => 40,
@@ -2178,29 +2597,42 @@ final class SettingsRegistry
             'session_lifetime' => [
                 'label' => 'Session lifetime',
                 'type' => self::TYPE_NUMBER,
-                'rules' => ['required', 'integer', 'min:5', 'max:43200'],
+                'rules' => ['required', 'integer', 'min:'.self::SESSION_LIFETIME_MIN, 'max:'.self::SESSION_LIFETIME_MAX],
                 'default' => 120,
-                'help' => 'Idle minutes before a session expires.',
+                'help' => 'Idle minutes before a session expires, between 15 minutes and 24 hours.',
                 'suffix' => 'minutes',
                 'span' => 4,
                 'sort' => 50,
             ],
+            /*
+            | Read by UpdateAvatarRequest through uploadExtensions() / uploadKilobytes(): a profile
+            | photo accepts only the image types this list also allows, up to the smallest of its own
+            | cap, max_upload_mb and PHP's upload limit. Later upload fields read the same two helpers.
+            | A never-uploadable extension is refused here and stripped again where it is read.
+            */
             'allowed_file_types' => [
                 'label' => 'Allowed upload types',
                 'type' => self::TYPE_TEXT,
-                'rules' => ['required', 'string', 'max:255', 'regex:/^[A-Za-z0-9]+(,[A-Za-z0-9]+)*$/'],
-                'default' => 'pdf,doc,docx,xls,xlsx,csv,png,jpg,jpeg,webp,zip',
-                'help' => 'Not enforced yet: every upload field validates its own types (D21). Read-only until a shared upload policy reads it.',
-                'readonly' => true,
+                'rules' => [
+                    'required',
+                    'string',
+                    'max:255',
+                    'regex:/^[A-Za-z0-9]+(,[A-Za-z0-9]+)*$/',
+                    'not_regex:/(^|,)('.implode('|', array_map(static fn (string $extension): string => preg_quote($extension, '/'), self::NEVER_UPLOADABLE_EXTENSIONS)).'|php[0-9]*)(,|$)/i',
+                ],
+                // Phase 2 review low 6: gif is allowed by default so a GIF profile photo is accepted
+                // (uploads are content-sniffed; php-family extensions stay refused whatever this says).
+                'default' => 'pdf,doc,docx,xls,xlsx,csv,png,jpg,jpeg,gif,webp,zip',
+                'help' => 'Comma-separated extensions. An upload field accepts only its own types that are also listed here (profile photos today). Script and executable types are never accepted.',
                 'span' => 8,
                 'sort' => 60,
             ],
             'max_upload_mb' => [
                 'label' => 'Maximum upload size',
                 'type' => self::TYPE_NUMBER,
-                'rules' => ['required', 'integer', 'min:1', 'max:512'],
+                'rules' => ['required', 'integer', 'min:1', 'max:'.self::MAX_UPLOAD_MB_MAX],
                 'default' => 10,
-                'help' => 'The web server’s own limit still applies and wins when it is lower.',
+                'help' => 'Caps every upload field that reads it (profile photos today), never above the field’s own limit. PHP’s upload limit still applies and wins when it is lower.',
                 'suffix' => 'MB',
                 'span' => 4,
                 'sort' => 70,

@@ -4,6 +4,13 @@
     272px on lg+, collapsible to a 76px icon rail (persisted in localStorage), and an
     off-canvas drawer with a backdrop below lg.
 
+    Initial rail state: a stored choice wins, otherwise `appearance.sidebar_collapsed_by_default`.
+    The inline head script (layouts/partials/theme-script) resolves the two before first paint and
+    publishes the answer on `<html data-sidebar-rail>`; the `x-init` below hands it to the
+    `$store.sidebar` store, whose own init only reads localStorage and would expand a rail the
+    setting collapsed. Nothing is written to storage here — only the toggle button stores a choice,
+    so a browser that never chose keeps following the setting.
+
     Items come from App\Support\Sidebar::forUser() via the sidebar_items() helper — never
     hardcode the menu here. An item is already filtered by module, route existence and
     permission before it reaches this file.
@@ -38,6 +45,7 @@
 
 <aside
     id="app-sidebar"
+    x-init="$store.sidebar.collapsed = document.documentElement.dataset.sidebarRail === '1'; document.documentElement.classList.toggle('is-rail', $store.sidebar.collapsed)"
     x-bind:class="{ 'is-open shadow-2xl': $store.sidebar.drawer }"
     x-trap="$store.sidebar.drawer"
     class="shell-sidebar fixed inset-y-0 left-0 z-drawer flex flex-col border-r border-slate-200 bg-white lg:z-topbar dark:border-slate-800 dark:bg-slate-900"

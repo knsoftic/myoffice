@@ -6,6 +6,7 @@ namespace App\Http\Requests\Auth;
 
 use App\Enums\UserStatus;
 use App\Models\User;
+use App\Support\SettingsRegistry;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -152,21 +153,34 @@ class LoginRequest extends FormRequest
     }
 
     /**
-     * `security.login_max_attempts` (1–20), read live so the Security screen actually governs the
-     * sign-in throttle. Before the Phase 2 finishing pass the setting was saved and enforced nowhere.
+     * `security.login_max_attempts`, read live so the Security screen actually governs the sign-in
+     * throttle — and clamped to the hard server floor (3–10), whatever the row holds. The registry
+     * refuses a value outside that range; this is the second lock, for a row written by raw SQL or
+     * by an older release that allowed 20. A setting may tighten the throttle, never loosen it.
      */
     protected function maxAttempts(): int
     {
-        return $this->securityInt('security.login_max_attempts', self::MAX_ATTEMPTS, 1, 20);
+        return $this->securityInt(
+            'security.login_max_attempts',
+            self::MAX_ATTEMPTS,
+            SettingsRegistry::LOGIN_MAX_ATTEMPTS_MIN,
+            SettingsRegistry::LOGIN_MAX_ATTEMPTS_MAX,
+        );
     }
 
     /**
-     * `security.lockout_minutes` (1–1440) as the limiter's decay. The throttle used Laravel's
-     * default 60 seconds while the screen said the lockout lasted 15 minutes.
+     * `security.lockout_minutes` as the limiter's decay, clamped to the hard server floor
+     * (5–1440 minutes): a lockout can be made longer, never shorter than five minutes — 20 attempts
+     * a minute was 28,800 guesses a day per email + IP.
      */
     protected function lockoutSeconds(): int
     {
-        return $this->securityInt('security.lockout_minutes', self::LOCKOUT_MINUTES, 1, 1440) * 60;
+        return $this->securityInt(
+            'security.lockout_minutes',
+            self::LOCKOUT_MINUTES,
+            SettingsRegistry::LOCKOUT_MINUTES_MIN,
+            SettingsRegistry::LOCKOUT_MINUTES_MAX,
+        ) * 60;
     }
 
     private function securityInt(string $key, int $fallback, int $min, int $max): int

@@ -9,6 +9,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
+use LogicException;
 use Throwable;
 
 /**
@@ -24,7 +25,10 @@ use Throwable;
  * In the dotted form the part before the first dot is the `settings.group` column and the
  * remainder is the `settings.key` column, so `mail.smtp.host` is group `mail`, key `smtp.host`.
  * Writes (`set()`, `setMany()`, `forget()`) take the dotted form only — there the second argument
- * is the value, so a two-part key would be ambiguous.
+ * is the value, so a two-part key would be ambiguous. They are low-level tools for an explicit
+ * system context (`asSystem()`) and the test suite: a request writes through `SettingsService`, a
+ * document counter is never written here (D62), and `forget()` deletes nothing outside the test
+ * suite.
  *
  * The cached payload holds raw column values, so encrypted secrets are never cached in clear
  * text: `is_encrypted` rows are decrypted on read and encrypted on write, and values are cast
@@ -52,6 +56,43 @@ final class SettingsRepository
      * @var array<string, array{value: string|null, type: string, is_encrypted: bool, is_public: bool, options: string|null}>|null
      */
     private ?array $items = null;
+
+    /** How many asSystem() callbacks are running right now; the registry/readonly guard lifts only above 0. */
+    private int $systemDepth = 0;
+
+    /**
+     * Run `$callback` in the explicit system context — the one place a low-level write may touch a
+     * key `SettingsRegistry` declares or a row stored `is_readonly`.
+     *
+     *   settings_repo()->asSystem(fn (SettingsRepository $settings) => $settings->set('mail.host', 'relay.local'));
+     *
+     * Phase 2 review low 4: being a console process is no longer enough. A queue worker is a console
+     * process too, so "running in console" let any queued job write a declared or readonly key with
+     * no audit trail; now a seeder, a migration or an artisan command has to ask for this by name,
+     * and it is refused outright outside the console (an HTTP request, a `sync` job run inside one).
+     * A document counter stays refused in here as everywhere else (D62).
+     *
+     * @template TReturn
+     *
+     * @param  callable(self): TReturn  $callback
+     * @return TReturn
+     *
+     * @throws LogicException outside a console process
+     */
+    public function asSystem(callable $callback): mixed
+    {
+        if (! $this->runningInConsole()) {
+            throw new LogicException('Settings may only be written in the system context from a console process.');
+        }
+
+        $this->systemDepth++;
+
+        try {
+            return $callback($this);
+        } finally {
+            $this->systemDepth--;
+        }
+    }
 
     /**
      * Read a setting, decrypted and cast.
@@ -135,16 +176,31 @@ final class SettingsRepository
     }
 
     /**
-     * Create or update a setting and flush the cache.
+     * Create or update a setting and flush the cache — a **low-level** write for the console and
+     * the test suite, never for a request.
+     *
+     * `SettingsService` is the only write path an application request may use (phase-02 §3): it
+     * validates, authorizes, audits, stamps `updated_by` and honours `readonly` (D62). This method
+     * does none of that, so it refuses (LogicException):
+     *
+     *   · a document counter (`*_next_number`) in EVERY context — only DocumentNumberService
+     *     advances a counter, under a row lock (D62, D27);
+     *   · outside asSystem() or the test suite: any key `SettingsRegistry` declares, and any stored
+     *     row flagged `is_readonly` (a superseded or reserved key). A console process that did not
+     *     ask for asSystem() — a queued job included — is refused like a request.
      *
      * Meta is applied on insert and, where supplied, on update:
      * `type`, `options`, `is_encrypted`, `is_public`, `label`, `description`, `sort_order`.
      *
      * @param  array<string, mixed>  $meta
+     *
+     * @throws LogicException
      */
     public function set(string $key, mixed $value, array $meta = []): void
     {
         [$group, $name] = $this->split($key);
+
+        $this->assertLowLevelWriteAllowed($group, $name);
 
         $existing = $this->items()[$group.'.'.$name] ?? null;
 
@@ -202,13 +258,22 @@ final class SettingsRepository
     }
 
     /**
-     * Write several settings at once.
+     * Write several settings at once. Same refusals as set(), checked for every key BEFORE any of
+     * them is written, so a refused key never leaves the others half-applied.
      *
      * @param  array<string, mixed>  $values  dotted key => value
      * @param  array<string, array<string, mixed>>  $meta  dotted key => meta
+     *
+     * @throws LogicException
      */
     public function setMany(array $values, array $meta = []): void
     {
+        foreach (array_keys($values) as $key) {
+            [$group, $name] = $this->split((string) $key);
+
+            $this->assertLowLevelWriteAllowed($group, $name);
+        }
+
         foreach ($values as $key => $value) {
             $this->set((string) $key, $value, $meta[$key] ?? []);
         }
@@ -314,11 +379,26 @@ final class SettingsRepository
     }
 
     /**
-     * Delete a setting and flush the cache.
+     * Delete a throwaway fixture row — in the test suite only, and only for a key the registry
+     * does not declare and that is not a document counter.
+     *
+     * No settings row is ever deleted by application code: a value the business entered outlives
+     * the code that read it, and a deleted counter would read its default of 1 again (D62). Outside
+     * the test suite this refuses, in every context, console included.
+     *
+     * @throws LogicException
      */
     public function forget(string $key): void
     {
         [$group, $name] = $this->split($key);
+        $dotted = $group.'.'.$name;
+
+        if (! $this->runningUnitTests() || SettingsRegistry::has($dotted) || $this->isDocumentCounter($name)) {
+            throw new LogicException(sprintf(
+                'Setting [%s] may not be deleted: settings rows are never removed by application code.',
+                $dotted,
+            ));
+        }
 
         DB::table(self::TABLE)->where('group', $group)->where('key', $name)->delete();
 
@@ -342,6 +422,16 @@ final class SettingsRepository
     /**
      * The raw rows, keyed 'group.key'. One query, then cached forever.
      *
+     * Three steps, each failing on its own terms:
+     *
+     *   1. the cache is read — a store that cannot be read is simply a miss;
+     *   2. on a miss the table is loaded — a table that does not exist yet (fresh install) reads as
+     *      "no settings stored" and is NOT memoised, because the migration that creates it may run
+     *      later in this same process;
+     *   3. what was loaded is memoised in-process FIRST and only then written to the cache, so a
+     *      store that refuses the payload (oversized, full, unavailable) is reported and costs one
+     *      query per process — instead of every setting silently reading its default.
+     *
      * @return array<string, array{value: string|null, type: string, is_encrypted: bool, is_public: bool, options: string|null}>
      */
     private function items(): array
@@ -351,17 +441,45 @@ final class SettingsRepository
         }
 
         try {
-            /** @var array<string, array<string, mixed>> $items */
-            $items = Cache::rememberForever(self::CACHE_KEY, fn (): array => $this->load());
-
-            if (! is_array($items)) {
-                return [];
-            }
-
-            return $this->items = $items;
+            $cached = Cache::get(self::CACHE_KEY);
         } catch (Throwable) {
-            // Table or cache store missing (fresh install): behave like "no settings stored".
+            $cached = null; // store unavailable — read the table instead
+        }
+
+        if (is_array($cached)) {
+            /** @var array<string, array{value: string|null, type: string, is_encrypted: bool, is_public: bool, options: string|null}> $cached */
+            return $this->items = $cached;
+        }
+
+        try {
+            $items = $this->load();
+        } catch (Throwable) {
+            // Table missing (fresh install): behave like "no settings stored".
             return [];
+        }
+
+        // Phase 2 review low 5: memoise the loaded payload even when the cache write below fails.
+        $this->items = $items;
+
+        try {
+            Cache::forever(self::CACHE_KEY, $items);
+        } catch (Throwable $exception) {
+            $this->reportQuietly($exception);
+        }
+
+        return $items;
+    }
+
+    /**
+     * report() without letting a half-booted container (an install, a bare unit test) turn a
+     * cache failure into a crash.
+     */
+    private function reportQuietly(Throwable $exception): void
+    {
+        try {
+            report($exception);
+        } catch (Throwable) {
+            // nothing left to tell
         }
     }
 
@@ -464,6 +582,84 @@ final class SettingsRepository
     private function knowsGroup(string $group): bool
     {
         return $this->hasGroup($group) || SettingsRegistry::hasGroup($group);
+    }
+
+    /**
+     * The guard in front of set() / setMany() (see set() for the rules).
+     *
+     * @throws LogicException
+     */
+    private function assertLowLevelWriteAllowed(string $group, string $name): void
+    {
+        $dotted = $group.'.'.$name;
+
+        if ($this->isDocumentCounter($name)) {
+            throw new LogicException(sprintf(
+                'Setting [%s] is a document counter: only DocumentNumberService may advance it, under a row lock (D62).',
+                $dotted,
+            ));
+        }
+
+        // Phase 2 review low 4: only the explicit system context (or the test suite) is exempt — not
+        // every console process, so a queue worker cannot write a declared or readonly key unaudited.
+        if ($this->runningUnitTests() || ($this->systemDepth > 0 && $this->runningInConsole())) {
+            return;
+        }
+
+        if (SettingsRegistry::has($dotted)) {
+            throw new LogicException(sprintf(
+                'Setting [%s] is declared by SettingsRegistry: write it through SettingsService, which validates, authorizes and audits the change.',
+                $dotted,
+            ));
+        }
+
+        if ($this->isStoredReadonly($group, $name)) {
+            throw new LogicException(sprintf(
+                'Setting [%s] is stored read-only and may only be changed from the console, inside SettingsRepository::asSystem().',
+                $dotted,
+            ));
+        }
+    }
+
+    /**
+     * D62: every `*_next_number` key is a document counter, declared or not.
+     */
+    private function isDocumentCounter(string $name): bool
+    {
+        return str_ends_with($name, '_next_number');
+    }
+
+    /**
+     * Does a stored row carry `is_readonly = 1`? A missing row, column or table reads as no.
+     */
+    private function isStoredReadonly(string $group, string $name): bool
+    {
+        try {
+            return (bool) DB::table(self::TABLE)
+                ->where('group', $group)
+                ->where('key', $name)
+                ->value('is_readonly');
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    private function runningInConsole(): bool
+    {
+        try {
+            return app()->runningInConsole();
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    private function runningUnitTests(): bool
+    {
+        try {
+            return app()->runningUnitTests();
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /**

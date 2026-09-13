@@ -49,9 +49,9 @@
                 No {{ $label }} found
             @else
                 Showing
-                <span class="font-semibold text-slate-700 dark:text-slate-200">{{ number_format((int) $from) }}</span>–<span class="font-semibold text-slate-700 dark:text-slate-200">{{ number_format((int) $to) }}</span>
+                <span class="font-semibold text-slate-700 dark:text-slate-200">{{ app_number((int) $from) }}</span>–<span class="font-semibold text-slate-700 dark:text-slate-200">{{ app_number((int) $to) }}</span>
                 @if ($hasTotal)
-                    of <span class="font-semibold text-slate-700 dark:text-slate-200">{{ number_format((int) $total) }}</span>
+                    of <span class="font-semibold text-slate-700 dark:text-slate-200">{{ app_number((int) $total) }}</span>
                 @endif
                 {{ $label }}
             @endif

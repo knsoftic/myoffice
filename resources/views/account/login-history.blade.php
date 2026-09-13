@@ -29,8 +29,8 @@
                 @foreach ($history as $entry)
                     <tr @class(['bg-emerald-50/40 dark:bg-emerald-500/5' => $currentSessionId !== null && $entry->session_id === $currentSessionId])>
                         <td class="whitespace-nowrap px-4 py-3 text-sm text-slate-700 dark:text-slate-300">
-                            <span title="{{ $entry->created_at?->timezone($user->effectiveTimezone())->format('d M Y, H:i:s') }}">
-                                {{ $entry->created_at?->timezone($user->effectiveTimezone())->format('d M Y, H:i') ?? '—' }}
+                            <span title="{{ \App\Support\Format::forHumans($entry->created_at) }}">
+                                {{ app_datetime($entry->created_at) ?: '—' }}
                             </span>
 
                             @if ($currentSessionId !== null && $entry->session_id === $currentSessionId && $entry->isSuccessful())
@@ -57,7 +57,7 @@
 
                         <td class="whitespace-nowrap px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
                             @if ($entry->logged_out_at)
-                                {{ $entry->logged_out_at->timezone($user->effectiveTimezone())->format('d M Y, H:i') }}
+                                {{ app_datetime($entry->logged_out_at) }}
                             @elseif ($entry->isOpen())
                                 <span class="text-emerald-600 dark:text-emerald-400">Still open</span>
                             @else

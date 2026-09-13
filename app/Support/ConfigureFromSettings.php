@@ -139,11 +139,18 @@ final class ConfigureFromSettings
     }
 
     /**
-     * `security.session_lifetime` → `session.lifetime`.
+     * `security.session_lifetime` → `session.lifetime`, clamped to the hard server floor.
      *
      * Applied at boot, before `StartSession` reads it, so the idle timeout the Security screen shows
      * is the one sessions really have. The password length and the sign-in throttle are read where
      * they are enforced (`PasswordPolicy`, `LoginRequest`), not copied into config.
+     *
+     * **Clamped, not trusted.** The registry refuses a lifetime outside
+     * `SettingsRegistry::SESSION_LIFETIME_MIN`..`SESSION_LIFETIME_MAX` (15 minutes to a day), and a
+     * stored value outside that range — raw SQL, an older release that allowed 30 days — is pulled
+     * back inside it here, exactly as `PasswordPolicy::minLength()` clamps its minimum. A setting
+     * may tighten the idle timeout, never loosen it past a day. An unreadable value leaves the
+     * environment's own lifetime in place.
      *
      * @param  array<string, mixed>  $settings  the `security` group, keyed relative to it
      */
@@ -151,9 +158,19 @@ final class ConfigureFromSettings
     {
         $lifetime = $settings['session_lifetime'] ?? null;
 
-        if (is_numeric($lifetime) && (int) $lifetime >= 5 && (int) $lifetime <= 43200) {
-            Config::set('session.lifetime', (int) $lifetime);
+        if (! is_numeric($lifetime)) {
+            return;
         }
+
+        Config::set('session.lifetime', self::clampSessionLifetime((int) $lifetime));
+    }
+
+    /**
+     * A session lifetime in minutes, inside the hard server floor.
+     */
+    public static function clampSessionLifetime(int $minutes): int
+    {
+        return max(SettingsRegistry::SESSION_LIFETIME_MIN, min(SettingsRegistry::SESSION_LIFETIME_MAX, $minutes));
     }
 
     /*

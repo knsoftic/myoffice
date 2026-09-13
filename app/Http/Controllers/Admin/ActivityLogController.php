@@ -58,7 +58,8 @@ final class ActivityLogController extends Controller
             ->with('causer')
             ->orderBy($sort, $direction)
             ->orderByDesc('id')
-            ->paginate($request->perPage())
+            // An explicit ?per_page= choice wins; otherwise the `appearance.table_page_size` setting.
+            ->paginate($request->perPage(per_page()))
             ->withQueryString();
 
         return view('admin.activity-log.index', [

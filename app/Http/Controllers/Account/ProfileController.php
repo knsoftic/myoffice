@@ -34,7 +34,11 @@ final class ProfileController extends AccountController
             'locales' => UpdateProfileRequest::localeOptions($user->locale),
             'timezones' => $this->timezoneOptions(),
             'hasAvatar' => $this->avatars->has($user),
-            'maxAvatarKilobytes' => UpdateAvatarRequest::MAX_KILOBYTES,
+            // What the upload rules enforce right now (Security settings included), not the form's
+            // own ceiling — the hint and the accept list must not promise more than the rules allow.
+            'maxAvatarKilobytes' => UpdateAvatarRequest::maxKilobytes(),
+            'avatarAccept' => UpdateAvatarRequest::acceptAttribute(),
+            'avatarHint' => UpdateAvatarRequest::hint(),
         ]);
     }
 

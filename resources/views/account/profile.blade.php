@@ -54,8 +54,8 @@
                 <x-ui.form.file
                     name="avatar"
                     label="Replace photo"
-                    accept="image/jpeg,image/png,image/webp,image/gif"
-                    hint="JPG, PNG, WEBP or GIF, up to {{ (int) ($maxAvatarKilobytes / 1024) }} MB"
+                    :accept="$avatarAccept"
+                    :hint="$avatarHint"
                 />
 
                 <div class="flex flex-col gap-2 sm:flex-row">
@@ -199,12 +199,13 @@
                             required
                         />
 
+                        {{-- The display default is localization.timezone (D61), never app.timezone: that is the UTC storage zone. --}}
                         <x-ui.form.select
                             name="timezone"
                             label="Timezone"
                             :options="$timezones"
                             :selected="$user->timezone"
-                            :placeholder="'System default ('.config('app.timezone', 'UTC').')'"
+                            :placeholder="'System default ('.\App\Support\Format::timezone().')'"
                             icon="clock"
                             help="Used for every date and time you see."
                         />
@@ -249,7 +250,7 @@
                         <dt class="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Last sign-in</dt>
                         <dd class="mt-1 text-sm text-slate-700 dark:text-slate-300">
                             @if ($user->last_login_at)
-                                {{ $user->last_login_at->timezone($user->effectiveTimezone())->format('d M Y, H:i') }}
+                                {{ app_datetime($user->last_login_at) }}
                                 <span class="text-slate-400 dark:text-slate-500">
                                     ({{ $user->last_login_ip ?: 'IP unknown' }})
                                 </span>

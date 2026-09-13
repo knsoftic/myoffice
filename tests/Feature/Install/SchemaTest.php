@@ -299,6 +299,12 @@ final class SchemaTest extends TestCase
      *
      * The files are read as text rather than `require`d, because the published vendor migrations
      * declare named classes that the migrator has already loaded in this process.
+     *
+     * "Reverses something" means a schema operation (`Schema::create/table/drop…`, `->drop…`) or, for
+     * a data migration (D61's timestamp re-base, the settings supersede/unpublish migrations), a write
+     * (`->update(`, `->insert(`, `->upsert(`, `->statement(`). A `Schema::has…()` guard on its own is
+     * NOT reversal. Private helpers `down()` calls through `$this->…()` are inspected too, so a
+     * migration whose `up()` and `down()` share one helper is judged on what that helper does.
      */
     #[Test]
     public function every_phase_one_migration_declares_a_reversing_down_method(): void
@@ -319,17 +325,14 @@ final class SchemaTest extends TestCase
                 sprintf('%s has no down() method, so it cannot be rolled back.', $name)
             );
 
-            $body = $this->downBody($source);
-
             $this->assertNotSame(
                 '',
-                $body,
+                $this->downBody($source),
                 sprintf('%s::down() is empty — the migration is not reversible.', $name)
             );
 
-            $this->assertMatchesRegularExpression(
-                '/Schema::|->drop|dropIfExists/i',
-                $body,
+            $this->assertTrue(
+                $this->downReverses($source),
                 sprintf('%s::down() does not reverse anything.', $name)
             );
 
@@ -337,6 +340,33 @@ final class SchemaTest extends TestCase
         }
 
         $this->assertGreaterThanOrEqual(14, $checked, 'Every Phase-1 migration must be inspected.');
+    }
+
+    /**
+     * The reversibility rule itself: it must reject a stub, a guard-only body and a helper that only
+     * reads, and accept a schema reversal, a data write, and a write reached through a helper.
+     */
+    #[Test]
+    #[DataProvider('downBodies')]
+    public function the_reversibility_rule_tells_a_real_down_from_a_stub(string $source, bool $reverses): void
+    {
+        $this->assertSame($reverses, $this->downReverses($source));
+    }
+
+    /**
+     * @return array<string, array{string, bool}>
+     */
+    public static function downBodies(): array
+    {
+        return [
+            'comment only' => ['<?php class M { public function down(): void { // nothing } }', false],
+            'guard only' => ["<?php class M { public function down(): void { if (! Schema::hasTable('t')) { return; } } }", false],
+            'helper that only reads' => ["<?php class M { public function down(): void { \$this->probe(); } private function probe(): void { DB::table('t')->count(); } }", false],
+            'drop table' => ["<?php class M { public function down(): void { Schema::dropIfExists('t'); } }", true],
+            'alter table' => ["<?php class M { public function down(): void { Schema::table('t', function (\$table) { \$table->dropColumn('c'); }); } }", true],
+            'data write' => ["<?php class M { public function down(): void { DB::table('t')->where('a', 1)->update(['b' => 0]); } }", true],
+            'write through a helper' => ["<?php class M { public function down(): void { \$this->rebase(false); } private function rebase(bool \$f): void { \$this->convert(); } private function convert(): void { \$c->update('update t set a = 1'); } }", true],
+        ];
     }
 
     /*
@@ -409,13 +439,53 @@ final class SchemaTest extends TestCase
      */
     private function downBody(string $source): string
     {
-        $start = strpos($source, 'function down(');
+        return $this->methodBody($source, 'down');
+    }
 
-        if ($start === false) {
+    /**
+     * Does `down()` — together with every `$this->helper()` it reaches — perform a schema reversal or
+     * a data write? A `Schema::has…()` guard alone does not count.
+     */
+    private function downReverses(string $source): bool
+    {
+        if ($this->downBody($source) === '') {
+            return false;
+        }
+
+        $seen = ['down' => true];
+        $queue = ['down'];
+        $reached = [];
+
+        while ($queue !== []) {
+            $body = $this->methodBody($source, (string) array_shift($queue));
+            $reached[] = $body;
+
+            preg_match_all('/\$this->([A-Za-z_][A-Za-z0-9_]*)\s*\(/', $body, $calls);
+
+            foreach ($calls[1] as $call) {
+                if (! isset($seen[$call]) && $this->methodBody($source, $call) !== '') {
+                    $seen[$call] = true;
+                    $queue[] = $call;
+                }
+            }
+        }
+
+        return preg_match(
+            '/Schema::(?!has)|->drop|dropIfExists|->(?:update|insert|upsert|statement)\s*\(/i',
+            implode(' ', $reached)
+        ) === 1;
+    }
+
+    /**
+     * The body of the named method, with comments and whitespace stripped.
+     */
+    private function methodBody(string $source, string $method): string
+    {
+        if (preg_match('/function\s+'.preg_quote($method, '/').'\s*\(/', $source, $match, PREG_OFFSET_CAPTURE) !== 1) {
             return '';
         }
 
-        $open = strpos($source, '{', $start);
+        $open = strpos($source, '{', $match[0][1]);
 
         if ($open === false) {
             return '';

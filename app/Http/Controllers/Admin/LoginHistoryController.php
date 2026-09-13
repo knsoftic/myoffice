@@ -46,7 +46,8 @@ final class LoginHistoryController extends Controller
             ->with('user')
             ->orderBy($sort, $direction)
             ->orderByDesc('id')
-            ->paginate($request->perPage())
+            // An explicit ?per_page= choice wins; otherwise the `appearance.table_page_size` setting.
+            ->paginate($request->perPage(per_page()))
             ->withQueryString();
 
         return view('admin.login-history.index', [

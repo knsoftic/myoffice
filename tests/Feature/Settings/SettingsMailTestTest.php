@@ -10,6 +10,7 @@ use App\Support\SettingsRepository;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Feature\Concerns\InteractsWithRbac;
 use Tests\Feature\Settings\Concerns\InteractsWithSettingsForms;
@@ -19,10 +20,14 @@ use Tests\TestCase;
  * phase-02 §6 "Mail test": uses the saved SMTP settings rather than `.env`, surfaces the failure
  * message on a bad host, and is throttled.
  *
- * The "bad host" is 127.0.0.1 port 1: nothing listens there, the refusal is immediate and local,
- * and — unlike an invented hostname — it never depends on DNS, so the transport's own message is
- * deterministic. The environment is pointed somewhere else entirely before every send, so a test
- * that passes proves the saved row was used and not the configuration the process booted with.
+ * The "bad host" is 192.0.2.1 port 2525. The test email refuses loopback addresses and non-mail
+ * ports before it connects (the SSRF guard, proven separately below), so the old 127.0.0.1:1 target
+ * can no longer reach the transport. 192.0.2.1 is TEST-NET-1 (RFC 5737): reserved for documentation,
+ * never routed, not in any range the guard refuses, and — unlike an invented hostname — it never
+ * depends on DNS. The connection attempt fails on its own, bounded by a one-second transport timeout,
+ * so the transport's message is deterministic. The environment is pointed somewhere else entirely
+ * before every send, so a test that passes proves the saved row was used and not the configuration
+ * the process booted with.
  */
 final class SettingsMailTestTest extends TestCase
 {
@@ -31,6 +36,9 @@ final class SettingsMailTestTest extends TestCase
     use RefreshDatabase;
 
     private const PASSWORD = 'Never-In-A-Response-91c7!';
+
+    /** TEST-NET-1 (RFC 5737): allowed by the guard, never reachable. */
+    private const UNREACHABLE_HOST = '192.0.2.1';
 
     protected function setUp(): void
     {
@@ -45,7 +53,7 @@ final class SettingsMailTestTest extends TestCase
     {
         $admin = $this->createSuperAdmin();
 
-        $this->saveSmtp($admin, host: '127.0.0.1', port: '1');
+        $this->saveSmtp($admin, host: self::UNREACHABLE_HOST, port: '2525');
         $this->pretendTheEnvironmentSaysOtherwise();
 
         $response = $this->actingAs($admin)
@@ -55,7 +63,7 @@ final class SettingsMailTestTest extends TestCase
 
         $message = (string) $response->json('message');
 
-        $this->assertStringContainsString('127.0.0.1', $message, 'The failure must name the SAVED host — proof the saved settings were used.');
+        $this->assertStringContainsString(self::UNREACHABLE_HOST, $message, 'The failure must name the SAVED host — proof the saved settings were used.');
         $this->assertStringContainsString('Connection could not be established', $message, 'The transport’s own reason is surfaced, not a generic "failed".');
         $this->assertStringNotContainsString('env-only-smtp.invalid', $message, 'The environment’s host must not have been used.');
 
@@ -68,7 +76,7 @@ final class SettingsMailTestTest extends TestCase
     {
         $admin = $this->createSuperAdmin();
 
-        $this->saveSmtp($admin, host: '127.0.0.1', port: '1');
+        $this->saveSmtp($admin, host: self::UNREACHABLE_HOST, port: '2525');
         $this->pretendTheEnvironmentSaysOtherwise();
 
         $this->actingAs($admin)
@@ -76,7 +84,7 @@ final class SettingsMailTestTest extends TestCase
             ->post('/admin/settings/mail/test', ['email' => 'ops@example.test'])
             ->assertRedirect('/admin/settings/mail')
             ->assertSessionHas('toast', fn (array $toast): bool => $toast['type'] === 'error')
-            ->assertSessionHas('settings.mail_test', fn (array $result): bool => $result['ok'] === false && str_contains($result['message'], '127.0.0.1'));
+            ->assertSessionHas('settings.mail_test', fn (array $result): bool => $result['ok'] === false && str_contains($result['message'], self::UNREACHABLE_HOST));
 
         $this->assertStringNotContainsString(self::PASSWORD, (string) json_encode(session()->all()));
 
@@ -85,6 +93,50 @@ final class SettingsMailTestTest extends TestCase
             ->assertOk()
             ->assertSee('Connection could not be established', false)
             ->assertDontSee(self::PASSWORD, false);
+    }
+
+    /**
+     * The SSRF guard: a saved SMTP endpoint on a non-mail port, or on a loopback, link-local or
+     * cloud-metadata address, is refused with the guard's own sentence — the transport is never
+     * reached, so its "Connection could not be established" never appears.
+     */
+    #[Test]
+    #[DataProvider('refusedEndpoints')]
+    public function an_smtp_endpoint_the_guard_refuses_is_never_connected_to(string $host, string $port, string $reason): void
+    {
+        $admin = $this->createSuperAdmin();
+
+        $this->saveSmtp($admin, host: $host, port: $port);
+        $this->pretendTheEnvironmentSaysOtherwise();
+
+        $message = (string) $this->actingAs($admin)
+            ->postJson('/admin/settings/mail/test', ['email' => 'ops@example.test'])
+            ->assertOk()
+            ->assertJsonPath('ok', false)
+            ->assertDontSee(self::PASSWORD, false)
+            ->json('message');
+
+        $this->assertStringContainsString($reason, $message);
+        $this->assertStringNotContainsString('Connection could not be established', $message, 'The guard refuses before the transport dials.');
+    }
+
+    /**
+     * @return array<string, array{string, string, string}>
+     */
+    public static function refusedEndpoints(): array
+    {
+        $address = 'loopback, link-local or cloud-metadata address';
+
+        return [
+            'loopback on a mail port' => ['127.0.0.1', '2525', $address],
+            'loopback on a non-mail port' => ['127.0.0.1', '1', 'the saved port 1 is refused'],
+            'a reachable-looking host on a non-mail port' => [self::UNREACHABLE_HOST, '6379', 'the saved port 6379 is refused'],
+            'localhost by name' => ['localhost', '587', $address],
+            'this host' => ['0.0.0.0', '25', $address],
+            'cloud metadata' => ['169.254.169.254', '25', $address],
+            'IPv6 loopback' => ['::1', '25', $address],
+            'IPv4-mapped loopback' => ['::ffff:127.0.0.1', '25', $address],
+        ];
     }
 
     #[Test]
@@ -232,7 +284,10 @@ final class SettingsMailTestTest extends TestCase
 
     /**
      * Make the booted configuration (the stand-in for `.env`) point at a different transport and
-     * host, so only a send that re-reads the saved settings can reach 127.0.0.1.
+     * host, so only a send that re-reads the saved settings can name the saved host.
+     *
+     * The one-second transport timeout is not a mail setting (refreshMail() leaves it alone); it only
+     * bounds how long the attempt on the unroutable TEST-NET address waits before failing.
      */
     private function pretendTheEnvironmentSaysOtherwise(): void
     {
@@ -241,6 +296,7 @@ final class SettingsMailTestTest extends TestCase
             'mail.mailers.smtp.host' => 'env-only-smtp.invalid',
             'mail.mailers.smtp.port' => 2525,
             'mail.mailers.smtp.password' => 'env-password',
+            'mail.mailers.smtp.timeout' => 1,
         ]);
 
         app('mail.manager')->purge('smtp');

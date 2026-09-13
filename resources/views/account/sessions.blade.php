@@ -96,7 +96,7 @@
                         </td>
 
                         <td class="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
-                            <span title="{{ $session->lastActiveAt()->timezone($user->effectiveTimezone())->format('d M Y, H:i') }}">
+                            <span title="{{ app_datetime($session->lastActiveAt()) }}">
                                 {{ $session->lastActiveAt()->diffForHumans() }}
                             </span>
                         </td>

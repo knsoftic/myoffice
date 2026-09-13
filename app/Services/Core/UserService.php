@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Policies\Concerns\ChecksRoleHierarchy;
 use App\Services\Auth\PasswordChangeService;
 use App\Services\Core\Concerns\WritesAuditTrail;
+use App\Support\ImageSanitizer;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -591,9 +592,11 @@ final class UserService
      */
     private function storeAvatar(UploadedFile $file): ?string
     {
-        $path = $file->store(self::AVATAR_DIRECTORY, 'public');
+        // Decoded pixels only - never the uploaded bytes (see App\Support\ImageSanitizer).
+        $clean = ImageSanitizer::reencode($file);
+        $path = self::AVATAR_DIRECTORY.'/'.Str::random(40).'.'.$clean['extension'];
 
-        return is_string($path) && $path !== '' ? $path : null;
+        return Storage::disk('public')->put($path, $clean['bytes']) ? $path : null;
     }
 
     /**

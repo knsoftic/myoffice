@@ -65,7 +65,8 @@ final class Format
      *
      * Accepts anything a date can arrive as — a Carbon instance, a model datetime, a 'Y-m-d'
      * string, a unix timestamp — and renders the empty string for null, so a view never has to
-     * guard the call.
+     * guard the call. A calendar date ('Y-m-d', or a `date`-cast value at midnight) renders as that
+     * same date in every display timezone; see carbon().
      */
     public static function date(mixed $value, ?string $format = null): string
     {
@@ -75,11 +76,30 @@ final class Format
     }
 
     /**
+     * The date of an **instant**, in the configured format and the display timezone.
+     *
+     * date() reads a DateTimeInterface at exactly 00:00:00 as a calendar date and does not shift
+     * it, which is right for a `date` column and wrong for a timestamp: a `created_at` stamped at
+     * 00:00:00 UTC is still an instant, and west of UTC it falls on the previous day. Use this for
+     * the date half of any timestamp shown beside time(), so the two halves always agree (Phase 2
+     * review low 2). A bare 'Y-m-d' string is still a calendar date — it has no time to convert.
+     */
+    public static function instantDate(mixed $value, ?string $format = null): string
+    {
+        $date = self::moment($value);
+
+        return $date === null ? self::EMPTY : $date->format($format ?? self::dateFormat());
+    }
+
+    /**
      * A time in the configured format: '03:45 PM' or '15:45'.
+     *
+     * A time of day is only ever asked of a moment, so a value at exactly midnight is converted like
+     * any other instant here (see moment()).
      */
     public static function time(mixed $value, ?string $format = null): string
     {
-        $date = self::carbon($value);
+        $date = self::moment($value);
 
         return $date === null ? self::EMPTY : $date->format($format ?? self::timeFormat());
     }
@@ -89,7 +109,7 @@ final class Format
      */
     public static function dateTime(mixed $value, ?string $format = null): string
     {
-        $date = self::carbon($value);
+        $date = self::moment($value);
 
         return $date === null ? self::EMPTY : $date->format($format ?? self::dateTimeFormat());
     }
@@ -99,7 +119,7 @@ final class Format
      */
     public static function forHumans(mixed $value): string
     {
-        $date = self::carbon($value);
+        $date = self::moment($value);
 
         return $date === null ? self::EMPTY : $date->diffForHumans();
     }
@@ -107,16 +127,54 @@ final class Format
     /**
      * Parse any date-ish value into the viewer's timezone, or null when there is nothing to show.
      *
+     * **Calendar dates are wall-clock dates (D61).** A stored instant is UTC and is converted into
+     * the display timezone. A calendar date is not an instant: `2026-09-14` is the 14th for everyone,
+     * and reading it as UTC midnight and then converting put it on the 13th for every zone west of
+     * UTC. Two shapes are calendar dates, and each comes back as that same date at 00:00 in the
+     * target timezone, never shifted:
+     *
+     *  - a **'Y-m-d' string** (nothing but a date — unambiguous);
+     *  - a **DateTimeInterface at exactly 00:00:00.000000** on its own clock — what a `date` /
+     *    `immutable_date` cast yields, and what a range boundary built with startOfDay() is. PHP
+     *    cannot tell that apart from a `datetime` that happens to sit on midnight, so only the
+     *    date renderers read it this way; time(), dateTime() and forHumans() go through moment(),
+     *    which converts such a value as the instant it may be.
+     *
      * An unparseable value is null rather than an exception: a malformed date in a legacy row must
      * not take a whole screen down.
      */
     public static function carbon(mixed $value, ?string $timezone = null): ?CarbonImmutable
+    {
+        return self::parse($value, $timezone, midnightIsCalendarDate: true);
+    }
+
+    /**
+     * Like carbon(), for renderers that show a time of day: a 'Y-m-d' string is still a calendar
+     * date (it has no time to convert), but every DateTimeInterface is an instant.
+     */
+    private static function moment(mixed $value, ?string $timezone = null): ?CarbonImmutable
+    {
+        return self::parse($value, $timezone, midnightIsCalendarDate: false);
+    }
+
+    private static function parse(mixed $value, ?string $timezone, bool $midnightIsCalendarDate): ?CarbonImmutable
     {
         if ($value === null || $value === '') {
             return null;
         }
 
         $timezone = $timezone ?? self::displayTimezone();
+
+        if (is_string($value) && preg_match('/^\s*(\d{4})-(\d{2})-(\d{2})\s*$/', $value, $parts) === 1) {
+            // A date that does not exist ('2026-02-30') is unreadable, not silently next month.
+            return checkdate((int) $parts[2], (int) $parts[3], (int) $parts[1])
+                ? self::calendarDate($parts[1].'-'.$parts[2].'-'.$parts[3], $timezone)
+                : null;
+        }
+
+        if ($midnightIsCalendarDate && $value instanceof DateTimeInterface && $value->format('H:i:s.u') === '00:00:00.000000') {
+            return self::calendarDate($value->format('Y-m-d'), $timezone);
+        }
 
         try {
             $date = match (true) {
@@ -139,6 +197,26 @@ final class Format
         } catch (Throwable) {
             return $date;
         }
+    }
+
+    /**
+     * 'Y-m-d' as the start of that calendar day in `$timezone` (the first instant that exists, on a
+     * day whose midnight a daylight-saving jump skips). An unusable timezone falls back to UTC rather
+     * than moving the date.
+     */
+    private static function calendarDate(string $date, string $timezone): ?CarbonImmutable
+    {
+        try {
+            $parsed = CarbonImmutable::createFromFormat('!Y-m-d', $date, $timezone);
+        } catch (Throwable) {
+            try {
+                $parsed = CarbonImmutable::createFromFormat('!Y-m-d', $date, self::FALLBACK_TIMEZONE);
+            } catch (Throwable) {
+                return null;
+            }
+        }
+
+        return $parsed instanceof CarbonImmutable ? $parsed : null;
     }
 
     /*
@@ -285,9 +363,35 @@ final class Format
         return self::WEEK_STARTS[self::weekStart()];
     }
 
+    /**
+     * The grouping character, or '' for no grouping.
+     *
+     * The registry documents "Leave empty for no grouping", so an **empty stored value** is a real
+     * choice and is honoured: a `localization.thousand_separator` row that exists and holds nothing
+     * (NULL or '') means no grouping. Only a **missing row** — or unreadable settings (a fresh
+     * install) — falls back to ','. The value is not trimmed: a space is a legitimate separator.
+     */
     public static function thousandSeparator(): string
     {
-        return self::setting('localization.thousand_separator', ',');
+        $key = 'localization.thousand_separator';
+
+        try {
+            $repository = settings_repo();
+
+            if (! $repository->has($key)) {
+                return ',';
+            }
+
+            $value = $repository->get($key);
+        } catch (Throwable) {
+            return ',';
+        }
+
+        if ($value === null) {
+            return '';
+        }
+
+        return is_scalar($value) ? (string) $value : ',';
     }
 
     public static function decimalSeparator(): string

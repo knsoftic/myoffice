@@ -61,6 +61,11 @@ final class DateRange
     public const DEFAULT_PRESET = self::MONTH;
 
     /**
+     * The longest custom range, in whole days: a leap year. See custom() — longer spans are clamped.
+     */
+    public const MAX_CUSTOM_DAYS = 366;
+
+    /**
      * Every preset a selector may offer, in display order.
      *
      * @var list<string>
@@ -138,6 +143,15 @@ final class DateRange
      * An explicit window. Both ends are inclusive whole days, and they are swapped when they
      * arrive the wrong way round rather than returning an empty range nobody can explain.
      *
+     * **Span cap: CLAMPED, not refused.** A window longer than MAX_CUSTOM_DAYS (366) keeps its end
+     * and has its start moved forward, so it covers exactly the last 366 days of what was asked for.
+     * A hand-edited `?from=1900-01-01` would otherwise have every widget and report scan and bucket
+     * the whole table on every load. Clamping rather than throwing is deliberate: `make()` turns an
+     * exception into the default preset, so a refusal would silently show "this month" for a
+     * two-year request, while a clamped range still answers about the end of the period asked for
+     * (the part a dashboard is looking at) and its label and `toArray()` state the dates actually
+     * used. `lastDays()` is built on this and is clamped the same way.
+     *
      * @param  mixed  $from  anything Format::carbon() can read
      * @param  mixed  $to  anything Format::carbon() can read
      */
@@ -159,7 +173,17 @@ final class DateRange
             [$start, $end] = [$end, $start];
         }
 
-        return new self($start->startOfDay(), $end->endOfDay(), self::CUSTOM, $timezone);
+        $start = $start->startOfDay();
+        $end = $end->endOfDay();
+
+        // Wall-clock subDays(), so a daylight-saving change inside the window cannot cost a day.
+        $earliestStart = $end->startOfDay()->subDays(self::MAX_CUSTOM_DAYS - 1);
+
+        if ($start->lessThan($earliestStart)) {
+            $start = $earliestStart;
+        }
+
+        return new self($start, $end, self::CUSTOM, $timezone);
     }
 
     /**
@@ -293,23 +317,30 @@ final class DateRange
 
     /**
      * Whole days covered, both ends included: a single day is 1.
+     *
+     * Counted on calendar dates, not elapsed time, so a window spanning a daylight-saving change
+     * (a 23- or 25-hour day) still counts every day exactly once.
      */
     public function days(): int
     {
-        return (int) $this->start->startOfDay()->diffInDays($this->end->startOfDay()) + 1;
+        return intdiv(self::calendarDay($this->end)->getTimestamp() - self::calendarDay($this->start)->getTimestamp(), 86400) + 1;
     }
 
     /**
      * Every day in the range as 'Y-m-d' — the x-axis of a trend chart, including the days with no
      * rows, so a gap renders as a zero instead of disappearing.
      *
+     * Walks calendar dates rather than local midnights: on a day whose midnight a daylight-saving jump
+     * skips (America/Santiago, 6 Sep 2026) a local cursor lands on 01:00, stays there, and the last
+     * day of the window was never reached — so it fell off the axis.
+     *
      * @return list<string>
      */
     public function dateKeys(): array
     {
         $keys = [];
-        $cursor = $this->start->startOfDay();
-        $last = $this->end->startOfDay();
+        $cursor = self::calendarDay($this->start);
+        $last = self::calendarDay($this->end);
 
         while ($cursor->lessThanOrEqualTo($last)) {
             $keys[] = $cursor->toDateString();
@@ -336,19 +367,23 @@ final class DateRange
 
     /**
      * A human label: 'Today', 'September 2026', '1 Sep 2026 – 14 Sep 2026'.
+     *
+     * Both ends are handed to Format as calendar dates ('Y-m-d'): the range's days are days in the
+     * range's own timezone, and must not move when the viewer's display timezone differs.
      */
     public function label(): string
     {
+        $from = Format::date($this->start->toDateString());
+        $to = Format::date($this->end->toDateString());
+
         return match ($this->preset) {
             self::TODAY => 'Today',
             self::YESTERDAY => 'Yesterday',
-            self::WEEK => Format::date($this->start).' – '.Format::date($this->end),
+            self::WEEK => $from.' – '.$to,
             self::MONTH => $this->start->format('F Y'),
             self::QUARTER => 'Q'.$this->start->quarter.' '.$this->start->format('Y'),
             self::YEAR => $this->start->format('Y'),
-            default => $this->days() === 1
-                ? Format::date($this->start)
-                : Format::date($this->start).' – '.Format::date($this->end),
+            default => $this->days() === 1 ? $from : $from.' – '.$to,
         };
     }
 
@@ -527,6 +562,15 @@ final class DateRange
         } catch (Throwable) {
             return null;
         }
+    }
+
+    /**
+     * The moment's calendar date in its own timezone, as midnight UTC — a clock with no daylight
+     * saving, on which one day is always 86,400 seconds.
+     */
+    private static function calendarDay(CarbonImmutable $moment): CarbonImmutable
+    {
+        return CarbonImmutable::createFromFormat('!Y-m-d', $moment->toDateString(), 'UTC') ?? $moment->utc()->startOfDay();
     }
 
     private function toStorageTimezone(CarbonImmutable $moment): CarbonImmutable

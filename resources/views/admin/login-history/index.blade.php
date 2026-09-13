@@ -26,7 +26,7 @@
         default => 'question-mark-circle',
     };
 
-    $perPageOptions = collect(\App\Http\Requests\Admin\LogFilterRequest::PER_PAGE_OPTIONS)
+    $perPageOptions = collect(\App\Http\Requests\Admin\LogFilterRequest::perPageOptions())
         ->mapWithKeys(static fn (int $size): array => [(string) $size => $size.' / page'])
         ->all();
 
@@ -170,7 +170,7 @@
             <x-ui.form.select
                 name="per_page"
                 :options="$perPageOptions"
-                :selected="request('per_page', \App\Http\Requests\Admin\LogFilterRequest::DEFAULT_PER_PAGE)"
+                :selected="(string) $entries->perPage()"
                 size="sm"
                 aria-label="Rows per page"
                 class="sm:max-w-[8rem]"

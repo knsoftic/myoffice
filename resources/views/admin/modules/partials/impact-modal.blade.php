@@ -186,7 +186,7 @@
                 </div>
 
                 <div class="rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200/70 dark:bg-slate-800/40 dark:ring-slate-700/60">
-                    <p class="text-lg font-semibold tabular-nums tracking-tight text-slate-900 dark:text-white" x-text="data ? data.sidebar_items.length : 0"></p>
+                    <p class="text-lg font-semibold tabular-nums tracking-tight text-slate-900 dark:text-white" x-text="data ? (data.sidebar ? data.sidebar.count : data.sidebar_items.length) : 0"></p>
                     <p class="text-2xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
                         <span x-text="enable ? 'menu items return' : 'menu items disappear'"></span>
                     </p>
@@ -224,6 +224,10 @@
                     <summary class="cursor-pointer px-3 py-2 text-2xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
                         Routes affected (<span x-text="data.routes.count"></span>)
                     </summary>
+
+                    <p x-show="data.routes.hidden > 0" class="border-t border-slate-200/70 px-3 py-1.5 text-2xs text-slate-500 dark:border-slate-700/60 dark:text-slate-400">
+                        <span x-text="data.routes.hidden"></span> more you do not have access to are counted but not named.
+                    </p>
 
                     <div class="max-h-40 overflow-y-auto border-t border-slate-200/70 px-3 py-2 dark:border-slate-700/60">
                         <ul class="space-y-1">

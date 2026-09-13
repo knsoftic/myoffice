@@ -9,7 +9,6 @@ use App\Models\Permission;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Feature\Concerns\InteractsWithRbac;
 use Tests\TestCase;
@@ -25,8 +24,9 @@ use Tests\TestCase;
  *     is covered the moment its migration exists, with no edit here.
  *  2. **The rows a module owns today are fingerprinted**, not just counted — its permissions, every
  *     role and user grant on them, its own `modules` row apart from the four switch columns, and
- *     real content rows in the CMS tables that exist at this point of the build. A toggle that
- *     rewrote a row without changing the count would slip past a count; it cannot slip past a hash.
+ *     content rows in a stand-in content store the test defines itself (no Phase 3 table is ever
+ *     read or written here). A toggle that rewrote a row without changing the count would slip
+ *     past a count; it cannot slip past a hash.
  */
 final class ModuleDataSafetyTest extends TestCase
 {
@@ -77,34 +77,43 @@ final class ModuleDataSafetyTest extends TestCase
     {
         $admin = $this->createSuperAdmin();
 
-        $tables = $this->seedCmsContent($admin);
+        // The content comes from a stand-in store this test defines, never from Phase 3's schema:
+        // a Phase 2 test has to pass, not skip, on a tree that carries no CMS code at all, and must
+        // not turn red when Phase 3 changes a column or adds a trigger to its own tables.
+        $tables = $this->createStandInCmsContent($admin);
 
-        if ($tables === []) {
-            $this->markTestSkipped('The CMS tables are not in this schema yet; the whole-database count above still covers every table that is.');
+        try {
+            $counts = $this->rowCounts();
+            $content = $this->tableHashes($tables);
+            $fingerprints = $this->fingerprints(['menus', 'pages']);
+
+            $this->assertCount(3, $tables);
+            $this->assertNotContains(md5('[]'), $content, 'Every stand-in table must hold rows, or a hash proves nothing.');
+
+            foreach (['menus', 'pages'] as $slug) {
+                $module = Module::query()->where('slug', $slug)->firstOrFail();
+
+                $this->actingAs($admin)
+                    ->post('/admin/modules/'.$module->getKey().'/toggle', ['enabled' => false, 'reason' => 'Website freeze'])
+                    ->assertRedirect();
+
+                $this->assertFalse((bool) $module->fresh()->is_enabled, $slug.' must really be off.');
+                $this->assertSame($content, $this->tableHashes($tables), 'Disabling '.$slug.' touched its content.');
+
+                $this->actingAs($admin)
+                    ->post('/admin/modules/'.$module->getKey().'/toggle', ['enabled' => true])
+                    ->assertRedirect();
+            }
+
+            $this->assertSame($counts, $this->rowCounts());
+            $this->assertSame($content, $this->tableHashes($tables));
+            $this->assertSame($fingerprints, $this->fingerprints(['menus', 'pages']));
+        } finally {
+            foreach (array_reverse($tables) as $table) {
+                // TEMPORARY again: a plain DROP TABLE would implicitly commit RefreshDatabase's transaction.
+                DB::statement('DROP TEMPORARY TABLE IF EXISTS `'.$table.'`');
+            }
         }
-
-        $counts = $this->rowCounts();
-        $content = $this->tableHashes($tables);
-        $fingerprints = $this->fingerprints(['menus', 'pages']);
-
-        foreach (['menus', 'pages'] as $slug) {
-            $module = Module::query()->where('slug', $slug)->firstOrFail();
-
-            $this->actingAs($admin)
-                ->post('/admin/modules/'.$module->getKey().'/toggle', ['enabled' => false, 'reason' => 'Website freeze'])
-                ->assertRedirect();
-
-            $this->assertFalse((bool) $module->fresh()->is_enabled, $slug.' must really be off.');
-            $this->assertSame($content, $this->tableHashes($tables), 'Disabling '.$slug.' touched its content.');
-
-            $this->actingAs($admin)
-                ->post('/admin/modules/'.$module->getKey().'/toggle', ['enabled' => true])
-                ->assertRedirect();
-        }
-
-        $this->assertSame($counts, $this->rowCounts());
-        $this->assertSame($content, $this->tableHashes($tables));
-        $this->assertSame($fingerprints, $this->fingerprints(['menus', 'pages']));
     }
 
     #[Test]
@@ -158,34 +167,68 @@ final class ModuleDataSafetyTest extends TestCase
     }
 
     /**
-     * Real rows in the CMS tables, when those tables exist in the schema this build carries.
+     * A stand-in for the content the `pages` and `menus` modules own, defined by this test.
      *
-     * @return list<string> the tables that received rows
+     * Session-local TEMPORARY tables with only inline columns (no separate index statement):
+     * `CREATE TEMPORARY TABLE` does not implicitly commit, so RefreshDatabase's wrapping transaction
+     * survives, and the tables vanish with the connection. They carry the shape a content store
+     * has — a blameable page, a menu and its items — and names no real table, so nothing Phase 3
+     * builds can collide with or change them. SHOW FULL TABLES does not list them, so rowCounts()
+     * still measures exactly the real schema.
+     *
+     * @return list<string> the stand-in tables, each holding rows
      */
-    private function seedCmsContent(User $admin): array
+    private function createStandInCmsContent(User $admin): array
     {
-        $tables = [];
+        $pages = 'phase2_standin_cms_pages';
+        $menus = 'phase2_standin_cms_menus';
+        $items = 'phase2_standin_cms_menu_items';
 
-        if (Schema::hasTable('pages') && Schema::hasColumns('pages', ['title', 'slug'])) {
-            foreach (['about-us', 'admissions-policy', 'refund-policy'] as $slug) {
-                DB::table('pages')->insert(['title' => ucwords(str_replace('-', ' ', $slug)), 'slug' => $slug, 'created_at' => now(), 'updated_at' => now(), 'created_by' => $admin->getKey()]);
-            }
+        DB::statement('CREATE TEMPORARY TABLE `'.$pages.'` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `title` VARCHAR(191) NOT NULL,
+            `slug` VARCHAR(191) NOT NULL,
+            `body` TEXT NULL,
+            `created_by` BIGINT UNSIGNED NULL,
+            `created_at` TIMESTAMP NULL,
+            `updated_at` TIMESTAMP NULL
+        )');
 
-            $tables[] = 'pages';
+        DB::statement('CREATE TEMPORARY TABLE `'.$menus.'` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `name` VARCHAR(191) NOT NULL,
+            `location` VARCHAR(64) NOT NULL,
+            `created_at` TIMESTAMP NULL,
+            `updated_at` TIMESTAMP NULL
+        )');
+
+        DB::statement('CREATE TEMPORARY TABLE `'.$items.'` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `menu_id` BIGINT UNSIGNED NOT NULL,
+            `label` VARCHAR(191) NOT NULL,
+            `sort_order` INT NOT NULL DEFAULT 0,
+            `created_at` TIMESTAMP NULL,
+            `updated_at` TIMESTAMP NULL
+        )');
+
+        foreach (['about-us', 'admissions-policy', 'refund-policy'] as $slug) {
+            DB::table($pages)->insert([
+                'title' => ucwords(str_replace('-', ' ', $slug)),
+                'slug' => $slug,
+                'body' => '<p>'.ucwords(str_replace('-', ' ', $slug)).' content.</p>',
+                'created_by' => $admin->getKey(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
         }
 
-        if (Schema::hasTable('menus') && Schema::hasColumns('menus', ['name', 'slug', 'location']) && Schema::hasTable('menu_items') && Schema::hasColumns('menu_items', ['menu_id', 'label'])) {
-            $menu = DB::table('menus')->insertGetId(['name' => 'Header', 'slug' => 'header', 'location' => 'header', 'created_at' => now(), 'updated_at' => now()]);
+        $menu = DB::table($menus)->insertGetId(['name' => 'Header', 'location' => 'header', 'created_at' => now(), 'updated_at' => now()]);
 
-            foreach (['Home', 'Courses', 'Contact'] as $label) {
-                DB::table('menu_items')->insert(['menu_id' => $menu, 'label' => $label, 'created_at' => now(), 'updated_at' => now()]);
-            }
-
-            $tables[] = 'menus';
-            $tables[] = 'menu_items';
+        foreach (['Home', 'Courses', 'Contact'] as $position => $label) {
+            DB::table($items)->insert(['menu_id' => $menu, 'label' => $label, 'sort_order' => $position, 'created_at' => now(), 'updated_at' => now()]);
         }
 
-        return $tables;
+        return [$pages, $menus, $items];
     }
 
     /*

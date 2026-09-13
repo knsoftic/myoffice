@@ -36,8 +36,6 @@ final class RoleController extends Controller
 
     private const SORTABLE = ['name', 'label', 'panel', 'level', 'users_count', 'permissions_count'];
 
-    private const PER_PAGE = 25;
-
     public function __construct(
         private readonly RoleService $roles,
         private readonly PermissionMatrix $matrix,
@@ -66,7 +64,8 @@ final class RoleController extends Controller
             ->when($system === 'custom', static fn (Builder $query) => $query->where('is_system', false))
             ->orderBy($sort, $direction)
             ->orderBy('id')
-            ->paginate(self::PER_PAGE)
+            // Page size is the `appearance.table_page_size` setting, clamped by per_page().
+            ->paginate(per_page())
             ->withQueryString();
 
         return view('admin.roles.index', [

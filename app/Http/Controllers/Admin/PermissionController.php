@@ -27,9 +27,6 @@ final class PermissionController extends Controller
 {
     use AuthorizesRequests;
 
-    /** Rows per page. The page is then grouped by module for rendering. */
-    private const PER_PAGE = 60;
-
     /** Module slug these permissions are filed under. */
     private const MODULE = 'permissions';
 
@@ -57,7 +54,9 @@ final class PermissionController extends Controller
             ->when($ability !== '', static fn (Builder $query) => $query->where('ability', $ability))
             ->when($module !== '', static fn (Builder $query) => $query->where('module', $module))
             ->ordered()
-            ->paginate(self::PER_PAGE)
+            // Rows per page come from `appearance.table_page_size` (per_page()); the page is then
+            // grouped by module for rendering.
+            ->paginate(per_page())
             ->withQueryString();
 
         /** @var Collection<int, Permission> $page */

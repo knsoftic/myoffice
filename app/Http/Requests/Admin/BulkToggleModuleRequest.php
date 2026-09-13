@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Http\Requests\Admin;
 
 use App\Enums\ModuleGroup;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /**
@@ -48,7 +50,9 @@ final class BulkToggleModuleRequest extends FormRequest
             'group' => ['required_without:modules', 'nullable', 'string', Rule::enum(ModuleGroup::class)],
 
             'modules' => ['required_without:group', 'nullable', 'array', 'max:'.self::MAX_MODULES],
-            'modules.*' => ['integer', 'min:1', 'distinct', 'exists:modules,id'],
+            // Existence is checked for every id at once in withValidator() — one whereIn query, not
+            // one `exists:modules,id` query per id (Phase 2 review low 7).
+            'modules.*' => ['integer', 'min:1', 'distinct'],
 
             // D63: switching modules off requires a human reason on the server (5–255 characters).
             'reason' => $this->has('enabled') && ! $this->boolean('enabled')
@@ -83,6 +87,59 @@ final class BulkToggleModuleRequest extends FormRequest
             'modules.*' => 'module',
             'cascade' => 'cascade confirmation',
         ];
+    }
+
+    /**
+     * Every named module must exist — decided with ONE query for the whole list.
+     *
+     * Phase 2 review low 7: `exists:modules,id` on `modules.*` ran a query per id (up to
+     * MAX_MODULES of them). The same verdict now comes from one `whereIn` against the same table,
+     * and every missing id still gets its own error on its own index, worded exactly as the
+     * `exists` rule words it. A value the `integer` / `min:1` rules already refused is not looked
+     * up; an over-long list is refused by `max:` and not looked up at all.
+     */
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            $ids = $this->input('modules');
+
+            if (! is_array($ids) || $ids === [] || count($ids) > self::MAX_MODULES) {
+                return;
+            }
+
+            /** @var array<array-key, int> $candidates index => id */
+            $candidates = [];
+
+            foreach ($ids as $index => $id) {
+                // The same reading the `integer` rule makes (filter_var), bounded like `min:1`.
+                $int = is_scalar($id)
+                    ? filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])
+                    : false;
+
+                if ($int !== false) {
+                    $candidates[$index] = $int;
+                }
+            }
+
+            if ($candidates === []) {
+                return;
+            }
+
+            $found = DB::table('modules')
+                ->whereIn('id', array_values(array_unique($candidates)))
+                ->pluck('id')
+                ->map(static fn (mixed $id): int => (int) $id)
+                ->all();
+
+            foreach ($candidates as $index => $id) {
+                if (! in_array($id, $found, true)) {
+                    $validator->errors()->add(
+                        'modules.'.$index,
+                        __('validation.exists', ['attribute' => $this->attributes()['modules.*']]),
+                    );
+                }
+            }
+        });
     }
 
     /**

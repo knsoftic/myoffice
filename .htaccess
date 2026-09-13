@@ -1,0 +1,10 @@
+# XAMPP's Apache serves C:/xampp/htdocs, which would expose this project's root
+# (including .env, storage/ and vendor/) at http://localhost/my%20office/.
+# Deny everything here; public/.htaccess re-grants access to the web root only.
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order deny,allow
+    Deny from all
+</IfModule>

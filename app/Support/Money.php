@@ -81,10 +81,6 @@ final class Money
         'localization.currency',
     ];
 
-    private const THOUSAND_SEPARATOR_KEYS = [
-        'localization.thousand_separator',
-    ];
-
     private const DECIMAL_SEPARATOR_KEYS = [
         'localization.decimal_separator',
     ];
@@ -745,7 +741,9 @@ final class Money
             'symbol' => $symbol,
             'code' => strtoupper($code),
             'decimals' => self::SCALE,
-            'thousand_separator' => self::settingString(self::THOUSAND_SEPARATOR_KEYS, ','),
+            // One rule for every number on screen: a stored empty (or NULL) separator means no
+            // grouping and only a missing row falls back to ',' — exactly what app_number() does.
+            'thousand_separator' => Format::thousandSeparator(),
             'decimal_separator' => self::settingString(self::DECIMAL_SEPARATOR_KEYS, '.') ?: '.',
             'position' => $position === 'after' ? 'after' : 'before',
             'space' => ' ',

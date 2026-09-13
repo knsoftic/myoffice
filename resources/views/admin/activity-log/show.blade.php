@@ -200,11 +200,16 @@
                                 {{--
                                     An audit entry keeps its seconds. The time part is the configured
                                     localization.time_format with seconds added after the minutes, so a
-                                    12-hour setting stays 12-hour ('h:i A' -> 'h:i:s A'); app_date() and
-                                    app_time() do the timezone conversion (D61: stored UTC, shown in the
+                                    12-hour setting stays 12-hour ('h:i A' -> 'h:i:s A'); Format::instantDate()
+                                    and app_time() do the timezone conversion (D61: stored UTC, shown in the
                                     display timezone). toIso8601String() is the machine-readable
                                     datetime attribute only, and the zone named underneath is the one the
                                     helpers actually rendered in.
+
+                                    Phase 2 review low 2: created_at is an instant, so its date half goes
+                                    through Format::instantDate(), never app_date() — app_date() reads a
+                                    value at 00:00:00 as a calendar date and would show UTC's date beside
+                                    the converted time west of UTC.
                                 --}}
                                 @php
                                     $whenTimeFormat = \App\Support\Format::timeFormat();
@@ -213,7 +218,7 @@
                                         : str_replace('i', 'i:s', $whenTimeFormat);
                                 @endphp
                                 <time datetime="{{ $entry->created_at->toIso8601String() }}" title="{{ $entry->created_at->diffForHumans() }}">
-                                    {{ app_date($entry->created_at) }} · {{ app_time($entry->created_at, $whenTimeFormat) }}
+                                    {{ \App\Support\Format::instantDate($entry->created_at) }} · {{ app_time($entry->created_at, $whenTimeFormat) }}
                                 </time>
                                 <span class="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
                                     {{ $entry->created_at->diffForHumans() }} · {{ \App\Support\Format::displayTimezone() }}

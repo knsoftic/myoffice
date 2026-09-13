@@ -30,8 +30,11 @@
 <meta name="theme-color" content="#f8fafc">
 <meta name="robots" content="noindex, nofollow">
 
-{{-- theme.js reads this to mirror the user's choice to the server; absent until the route exists. --}}
-@if (Route::has('account.theme.update'))
+{{--
+    theme.js reads this to mirror the user's choice to the server. Only a signed-in user has a row
+    to write: on the sign-in and reset screens the choice stays on the device (theme-script).
+--}}
+@if (auth()->check() && Route::has('account.theme.update'))
     <meta name="theme-endpoint" content="{{ route('account.theme.update') }}">
 @endif
 

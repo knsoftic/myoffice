@@ -6,8 +6,11 @@ namespace App\Http\Middleware;
 
 use App\Enums\UserStatus;
 use App\Models\User;
+use App\Support\SettingsRegistry;
 use Closure;
+use DateTimeInterface;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route as RouteFacade;
 use Illuminate\Support\Str;
@@ -25,6 +28,8 @@ use Throwable;
  *      (they subscribe to the Logout event), never here.
  *   2. `users.must_change_password`  → force the change-password screen; only that screen (plus
  *      logout and the theme endpoint) is reachable until the password has been changed.
+ *   3. the password is older than `security.force_password_change_days` (0 = off) → the same
+ *      redirect, with a message that says the password expired.
  *
  * The change-password screen is resolved by route name at runtime (see CHANGE_PASSWORD_ROUTES)
  * so this middleware does not hard-depend on the panel route files being registered yet.
@@ -58,6 +63,12 @@ final class EnsureUserIsActive
         'account.theme.update',
     ];
 
+    /** Shown when an administrator flagged the account (`users.must_change_password`). */
+    private const MUST_CHANGE_MESSAGE = 'You must change your password before continuing.';
+
+    /** Shown when the password is older than `security.force_password_change_days`. */
+    private const EXPIRED_MESSAGE = 'Your password has expired. Choose a new one to continue.';
+
     public function handle(Request $request, Closure $next): Response
     {
         $user = $request->user();
@@ -76,7 +87,55 @@ final class EnsureUserIsActive
             return $this->forcePasswordChange($request, $next, $user);
         }
 
+        if ($this->passwordHasExpired($user)) {
+            return $this->forcePasswordChange($request, $next, $user, self::EXPIRED_MESSAGE);
+        }
+
         return $next($request);
+    }
+
+    /**
+     * `security.force_password_change_days`: is this user's password older than the policy allows?
+     *
+     * 0 (the default) switches expiry off. The age runs from `users.password_changed_at` — stamped
+     * by PasswordChangeService, the reset flow and UserService — or, for an account whose password
+     * was never changed, from the account's creation. An account with neither date has a password
+     * of unknown age and is treated as expired. Changing the password stamps a fresh
+     * `password_changed_at`, which is what releases the user from the change-password screen.
+     */
+    private function passwordHasExpired(User $user): bool
+    {
+        $days = $this->passwordMaxAgeDays();
+
+        if ($days === 0) {
+            return false;
+        }
+
+        $changedAt = $user->password_changed_at ?? $user->created_at ?? null;
+
+        if (! $changedAt instanceof DateTimeInterface) {
+            return true;
+        }
+
+        return Carbon::instance($changedAt)->lt(Carbon::now()->subDays($days));
+    }
+
+    /**
+     * The policy in days, clamped to 0..FORCE_PASSWORD_CHANGE_DAYS_MAX; an unreadable setting is 0.
+     */
+    private function passwordMaxAgeDays(): int
+    {
+        try {
+            $days = settings_repo()->get('security.force_password_change_days');
+        } catch (Throwable) {
+            return 0;
+        }
+
+        if (! is_numeric($days)) {
+            return 0;
+        }
+
+        return max(0, min(SettingsRegistry::FORCE_PASSWORD_CHANGE_DAYS_MAX, (int) $days));
     }
 
     /**
@@ -106,7 +165,7 @@ final class EnsureUserIsActive
     /**
      * Pin the user to the change-password screen until they have changed it.
      */
-    private function forcePasswordChange(Request $request, Closure $next, User $user): Response
+    private function forcePasswordChange(Request $request, Closure $next, User $user, string $message = self::MUST_CHANGE_MESSAGE): Response
     {
         $target = $this->changePasswordRoute($user);
 
@@ -118,8 +177,6 @@ final class EnsureUserIsActive
         if ($request->routeIs(...$this->allowedRoutePatterns($target))) {
             return $next($request);
         }
-
-        $message = 'You must change your password before continuing.';
 
         if ($request->expectsJson()) {
             abort(Response::HTTP_FORBIDDEN, $message);

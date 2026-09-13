@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests\Admin;
 
 use App\Http\Controllers\Admin\SettingsController;
+use App\Services\Core\SettingsService;
 use App\Support\ConfigureFromSettings;
 use App\Support\SettingsRegistry;
 use Illuminate\Contracts\Validation\Validator;
@@ -29,7 +30,8 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  *
  *   · an **unknown** key — not declared by the registry at all;
  *   · a key **belonging to another group** — declared, but not in the group being saved;
- *   · a **readonly** key — declared here, but writable only from the console or the environment.
+ *   · a **readonly** key — declared readonly by the registry or stored with `is_readonly = 1`, and
+ *     writable only from the console or the environment.
  *
  * Laravel's `validated()` would simply drop all three (no rule, no data). The explicit check in
  * `withValidator()` turns that silence into a 422 naming the key, which is what an operator
@@ -39,6 +41,13 @@ final class UpdateSettingsRequest extends FormRequest
 {
     /** The one input name every field nests under. */
     public const PAYLOAD = 'settings';
+
+    /**
+     * readonlyKeys(), memoised for the request.
+     *
+     * @var list<string>|null
+     */
+    private ?array $readonly = null;
 
     /**
      * `settings.edit`, plus the extra gate the mail group carries.
@@ -163,6 +172,20 @@ final class UpdateSettingsRequest extends FormRequest
                 continue;
             }
 
+            if ($field['storage'] === 'decimal') {
+                // Restated at the field's scale through Money BEFORE the rules run, so the rules, the
+                // 100 % cap and the stored column judge one value: '5000.' is judged as 5000.0000
+                // instead of slipping past a pattern that did not anticipate a trailing dot.
+                // Phase 2 review low 1: only an exact restatement — '1000.005' at scale 2 is left as
+                // posted and refused in withValidator(), never rounded to 1000.01. Anything that is
+                // not a plain decimal ('1e3', '5,5') is left for the rules to refuse.
+                $payload[$key] = is_string($value) && trim($value) === '' && $this->isNullable($field)
+                    ? null
+                    : SettingsRegistry::normaliseDecimal($field, $value);
+
+                continue;
+            }
+
             if ($field['type'] === SettingsRegistry::TYPE_JSON && is_string($value)) {
                 // A json textarea posts a string; store real JSON, not a string holding JSON.
                 $decoded = json_decode($value, true);
@@ -233,6 +256,15 @@ final class UpdateSettingsRequest extends FormRequest
                     );
 
                     continue;
+                }
+
+                // Phase 2 review low 1: a decimal with more decimals than its scale is refused, never
+                // rounded — enforced here, not left to whether the field happens to carry `decimal:`.
+                if (
+                    ! $validator->errors()->has(self::PAYLOAD.'.'.$key)
+                    && SettingsRegistry::exceedsScale($definitions[$key], $this->input(self::PAYLOAD.'.'.$key))
+                ) {
+                    $validator->errors()->add(self::PAYLOAD.'.'.$key, SettingsRegistry::scaleErrorMessage($definitions[$key]));
                 }
 
                 // A json field still holding a string is a textarea whose JSON did not parse;
@@ -381,21 +413,15 @@ final class UpdateSettingsRequest extends FormRequest
     }
 
     /**
-     * Keys of this group that may not be written from the screen.
+     * Keys of this group that may not be written from the screen: registry-readonly keys AND rows
+     * stored with `is_readonly = 1` — the same answer `SettingsService::readonlyKeys()` gives, because
+     * it is that method. Resolved once per request.
      *
      * @return list<string>
      */
     private function readonlyKeys(): array
     {
-        $keys = [];
-
-        foreach ($this->definitions() as $key => $field) {
-            if ($field['readonly'] === true) {
-                $keys[] = (string) $key;
-            }
-        }
-
-        return $keys;
+        return $this->readonly ??= app(SettingsService::class)->readonlyKeys($this->groupSlug());
     }
 
     /**

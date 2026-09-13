@@ -54,8 +54,31 @@ final class LogFilterRequest extends FormRequest
             'to' => ['nullable', 'date', 'after_or_equal:from'],
             'sort' => ['nullable', 'string', 'max:32'],
             'direction' => ['nullable', 'string', Rule::in(['asc', 'desc'])],
-            'per_page' => ['nullable', 'integer', Rule::in(self::PER_PAGE_OPTIONS)],
+            'per_page' => ['nullable', 'integer', Rule::in(self::perPageOptions())],
         ];
+    }
+
+    /**
+     * The page sizes the select offers and the rules accept: PER_PAGE_OPTIONS plus the
+     * `appearance.table_page_size` default (per_page(), already clamped to 10..100), ascending.
+     *
+     * Without the setting's own size in the list, the select could not show the size the page was
+     * actually rendered at, and the first filter submit would post a different one and override it.
+     *
+     * @return list<int>
+     */
+    public static function perPageOptions(): array
+    {
+        $options = self::PER_PAGE_OPTIONS;
+
+        if (function_exists('per_page')) {
+            $options[] = per_page();
+        }
+
+        $options = array_values(array_unique($options));
+        sort($options);
+
+        return $options;
     }
 
     /**
@@ -207,7 +230,7 @@ final class LogFilterRequest extends FormRequest
 
         $value = (int) $value;
 
-        return in_array($value, self::PER_PAGE_OPTIONS, true) ? $value : $default;
+        return in_array($value, self::perPageOptions(), true) ? $value : $default;
     }
 
     /**

@@ -11,9 +11,16 @@
         @section('content') … @endsection
 
     Settings read: company.name, company.tagline, company.features (a JSON list, or one entry per
-    line), and the logo from branding.logo_dark / branding.logo_light. Every one of them is
-    declared in App\Support\SettingsRegistry, so every one of them is editable on the settings
-    screen — a view may never read a key the registry does not declare.
+    line), the logo from branding.logo_dark / branding.logo_light, the brand panel image from
+    branding.login_background, and the credit line switch appearance.show_powered_by. The theme
+    these pages open in is appearance.default_theme (see layouts/partials/theme-script). Every one
+    of them is declared in App\Support\SettingsRegistry, so every one of them is editable on the
+    settings screen — a view may never read a key the registry does not declare.
+
+    branding.login_background is shown to signed-out visitors, so it can only ever be served from
+    the public disk. The layout asks SettingsService::diskFor() where the field lives and renders
+    the image only when that answer is the public disk: a file on the private disk is never given
+    a URL here (D21), whatever the row holds.
 --}}
 
 @php
@@ -51,6 +58,22 @@
             : \Illuminate\Support\Facades\Storage::disk('public')->url((string) $authLogoPath))
         : null;
 
+    $authBackgroundPath = setting('branding.login_background');
+    $authBackgroundUrl = null;
+
+    if (is_string($authBackgroundPath) && trim($authBackgroundPath) !== '') {
+        $authBackgroundPath = trim($authBackgroundPath);
+
+        if (str_starts_with($authBackgroundPath, 'http')) {
+            $authBackgroundUrl = $authBackgroundPath;
+        } elseif (\App\Services\Core\SettingsService::diskFor('branding.login_background') === \App\Services\Core\SettingsService::PUBLIC_DISK) {
+            $authBackgroundUrl = \Illuminate\Support\Facades\Storage::disk(\App\Services\Core\SettingsService::PUBLIC_DISK)->url($authBackgroundPath);
+        }
+    }
+
+    $authPoweredBy = (bool) setting('appearance.show_powered_by', true);
+    $authProduct = trim((string) config('app.name', 'My Office'));
+
     $authWords = array_values(array_filter(preg_split('/\s+/', trim((string) $authName)) ?: []));
     $authInitials = count($authWords) > 1
         ? mb_strtoupper(mb_substr($authWords[0], 0, 1).mb_substr($authWords[1], 0, 1))
@@ -67,6 +90,28 @@
     <div class="flex min-h-screen flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-0">
         {{-- Brand panel --}}
         <div class="relative isolate overflow-hidden bg-gradient-to-br from-brand-700 via-brand-600 to-brand-800 px-6 py-8 text-white sm:px-10 lg:flex lg:flex-col lg:justify-between lg:px-12 lg:py-14">
+            @if ($authBackgroundUrl)
+                {{--
+                    The administrator's image, under a brand-tinted scrim so the white copy stays
+                    readable over any photograph. First in the DOM, so every later positioned child
+                    paints above it without a z-index. The scrim is an inline gradient over the
+                    runtime --brand-* variables: it follows branding.brand_color in both themes.
+                --}}
+                <img
+                    src="{{ $authBackgroundUrl }}"
+                    alt=""
+                    class="pointer-events-none absolute inset-0 h-full w-full object-cover"
+                    decoding="async"
+                    aria-hidden="true"
+                    data-login-background
+                />
+                <div
+                    class="pointer-events-none absolute inset-0"
+                    style="background-image: linear-gradient(135deg, rgb(var(--brand-800) / 0.88) 0%, rgb(var(--brand-600) / 0.72) 55%, rgb(var(--brand-900) / 0.9) 100%);"
+                    aria-hidden="true"
+                ></div>
+            @endif
+
             {{-- Decorative glows --}}
             <div class="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-white/10 blur-3xl" aria-hidden="true"></div>
             <div class="pointer-events-none absolute -bottom-32 -left-20 h-80 w-80 rounded-full bg-brand-400/25 blur-3xl" aria-hidden="true"></div>
@@ -106,6 +151,10 @@
 
             <p class="relative mt-8 hidden text-xs text-white/60 lg:mt-0 lg:block">
                 &copy; {{ now()->year }} {{ $authName }}
+
+                @if ($authPoweredBy && $authProduct !== '')
+                    <span data-powered-by>&middot; Powered by {{ $authProduct }}</span>
+                @endif
             </p>
         </div>
 

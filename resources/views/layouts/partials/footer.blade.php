@@ -8,6 +8,11 @@
     `2026_09_12_060400_supersede_relocated_setting_keys`) and must not be read here: while they
     were, an administrator changing the support address on the Contact screen saw the footer keep
     the old one.
+
+    `appearance.show_powered_by` switches the credit line naming the software itself
+    (`config('app.name')`, the product) rather than `company.name` (the business running it). The
+    guest layout carries the same line under its own copyright, so the switch reads the same on the
+    sign-in screen.
 --}}
 
 @php
@@ -15,6 +20,8 @@
     $footerEmail = setting('contact.support_email') ?: setting('contact.email');
     $footerPhone = setting('contact.phone');
     $footerSite = setting('company.website');
+    $footerPoweredBy = (bool) setting('appearance.show_powered_by', true);
+    $footerProduct = trim((string) config('app.name', 'My Office'));
 @endphp
 
 <footer class="mt-auto border-t border-slate-200 bg-white/60 dark:border-slate-800 dark:bg-slate-900/40">
@@ -23,6 +30,10 @@
             &copy; {{ now()->year }}
             <span class="font-medium text-slate-700 dark:text-slate-300">{{ $footerCompany }}</span>.
             All rights reserved.
+
+            @if ($footerPoweredBy && $footerProduct !== '')
+                <span class="text-slate-400 dark:text-slate-500" data-powered-by>&middot; Powered by {{ $footerProduct }}</span>
+            @endif
         </p>
 
         <div class="flex flex-wrap items-center gap-x-4 gap-y-1">

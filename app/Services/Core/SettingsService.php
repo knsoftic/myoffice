@@ -49,13 +49,18 @@ use Throwable;
  *   · **One activity entry per changed key**, with old and new values (phase-02 §6 "Settings
  *     write"). An unchanged key writes nothing at all.
  *
+ * **A write with no actor fails closed.** `update()`, `resetGroup()` and `deleteFile()` authorize
+ * the given actor (or the signed-in user); with neither, they refuse — unless the caller asked for
+ * `asSystem()` from a console process (a seeder, a command, a test).
+ *
  * Two refusals that are not permission checks, and therefore raise `ActionNotAllowedException`
  * rather than a 403:
  *
- *   · a `readonly` key (today `security.two_factor_enabled`) submitted with a value that differs
- *     from the stored one — those keys move through the console or the environment only. A
- *     readonly key submitted with its current value is dropped silently, so a form that echoes
- *     disabled fields back is not punished for a no-op;
+ *   · a `readonly` key — declared readonly by the registry (`security.two_factor_enabled`, every
+ *     `*_next_number` counter, D62) **or** stored with `is_readonly = 1` — submitted with a value
+ *     that differs from the stored one. Those keys move through the console or the environment
+ *     only. A readonly key submitted with its current value is dropped silently, so a form that
+ *     echoes disabled fields back is not punished for a no-op;
  *   · an upload whose file name carries an executable extension in **any** segment
  *     (`logo.php.png`), on top of the registry's own `image` / `mimes` rules.
  *
@@ -115,19 +120,44 @@ final class SettingsService
     /**
      * Extensions refused in any segment of an uploaded file name, whatever the MIME type says.
      *
-     * `svg` is deliberately absent: the registry allows it for logos and it is rendered through
-     * `<img>`, which does not execute script.
+     * One list for the whole application, declared by the registry (it also strips them from
+     * `security.allowed_file_types`), so the two can never disagree.
      *
      * @var list<string>
      */
-    private const BLOCKED_EXTENSIONS = [
-        'php', 'php3', 'php4', 'php5', 'php7', 'php8', 'phps', 'phtml', 'pht', 'phar',
-        'asp', 'aspx', 'jsp', 'jspx', 'cgi', 'pl', 'py', 'rb', 'sh', 'bash', 'zsh',
-        'bat', 'cmd', 'com', 'exe', 'dll', 'so', 'jar', 'msi', 'ps1', 'vbs', 'wsf',
-        'htaccess', 'htpasswd', 'ini', 'inc', 'html', 'htm', 'shtml', 'xhtml', 'js', 'mjs', 'cjs',
-    ];
+    private const BLOCKED_EXTENSIONS = SettingsRegistry::NEVER_UPLOADABLE_EXTENSIONS;
+
+    /**
+     * True only on a clone made by asSystem() inside a console process: the one case in which a
+     * write with no authenticated actor is authorized.
+     */
+    private bool $system = false;
 
     public function __construct(private readonly SettingsRepository $settings) {}
+
+    /**
+     * A copy of this service that may write with no signed-in actor — for a seeder, an artisan
+     * command, a queued job or a test, and for nothing reachable over HTTP.
+     *
+     * Without it a missing actor FAILS CLOSED (canEditGroup() answers no). Before, a null actor was
+     * waved through as "the console is trusted", which meant any later code path that lost track of
+     * the user — a queued listener, a helper called before authentication — could write settings
+     * with no permission check at all. Being in the console is now necessary but not sufficient:
+     * the caller has to ask for it by name.
+     *
+     * @throws AuthorizationException outside a console process
+     */
+    public function asSystem(): self
+    {
+        if (! app()->runningInConsole()) {
+            throw new AuthorizationException('Settings may only be written without a signed-in user from the console.');
+        }
+
+        $system = clone $this;
+        $system->system = true;
+
+        return $system;
+    }
 
     /*
     |--------------------------------------------------------------------------
@@ -165,15 +195,16 @@ final class SettingsService
      * May this user edit this group?
      *
      * Both halves are required for a restricted group: `settings.edit` **and** the group
-     * permission. With no authenticated user (console, seeder, scheduled command) the answer is
-     * yes — there is no actor to authorize, and the console is trusted by definition.
+     * permission. With no authenticated user the answer is **no** — unless this instance came from
+     * asSystem() and the process really is a console process (checked again here, so a clone that
+     * somehow outlives its command still cannot write over HTTP).
      */
     public function canEditGroup(string $group, ?Authenticatable $user = null): bool
     {
         $user = $user ?? Auth::user();
 
         if ($user === null) {
-            return true;
+            return $this->system && app()->runningInConsole();
         }
 
         $gate = Gate::forUser($user);
@@ -237,15 +268,25 @@ final class SettingsService
 
         $input = $this->normaliseKeys($group, $input);
 
-        $this->assertNoReadonlyChange($group, $fields, $input);
+        $readonly = $this->readonlyKeys($group);
 
-        $payload = $this->prunePayload($fields, $input);
+        $this->assertNoReadonlyChange($group, $fields, $input, $readonly);
+
+        $payload = $this->prunePayload($fields, $input, $readonly);
 
         if ($payload === []) {
             return [];
         }
 
         $payload = $this->followCurrencySymbol($group, $fields, $payload);
+
+        // Restate every decimal at its scale BEFORE validating, so the rules, the 100 % cap and the
+        // stored column all judge the same value ('5000.' is judged as 5000.0000, not skipped).
+        // Phase 2 review low 1: only an exact restatement — a value with more decimals than its
+        // scale is left as submitted and refused by validate(), never rounded.
+        foreach ($payload as $key => $value) {
+            $payload[$key] = SettingsRegistry::normaliseDecimal($fields[$key], $value);
+        }
 
         $this->validate($group, $payload);
 
@@ -324,9 +365,11 @@ final class SettingsService
         /** @var list<array{disk: string, path: string}> $obsolete */
         $obsolete = [];
 
-        DB::transaction(function () use ($group, $fields, $actor, &$changes, &$obsolete): void {
+        $readonly = $this->readonlyKeys($group);
+
+        DB::transaction(function () use ($group, $fields, $actor, $readonly, &$changes, &$obsolete): void {
             foreach ($fields as $key => $field) {
-                if ($field['readonly'] === true) {
+                if (in_array((string) $key, $readonly, true)) {
                     continue;
                 }
 
@@ -377,7 +420,7 @@ final class SettingsService
 
         $this->assertCanEditGroup($group, $actor);
 
-        if ($field['readonly'] === true) {
+        if (in_array($key, $this->readonlyKeys($group), true)) {
             throw new ActionNotAllowedException(sprintf(
                 '"%s" may only be changed through the console.',
                 (string) $field['label'],
@@ -431,6 +474,38 @@ final class SettingsService
     }
 
     /**
+     * The bare keys of one group that may not be written from the screen or this service: every
+     * key the registry declares `readonly`, **plus** every stored row flagged `is_readonly`.
+     *
+     * The stored flag is honoured as well as the registry's, so a row a migration or a console
+     * command locked (a superseded key, a reserved key, a counter) stays locked even when the
+     * registry has not caught up — and it is only ever cleared by `SettingSeeder`'s metadata refresh
+     * from the console, never by a save. `UpdateSettingsRequest` and the settings screen ask this
+     * same question, so the form, the request and the service cannot disagree.
+     *
+     * @return list<string>
+     */
+    public function readonlyKeys(string $group): array
+    {
+        $keys = [];
+
+        foreach (SettingsRegistry::fields($group) as $key => $field) {
+            if ($field['readonly'] === true) {
+                $keys[] = (string) $key;
+            }
+        }
+
+        $stored = Setting::query()
+            ->forGroup($group)
+            ->where('is_readonly', true)
+            ->pluck('key')
+            ->map(static fn (mixed $key): string => (string) $key)
+            ->all();
+
+        return array_values(array_unique(array_merge($keys, $stored)));
+    }
+
+    /**
      * The stored path behind a file setting, or null when nothing is stored.
      */
     public function pathFor(string $dottedKey): ?string
@@ -479,9 +554,16 @@ final class SettingsService
         $previous = $existed ? $setting->value : null;
         $previous = $previous === null ? null : (string) $previous;
 
-        $next = $this->serialise($value, $storage);
+        // A decimal is stored at its scale whichever path it came through (a reset writes the
+        // registry default, a programmatic caller may pass an int or a float). Phase 2 review low 1:
+        // a value that could only be stored by rounding it is refused here too, never rounded.
+        if (SettingsRegistry::exceedsScale($field, $value)) {
+            throw ValidationException::withMessages([$key => SettingsRegistry::scaleErrorMessage($field)]);
+        }
 
-        $metadata = $this->metadataFor($field, $existed);
+        $next = $this->serialise(SettingsRegistry::normaliseDecimal($field, $value), $storage);
+
+        $metadata = $this->metadataFor($field, $existed, $existed && $setting->isReadonly());
 
         $unchanged = $existed && $previous === $next;
 
@@ -534,16 +616,19 @@ final class SettingsService
      * columns that decide how the value is *read back* (`type`, `is_encrypted`) are always
      * applied: a stale `type` would silently change what the value means.
      *
+     * `is_readonly` is only ever **raised** here, never cleared: a stored lock is lifted by
+     * `SettingSeeder` from the console, not as a side effect of somebody saving the group.
+     *
      * @param  array<string, mixed>  $field
      * @return array<string, mixed>
      */
-    private function metadataFor(array $field, bool $existed): array
+    private function metadataFor(array $field, bool $existed, bool $storedReadonly = false): array
     {
         $metadata = [
             'type' => (string) $field['storage'],
             'is_encrypted' => $field['encrypted'] === true,
             'is_public' => $field['public'] === true,
-            'is_readonly' => $field['readonly'] === true,
+            'is_readonly' => $field['readonly'] === true || $storedReadonly,
         ];
 
         if (! $existed) {
@@ -685,16 +770,17 @@ final class SettingsService
      *
      * @param  array<string, array<string, mixed>>  $fields
      * @param  array<string, mixed>  $input
+     * @param  list<string>  $readonly  readonlyKeys() for this group
      * @return array<string, mixed>
      */
-    private function prunePayload(array $fields, array $input): array
+    private function prunePayload(array $fields, array $input, array $readonly): array
     {
         $payload = [];
 
         foreach ($input as $key => $value) {
             $field = $fields[$key] ?? null;
 
-            if ($field === null || $field['readonly'] === true) {
+            if ($field === null || in_array((string) $key, $readonly, true)) {
                 continue;
             }
 
@@ -804,17 +890,20 @@ final class SettingsService
     /**
      * A readonly key may never be moved from here.
      *
+     * Judged against the registry flag AND the stored `is_readonly` flag (readonlyKeys()).
+     *
      * @param  array<string, array<string, mixed>>  $fields
      * @param  array<string, mixed>  $input
+     * @param  list<string>  $readonly  readonlyKeys() for this group
      *
      * @throws ActionNotAllowedException
      */
-    private function assertNoReadonlyChange(string $group, array $fields, array $input): void
+    private function assertNoReadonlyChange(string $group, array $fields, array $input, array $readonly): void
     {
         foreach ($input as $key => $value) {
             $field = $fields[$key] ?? null;
 
-            if ($field === null || $field['readonly'] !== true) {
+            if ($field === null || ! in_array((string) $key, $readonly, true)) {
                 continue;
             }
 
@@ -867,13 +956,25 @@ final class SettingsService
 
         $names = [];
 
-        foreach (SettingsRegistry::fields($group) as $key => $field) {
+        $fields = SettingsRegistry::fields($group);
+
+        foreach ($fields as $key => $field) {
             $names[$key] = (string) $field['label'];
         }
 
         $validator = Validator::make($payload, $rules, [], $names);
 
-        $validator->after(function (ValidatorContract $validator) use ($group, $payload): void {
+        $validator->after(function (ValidatorContract $validator) use ($group, $payload, $fields): void {
+            // Phase 2 review low 1: a decimal with more decimals than its scale is refused, never
+            // rounded — enforced here, not left to whether the field happens to carry `decimal:`.
+            foreach ($payload as $key => $value) {
+                $key = (string) $key;
+
+                if (isset($fields[$key]) && ! $validator->errors()->has($key) && SettingsRegistry::exceedsScale($fields[$key], $value)) {
+                    $validator->errors()->add($key, SettingsRegistry::scaleErrorMessage($fields[$key]));
+                }
+            }
+
             $this->assertTransportIsUsable($group, $payload, $validator);
 
             // The same cross-field verdict UpdateSettingsRequest reaches: a commission rate is at

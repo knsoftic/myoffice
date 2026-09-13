@@ -27,7 +27,16 @@ use Throwable;
  *  3. **trimmed to its last 90 days** when it is longer, so a daily x-axis stays readable and the
  *     row count stays bounded.
  *
- * One grouped query returns at most 2 × 90 rows. Days with no sign-ins are filled from
+ * **Which day a sign-in belongs to (D61).** Rows are stored in UTC; the x-axis is the window's own
+ * calendar days in the range's (display) timezone. Grouping by `date(created_at)` produced UTC dates, so
+ * in Asia/Karachi a 02:30 sign-in counted on the previous day and the first day's 00:00–05:00 slice was
+ * keyed to a date outside the axis and silently dropped. Each day is instead bucketed by the UTC instant
+ * its local midnight falls on — computed in PHP by Carbon, so a daylight-saving day of 23 or 25 hours and
+ * a half-hour offset are exact — and MariaDB's `INTERVAL()` (a binary search over those sorted
+ * boundaries) turns `unix_timestamp(created_at)` into the day's index. `unix_timestamp()` of a TIMESTAMP
+ * column is the stored instant, so the bucketing does not depend on the session time zone either.
+ *
+ * One grouped query returns at most 90 rows. Days with no sign-ins are filled from
  * `DateRange::dateKeys()` in PHP, so a quiet Sunday renders as a zero instead of disappearing and
  * shortening the line.
  */
@@ -113,9 +122,13 @@ final class LoginTrendChartWidget extends Widget
             'note' => $note,
         ];
 
+        $dayKeys = $window->dateKeys();
+
         try {
+            [$dayIndex, $dayIndexBindings] = $this->dayIndexExpression($dayKeys, $window->timezone());
+
             $rows = LoginHistory::query()
-                ->selectRaw('date(created_at) as day')
+                ->selectRaw($dayIndex.' as day_index', $dayIndexBindings)
                 ->selectRaw('sum(case when status = ? then 1 else 0 end) as successful', [LoginStatus::Success->value])
                 ->selectRaw('sum(case when status in (?, ?) then 1 else 0 end) as failed', [
                     LoginStatus::Failed->value,
@@ -125,8 +138,8 @@ final class LoginTrendChartWidget extends Widget
                     $window->storageStart()->format('Y-m-d H:i:s'),
                     $window->storageEnd()->format('Y-m-d H:i:s'),
                 ])
-                ->groupByRaw('date(created_at)')
-                ->orderByRaw('date(created_at)')
+                ->groupBy('day_index')
+                ->orderBy('day_index')
                 ->get();
         } catch (Throwable) {
             return $empty;
@@ -136,7 +149,14 @@ final class LoginTrendChartWidget extends Widget
         $failedByDay = [];
 
         foreach ($rows as $row) {
-            $day = substr((string) $row->day, 0, 10);
+            // Every row inside the window maps to an index of $dayKeys; anything else is ignored
+            // rather than keyed to a day the axis does not have.
+            $day = $dayKeys[(int) $row->day_index] ?? null;
+
+            if ($day === null) {
+                continue;
+            }
+
             $successByDay[$day] = (int) $row->successful;
             $failedByDay[$day] = (int) $row->failed;
         }
@@ -147,7 +167,7 @@ final class LoginTrendChartWidget extends Widget
         $table = [];
         $peak = null;
 
-        foreach ($window->dateKeys() as $day) {
+        foreach ($dayKeys as $day) {
             $successCount = $successByDay[$day] ?? 0;
             $failedCount = $failedByDay[$day] ?? 0;
 
@@ -204,6 +224,37 @@ final class LoginTrendChartWidget extends Widget
     public function emptyMessage(): ?string
     {
         return 'No sign-ins have been recorded in this window.';
+    }
+
+    /**
+     * SQL that maps a row to the index of its display-timezone day in `$dayKeys`, with its bindings.
+     *
+     * `INTERVAL(n, b1, …, bk)` returns 0 when n < b1, i when bi <= n < bi+1, and k when n >= bk. The
+     * boundaries are the unix instants of local midnight for the 2nd … last day, so the result is the
+     * day's position in `$dayKeys` — the query's `whereBetween` already keeps everything before the
+     * first midnight and after the last day's end out. A missing local midnight (a daylight-saving
+     * jump at 00:00) resolves to the first instant that exists that day, which is where that day
+     * starts.
+     *
+     * @param  list<string>  $dayKeys  'Y-m-d', ascending
+     * @return array{0: string, 1: list<int>}
+     */
+    private function dayIndexExpression(array $dayKeys, string $timezone): array
+    {
+        $boundaries = [];
+
+        foreach (array_slice($dayKeys, 1) as $day) {
+            $boundaries[] = CarbonImmutable::createFromFormat('!Y-m-d', $day, $timezone)->getTimestamp();
+        }
+
+        if ($boundaries === []) {
+            return ['0', []];
+        }
+
+        return [
+            'interval(unix_timestamp(created_at), '.implode(', ', array_fill(0, count($boundaries), '?')).')',
+            $boundaries,
+        ];
     }
 
     /**

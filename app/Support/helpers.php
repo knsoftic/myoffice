@@ -100,6 +100,25 @@ if (! function_exists('app_number')) {
     }
 }
 
+if (! function_exists('per_page')) {
+    /**
+     * Rows per page for an admin list screen: `appearance.table_page_size`, clamped to 10..100.
+     *
+     *   ->paginate(per_page())
+     *
+     * The clamp is the guard, not the form rule: a value written before the rule existed, or by a
+     * raw SQL edit, must never ask the database for 5,000 rows or render a one-row page. A value
+     * that is not a number at all falls back to 15, the registry default.
+     */
+    function per_page(): int
+    {
+        $value = setting('appearance.table_page_size', 15);
+        $size = is_numeric($value) ? (int) $value : 15;
+
+        return max(10, min(100, $size));
+    }
+}
+
 if (! function_exists('sidebar_items')) {
     /**
      * The navigation tree for a user (defaults to the authenticated user), already filtered

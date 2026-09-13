@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Crypt;
+use LogicException;
 use Throwable;
 
 /**
@@ -22,8 +23,10 @@ use Throwable;
  *
  *   · transparent encryption — `value` is stored encrypted whenever `is_encrypted` is true
  *     and handed back in clear text when read, so a secret never sits in the cache or in a
- *     Blade view in plain form by accident;
- *   · cache invalidation — any save or delete flushes the cached settings payload.
+ *     Blade view in plain form by accident. Only ciphertext loaded from the database is ever
+ *     decrypted; a value assigned from input never is (no decryption oracle);
+ *   · cache invalidation — any save flushes the cached settings payload;
+ *   · no deletes — application code may not delete a settings row (the test suite may).
  *
  * Encryption happens on `saving` (not in a mutator) so the order of mass assignment cannot
  * matter: `Setting::create(['value' => 'x', 'is_encrypted' => true])` works either way round.
@@ -123,6 +126,20 @@ class Setting extends Model
             $setting->flushSettingsCache();
         });
 
+        // No settings row is ever deleted by application code: a value the business entered
+        // outlives the code that read it (SettingSeeder reports such rows, it never removes them),
+        // and a deleted document counter would read its default of 1 again (D62). The test suite
+        // may still delete a fixture row.
+        static::deleting(static function (Setting $setting): void {
+            if (! app()->runningUnitTests()) {
+                throw new LogicException(sprintf(
+                    'Setting [%s.%s] may not be deleted: settings rows are never removed by application code.',
+                    (string) $setting->group,
+                    (string) $setting->key,
+                ));
+            }
+        });
+
         static::deleted(static function (Setting $setting): void {
             $setting->flushSettingsCache();
         });
@@ -135,9 +152,16 @@ class Setting extends Model
     */
 
     /**
-     * Clear-text value: decrypted on the way out when the row is flagged encrypted.
+     * Clear-text value: decrypted on the way out when the row was LOADED encrypted.
      *
      * Assignment stores the plain string as-is; `saving` does the encrypting.
+     *
+     * **Only ciphertext that came out of the database is ever decrypted.** A value assigned from
+     * input is returned exactly as assigned, even when it happens to be a valid Laravel payload.
+     * The model used to trial-decrypt whatever it held, which made it a decryption oracle: post any
+     * ciphertext the application key produced (an encrypted cookie, another encrypted column) as a
+     * setting and it came back — on the form, on the public site, or as the SMTP password handed to
+     * a host of the poster's choosing — as plain text.
      *
      * @return Attribute<string|null, string|null>
      */
@@ -151,7 +175,7 @@ class Setting extends Model
 
                 $raw = (string) $value;
 
-                if ($raw === '' || ! $this->isEncrypted()) {
+                if ($raw === '' || ! $this->holdsStoredCiphertext($raw)) {
                     return $raw;
                 }
 
@@ -299,8 +323,16 @@ class Setting extends Model
     /**
      * Encrypt (or decrypt) the stored column so it matches the `is_encrypted` flag.
      *
-     * Whether a string is already ciphertext is decided by actually trying to decrypt it —
-     * Laravel's payload is MAC-verified, so this cannot produce a false positive.
+     * Whether the column holds ciphertext is decided by **where the value came from**, never by
+     * trying to decrypt it (see value()):
+     *
+     *   · a value assigned from input is plain text by definition. Flagged encrypted, it is
+     *     encrypted — even if it looks like ciphertext, it is encrypted again, so reading it back
+     *     returns exactly what was submitted and never its decryption. Not flagged, it is stored
+     *     exactly as given;
+     *   · a value loaded from the database and left untouched is ciphertext if and only if the row
+     *     was loaded with `is_encrypted`. Only then may it be decrypted — when the flag is being
+     *     switched off — and a loaded plain value is encrypted when the flag is being switched on.
      */
     protected function applyEncryptionToRawValue(): void
     {
@@ -316,10 +348,10 @@ class Setting extends Model
             return;
         }
 
-        $plain = self::decryptOrNull($raw);
+        $storedCiphertext = $this->holdsStoredCiphertext($raw);
 
         if ($this->isEncrypted()) {
-            if ($plain === null) {
+            if (! $storedCiphertext) {
                 $encrypted = self::encryptOrNull($raw);
 
                 if ($encrypted !== null) {
@@ -330,10 +362,36 @@ class Setting extends Model
             return;
         }
 
-        // Flag turned off: store the value in clear text again.
-        if ($plain !== null) {
-            $this->attributes['value'] = $plain;
+        // Flag turned off on a row that was loaded encrypted: store its clear text again.
+        if ($storedCiphertext) {
+            $plain = self::decryptOrNull($raw);
+
+            if ($plain !== null) {
+                $this->attributes['value'] = $plain;
+            }
         }
+    }
+
+    /**
+     * Is this raw column value the untouched ciphertext of a row loaded with `is_encrypted`?
+     *
+     * True only for a persisted model whose `value` has not been reassigned since it was read and
+     * whose ORIGINAL `is_encrypted` flag was set. A value assigned from input — including one
+     * shaped exactly like a Laravel payload — is never treated as ciphertext.
+     */
+    private function holdsStoredCiphertext(string $raw): bool
+    {
+        if (! $this->exists) {
+            return false;
+        }
+
+        $original = $this->getRawOriginal('value');
+
+        if ($original === null || (string) $original !== $raw) {
+            return false;
+        }
+
+        return (bool) $this->getRawOriginal('is_encrypted', false);
     }
 
     /**

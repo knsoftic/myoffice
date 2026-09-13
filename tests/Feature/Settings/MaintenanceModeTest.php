@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Settings;
 
+use App\Http\Middleware\EnsurePublicSiteAvailable;
 use App\Models\User;
 use App\Support\SettingsRepository;
+use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Route;
+use Illuminate\Routing\Router;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Feature\Concerns\InteractsWithRbac;
 use Tests\Feature\Settings\Concerns\InteractsWithSettingsForms;
@@ -126,9 +128,85 @@ final class MaintenanceModeTest extends TestCase
     #[Test]
     public function every_public_page_route_carries_the_public_site_gate(): void
     {
+        $ungated = $this->ungatedPublicRoutes($this->applicationRouter());
+
+        $this->assertSame(
+            [],
+            $ungated,
+            'These public GET routes ignore maintenance mode: '.implode(', ', $ungated)
+        );
+    }
+
+    /**
+     * The scanner above is proven against a stand-in router this test defines, so its teeth never
+     * depend on which public routes a later phase happens to register: on a Phase 2 tree the real
+     * router carries a single public page, and a scan that could not tell a gated route from an
+     * ungated one would pass there just the same.
+     */
+    #[Test]
+    public function the_public_route_scan_catches_an_ungated_page_and_recognises_the_gate_in_every_form(): void
+    {
+        $real = $this->applicationRouter();
+        $router = new Router($this->app->make('events'), $this->app);
+
+        foreach ($real->getMiddleware() as $alias => $class) {
+            $router->aliasMiddleware($alias, $class);
+        }
+
+        foreach ($real->getMiddlewareGroups() as $group => $members) {
+            $router->middlewareGroup($group, $members);
+        }
+
+        $router->middlewareGroup('phase2-standin-site', ['public_site']);
+
+        $page = static fn (): string => 'stand-in';
+
+        // Gated: by the alias, by the class itself, and through a group that carries it.
+        $router->get('/standin-gated-by-alias', $page)->middleware('public_site');
+        $router->get('/standin-gated-by-class', $page)->middleware(EnsurePublicSiteAvailable::class);
+        $router->get('/standin-gated-by-group', $page)->middleware('phase2-standin-site');
+
+        // Not the public site: a panel page, a sign-in page, a form post, framework plumbing.
+        $router->get('/standin-panel', $page)->middleware('auth');
+        $router->get('/standin-sign-in', $page)->middleware('guest');
+        $router->post('/standin-form', $page);
+        $router->get('/up', $page);
+
+        // Ungated public pages — the failures the scan exists to catch, including a gate that was
+        // declared and then excluded again.
+        $router->get('/standin-open', $page);
+        $router->get('/standin-excluded', $page)->middleware('phase2-standin-site')->withoutMiddleware('public_site');
+
+        $this->assertSame(['/standin-open', '/standin-excluded'], $this->ungatedPublicRoutes($router));
+    }
+
+    /**
+     * The application's router with its middleware aliases and groups in place.
+     *
+     * The HTTP kernel copies them onto the router when it is constructed, and a test that has not
+     * sent a request yet has never constructed it — without this, no alias resolves to its class.
+     */
+    private function applicationRouter(): Router
+    {
+        $this->app->make(HttpKernel::class);
+
+        return $this->app->make(Router::class);
+    }
+
+    /**
+     * Public GET routes whose resolved middleware stack does not run `EnsurePublicSiteAvailable`.
+     *
+     * The gate is recognised by the class the stack resolves to — through an alias, a middleware
+     * group or the class name — never by one literal alias, and a route that excludes it again is
+     * reported. That is the same gate seen more accurately, not a looser rule.
+     *
+     * @return list<string>
+     */
+    private function ungatedPublicRoutes(Router $router): array
+    {
         $ungated = [];
 
-        foreach (Route::getRoutes() as $route) {
+        foreach ($router->getRoutes() as $route) {
             $uri = '/'.ltrim($route->uri(), '/');
             $middleware = $route->gatherMiddleware();
 
@@ -145,16 +223,17 @@ final class MaintenanceModeTest extends TestCase
                 continue;
             }
 
-            if (! in_array('public_site', $middleware, true)) {
+            $gated = collect($router->gatherRouteMiddleware($route))->contains(
+                static fn (mixed $resolved): bool => is_string($resolved)
+                    && explode(':', $resolved, 2)[0] === EnsurePublicSiteAvailable::class
+            );
+
+            if (! $gated) {
                 $ungated[] = $uri;
             }
         }
 
-        $this->assertSame(
-            [],
-            $ungated,
-            'These public GET routes ignore maintenance mode: '.implode(', ', $ungated)
-        );
+        return $ungated;
     }
 
     /**

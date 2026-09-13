@@ -18,6 +18,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
@@ -94,22 +95,23 @@ final class ModuleController extends Controller
         $this->authorize('toggle', $module);
 
         $desired = $request->desiredState() ?? ! (bool) $module->is_enabled;
-        $slug = (string) $module->slug;
-
-        // Read before the write: afterwards the dependents are off and the list would be empty.
-        $cascaded = $desired ? [] : $this->modules->cascadeSet($slug);
 
         try {
-            $module = $this->modules->toggle($module, $desired, $request->reason(), $request->cascade());
+            // The service reports the cascade it actually applied, decided under the same row
+            // locks as the switch — never a list read beforehand that a concurrent toggle could
+            // have made stale.
+            $outcome = $this->modules->switchModule($module, $desired, $request->reason(), $request->cascade());
         } catch (ActionNotAllowedException $exception) {
             return back()->with('toast', ['type' => 'error', 'message' => $exception->getMessage()]);
         }
+
+        $module = $outcome['module'];
 
         return back()->with('toast', [
             'type' => $module->is_enabled ? 'success' : 'warning',
             'message' => $module->is_enabled
                 ? $this->enabledMessage($module)
-                : $this->disabledMessage($module, $request->cascade() ? $cascaded : []),
+                : $this->disabledMessage($module, $outcome['cascaded']),
         ]);
     }
 
@@ -171,15 +173,17 @@ final class ModuleController extends Controller
     /**
      * What a flip will actually do — read by the impact dialog before it is confirmed.
      *
-     * JSON only, read-only, and gated by `modules.view`: it lists the dependent modules, the
-     * routes that will answer 403, the sidebar entries that will disappear — and states that no
-     * data is deleted.
+     * JSON only, read-only, and gated by `modules.view`: it lists the dependent modules, counts
+     * the routes that will answer 403 and the sidebar entries that will disappear, and states that
+     * no data is deleted. Routes and sidebar entries are *named* only as far as the viewer holds
+     * the permissions behind them (ModuleService::impact()); `modules.view` alone is never a
+     * licence to read the route map.
      */
-    public function impact(Module $module): JsonResponse
+    public function impact(Request $request, Module $module): JsonResponse
     {
         $this->authorize('view', $module);
 
-        return response()->json($this->modules->impact($module));
+        return response()->json($this->modules->impact($module, $request->user()));
     }
 
     /*

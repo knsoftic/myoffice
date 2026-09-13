@@ -47,8 +47,6 @@ final class UserController extends Controller
     /** Columns a user is allowed to sort by — anything else falls back to `name`. */
     private const SORTABLE = ['name', 'email', 'status', 'last_login_at', 'created_at'];
 
-    private const PER_PAGE = 20;
-
     public function __construct(
         private readonly UserService $users,
         private readonly PermissionMatrix $matrix,
@@ -90,7 +88,8 @@ final class UserController extends Controller
             ->orderBy($sort, $direction)
             // A deterministic tie-break keeps pagination stable when the sort column repeats.
             ->orderBy('id')
-            ->paginate(self::PER_PAGE)
+            // Page size is the `appearance.table_page_size` setting, clamped by per_page().
+            ->paginate(per_page())
             ->withQueryString();
 
         return view('admin.users.index', [

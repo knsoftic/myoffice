@@ -59,6 +59,12 @@ return [
             'prefix_indexes' => true,
             'strict' => true,
             'engine' => null,
+            // D61: storage is UTC. Pin the session so a TIMESTAMP column stores exactly the UTC
+            // wall-clock string Laravel writes, whatever the server's own time_zone / system zone is.
+            // Deliberately not an env() value: the storage timezone is never configurable. Rows
+            // written before the pin are converted by
+            // 2026_09_12_060600_pin_utc_session_and_convert_timestamp_columns.
+            'timezone' => '+00:00',
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
@@ -79,6 +85,8 @@ return [
             'prefix_indexes' => true,
             'strict' => true,
             'engine' => null,
+            // D61: see the mysql connection above.
+            'timezone' => '+00:00',
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],

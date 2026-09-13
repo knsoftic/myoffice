@@ -211,12 +211,20 @@ final class SettingsController extends Controller
             $this->removeFile($slug, (string) $key);
         } catch (LogicException $exception) {
             throw $exception;
+        } catch (ActionNotAllowedException|AuthorizationException $exception) {
+            // Written for an operator (a read-only key): safe to show as is.
+            return $this->back($slug)->with('toast', [
+                'type' => 'error',
+                'message' => 'That file could not be removed: '.$exception->getMessage(),
+            ]);
         } catch (Throwable $exception) {
+            // A QueryException carries the SQL and its bindings, a filesystem error the disk path:
+            // reported, never rendered into the page or flashed into the session.
             report($exception);
 
             return $this->back($slug)->with('toast', [
                 'type' => 'error',
-                'message' => 'That file could not be removed: '.$exception->getMessage(),
+                'message' => 'That file could not be removed because of an unexpected error. It has been logged.',
             ]);
         }
 
@@ -239,12 +247,19 @@ final class SettingsController extends Controller
             $this->resetGroup($slug);
         } catch (LogicException $exception) {
             throw $exception;
+        } catch (ActionNotAllowedException|AuthorizationException $exception) {
+            return $this->back($slug)->with('toast', [
+                'type' => 'error',
+                'message' => 'That group could not be reset: '.$exception->getMessage(),
+            ]);
         } catch (Throwable $exception) {
+            // A lock timeout inside the reset transaction is a QueryException with the SQL and its
+            // bindings in the message: reported, never shown.
             report($exception);
 
             return $this->back($slug)->with('toast', [
                 'type' => 'error',
-                'message' => 'That group could not be reset: '.$exception->getMessage(),
+                'message' => 'That group could not be reset because of an unexpected error. It has been logged.',
             ]);
         }
 
@@ -321,11 +336,15 @@ final class SettingsController extends Controller
             Artisan::call('view:clear');
             $cleared[] = 'views';
         } catch (Throwable $exception) {
+            // A cache-store or filesystem error can name hosts and paths: reported, never shown.
             report($exception);
 
             return back()->with('toast', [
                 'type' => 'error',
-                'message' => 'Some caches could not be cleared: '.$exception->getMessage(),
+                'message' => sprintf(
+                    'Some caches could not be cleared because of an unexpected error (cleared so far: %s). It has been logged.',
+                    $cleared === [] ? 'none' : implode(', ', $cleared),
+                ),
             ]);
         }
 
@@ -435,12 +454,14 @@ final class SettingsController extends Controller
         } catch (LogicException $exception) {
             throw $exception;
         } catch (Throwable $exception) {
+            // TestMailService never throws — it returns a redacted result for every outcome — so
+            // anything that lands here is unexpected, and its message is reported, not flashed.
             report($exception);
 
             $result = [
                 'ok' => false,
-                'message' => $exception->getMessage(),
-                'exception' => $exception::class,
+                'message' => 'The test email could not be sent because of an unexpected error. It has been logged.',
+                'exception' => null,
             ];
         }
 
@@ -607,6 +628,11 @@ final class SettingsController extends Controller
         $isSecret = $field['encrypted'] === true || $type === SettingsRegistry::TYPE_PASSWORD;
         $isFile = SettingsRegistry::isFileType($type);
 
+        // The stored lock counts as well as the registry's (SettingsService::readonlyKeys()): a
+        // field the request and the service would refuse must render disabled, or saving the rest
+        // of the group would post it and fail.
+        $readonly = $field['readonly'] === true || $row?->isReadonly() === true;
+
         $stored = $row?->typedValue();
         $value = $stored ?? $field['default'];
 
@@ -632,33 +658,41 @@ final class SettingsController extends Controller
             'value' => $value,
             'encrypted' => $isSecret,
             'public' => $field['public'] === true,
-            'readonly' => $field['readonly'] === true,
+            'readonly' => $readonly,
             'required' => in_array('required', (array) $field['rules'], true),
-            'disabled' => ! $canEdit || $field['readonly'] === true,
+            'disabled' => ! $canEdit || $readonly,
             'name' => UpdateSettingsRequest::PAYLOAD.'['.$key.']',
             'error_key' => UpdateSettingsRequest::PAYLOAD.'.'.$key,
             'id' => 'setting-'.$group.'-'.str_replace('_', '-', $key),
             'has_secret' => $isSecret && $row?->maskedValue() !== null,
-            'file' => $isFile ? $this->presentFile(is_string($stored) ? $stored : null) : null,
+            'file' => $isFile ? $this->presentFile($field, is_string($stored) ? $stored : null) : null,
             'updated_at' => $row?->updated_at,
             'updated_by' => $row?->updatedBy?->name,
         ];
     }
 
     /**
-     * A stored file's path, public URL and basename — null when nothing is stored.
+     * A stored file's path, preview URL and basename — null when nothing is stored.
      *
+     * The URL is built from the disk the field actually lives on (`SettingsService::diskFor()`,
+     * D21): a public field gets its `/storage` URL; a private field gets **no** URL at all, because
+     * a private artefact is only ever streamed by a controller that re-runs the permission chain,
+     * and pointing at the public disk for it only ever produced a 404.
+     *
+     * @param  array<string, mixed>  $field
      * @return array{path: string, url: string|null, name: string}|null
      */
-    private function presentFile(?string $path): ?array
+    private function presentFile(array $field, ?string $path): ?array
     {
         if ($path === null || trim($path) === '') {
             return null;
         }
 
-        $url = str_starts_with($path, 'http://') || str_starts_with($path, 'https://')
-            ? $path
-            : $this->publicUrl($path);
+        $url = match (true) {
+            str_starts_with($path, 'http://') || str_starts_with($path, 'https://') => $path,
+            SettingsService::diskFor($field) === SettingsService::PUBLIC_DISK => $this->publicUrl($path),
+            default => null,
+        };
 
         return [
             'path' => $path,
@@ -674,7 +708,7 @@ final class SettingsController extends Controller
     private function publicUrl(string $path): ?string
     {
         try {
-            return Storage::disk('public')->url($path);
+            return Storage::disk(SettingsService::PUBLIC_DISK)->url($path);
         } catch (Throwable) {
             return null;
         }

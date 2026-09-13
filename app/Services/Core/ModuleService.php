@@ -7,14 +7,18 @@ namespace App\Services\Core;
 use App\Enums\ModuleGroup;
 use App\Events\ModuleStateChanged;
 use App\Models\Module;
+use App\Models\User;
 use App\Services\Core\Concerns\WritesAuditTrail;
 use App\Support\Modules;
 use App\Support\PermissionRegistry;
 use App\Support\Sidebar;
+use Closure;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
+use Throwable;
 
 /**
  * Enabling and disabling a module (phase-01 §1.3 / D5, extended by phase-02 §3).
@@ -32,12 +36,35 @@ use Illuminate\Support\Facades\Route;
  * keys — a dependency may name a module that is declared in `PermissionRegistry` but has not been
  * seeded yet), and a module may not be switched off while a module that depends on it is still
  * enabled, unless the caller explicitly asks for a cascade.
+ *
+ * **Every switch is decided under a lock.** The dependents rule is read inside the write
+ * transaction from `modules` rows locked `FOR UPDATE`, so two concurrent switches are serialised:
+ * the second one decides against what the first one committed, never against a stale snapshot.
+ *
+ * @phpstan-type ModuleGraph array{
+ *     ids: array<string, int>,
+ *     stored: array<string, bool>,
+ *     dependencies: array<string, list<string>>,
+ *     dependents: array<string, list<string>>,
+ *     enabled: array<string, bool>,
+ *     core: array<string, bool>,
+ *     names: array<string, string>
+ * }
+ * @phpstan-type ModuleMove array{id: int, slug: string, enabled: bool, reason: string, cascaded_from: string|null}
+ * @phpstan-type RouteEntry array{name: string|null, uri: string, methods: string, requires: list<list<string>>}
+ * @phpstan-type SidebarEntry array{panel: string, label: string, path: list<string>, permission: string|null}
  */
 final class ModuleService
 {
     use WritesAuditTrail;
 
     private const MODULE = 'modules';
+
+    /**
+     * A deadlock between two switches is retried rather than surfaced: the closure re-reads and
+     * re-locks the graph on every attempt, so a retry decides against the committed state.
+     */
+    private const LOCK_ATTEMPTS = 3;
 
     /*
     |--------------------------------------------------------------------------
@@ -145,12 +172,7 @@ final class ModuleService
      */
     public function missingDependencies(string $slug): array
     {
-        $graph = $this->graph();
-
-        return array_values(array_filter(
-            $graph['dependencies'][$slug] ?? [],
-            static fn (string $dependency): bool => ($graph['enabled'][$dependency] ?? false) === false,
-        ));
+        return $this->missingDependenciesIn($this->graph(), $slug);
     }
 
     /**
@@ -170,12 +192,7 @@ final class ModuleService
      */
     public function enabledDependents(string $slug): array
     {
-        $graph = $this->graph();
-
-        return array_values(array_filter(
-            $graph['dependents'][$slug] ?? [],
-            static fn (string $dependent): bool => ($graph['enabled'][$dependent] ?? false) === true,
-        ));
+        return $this->enabledDependentsIn($this->graph(), $slug);
     }
 
     /**
@@ -185,29 +202,13 @@ final class ModuleService
      * switched off before the module it depends on, so the system is never left in a state where
      * an enabled module has a disabled dependency.
      *
+     * This is a preview. The switch itself recomputes the set from locked rows (switchModule()).
+     *
      * @return list<string>
      */
     public function cascadeSet(string $slug): array
     {
-        $graph = $this->graph();
-        $order = [];
-
-        $walk = function (string $current) use (&$walk, $graph, &$order): void {
-            foreach ($graph['dependents'][$current] ?? [] as $dependent) {
-                if (in_array($dependent, $order, true) || ($graph['enabled'][$dependent] ?? false) === false) {
-                    continue;
-                }
-
-                // Claim the slot before recursing so a cyclic declaration cannot loop for ever.
-                $order[] = $dependent;
-                $walk($dependent);
-            }
-        };
-
-        $walk($slug);
-
-        // Deepest dependents first: reverse discovery order, then drop duplicates.
-        return array_values(array_reverse($order));
+        return $this->cascadeSetIn($this->graph(), $slug);
     }
 
     /**
@@ -224,35 +225,14 @@ final class ModuleService
     public function dependencyOverview(array $slugs): array
     {
         $graph = $this->graph();
-        $names = $graph['names'];
-
-        $describe = static fn (array $list): array => array_values(array_map(
-            static fn (string $slug): array => [
-                'slug' => $slug,
-                'name' => $names[$slug] ?? $slug,
-                'enabled' => ($graph['enabled'][$slug] ?? false) === true,
-                'is_core' => ($graph['core'][$slug] ?? false) === true,
-            ],
-            $list,
-        ));
-
         $overview = [];
 
         foreach ($slugs as $slug) {
-            $dependencies = $graph['dependencies'][$slug] ?? [];
-            $dependents = $graph['dependents'][$slug] ?? [];
-
             $overview[$slug] = [
-                'dependencies' => $describe($dependencies),
-                'dependents' => $describe($dependents),
-                'missing' => array_values(array_filter(
-                    $dependencies,
-                    static fn (string $one): bool => ($graph['enabled'][$one] ?? false) === false,
-                )),
-                'blocking' => array_values(array_filter(
-                    $dependents,
-                    static fn (string $one): bool => ($graph['enabled'][$one] ?? false) === true,
-                )),
+                'dependencies' => $this->describeIn($graph, $graph['dependencies'][$slug] ?? []),
+                'dependents' => $this->describeIn($graph, $graph['dependents'][$slug] ?? []),
+                'missing' => $this->missingDependenciesIn($graph, $slug),
+                'blocking' => $this->enabledDependentsIn($graph, $slug),
             ];
         }
 
@@ -267,12 +247,7 @@ final class ModuleService
      */
     public function namesFor(array $slugs): array
     {
-        $names = $this->graph()['names'];
-
-        return array_values(array_map(
-            static fn (string $slug): string => $names[$slug] ?? $slug,
-            $slugs,
-        ));
+        return $this->namesIn($this->graph(), $slugs);
     }
 
     /*
@@ -299,11 +274,28 @@ final class ModuleService
      */
     public function setEnabled(Module $module, bool $enabled, ?string $reason = null, bool $cascade = false): Module
     {
+        return $this->switchModule($module, $enabled, $reason, $cascade)['module'];
+    }
+
+    /**
+     * setEnabled(), reporting what actually moved.
+     *
+     * The report comes from the same locked snapshot that decided the switch, so a caller's message
+     * can never name a cascade that did not happen (or miss one that did because a dependent was
+     * switched on a moment earlier).
+     *
+     * @return array{module: Module, changed: bool, cascaded: list<string>}
+     *
+     * @throws ActionNotAllowedException
+     */
+    public function switchModule(Module $module, bool $enabled, ?string $reason = null, bool $cascade = false): array
+    {
         if (! $enabled && ! $module->canBeDisabled()) {
             throw ActionNotAllowedException::coreModule((string) $module->name);
         }
 
         $slug = (string) $module->slug;
+        $name = (string) $module->name;
 
         $given = $this->clean($reason);
 
@@ -311,76 +303,37 @@ final class ModuleService
             throw $this->reasonRequired($module);
         }
 
-        $reason = $given ?? sprintf('Module %s enabled from the admin panel', $slug);
-
-        // The dependents rule only ever guards a disable: turning a module *on* can break nothing.
-        $cascadeSlugs = [];
-
-        if (! $enabled) {
-            $blocking = $this->enabledDependents($slug);
-
-            if ($blocking !== [] && ! $cascade) {
-                throw $this->dependentsBlockDisable($module, $blocking);
-            }
-
-            if ($blocking !== []) {
-                $cascadeSlugs = $this->cascadeSet($slug);
-                $this->assertCascadeIsPermitted($module, $cascadeSlugs);
-            }
-        }
-
-        if ((bool) $module->is_enabled === $enabled && $cascadeSlugs === []) {
-            // Nothing moved: no write, no audit row, no cache churn.
-            return $module;
-        }
-
-        /** @var list<Module> $cascaded */
-        $cascaded = $cascadeSlugs === []
-            ? []
-            : Module::query()->whereIn('slug', $cascadeSlugs)->get()
-                ->sortBy(static fn (Module $row): int => (int) array_search((string) $row->slug, $cascadeSlugs, true))
-                ->values()
-                ->all();
-
+        $reason = $given ?? $this->enableReason($slug);
         $actorId = $this->actorId();
-        $moved = [];
 
-        // The state change and its reasoned audit row commit together or not at all: a switch
-        // that went through without its "Module disabled" entry would be an unexplained change.
-        DB::transaction(function () use ($module, $enabled, $reason, $cascaded, $actorId, $slug, &$moved): void {
-            // Dependents come down first, so no enabled module is ever left pointing at a module
-            // that has already gone dark.
-            foreach ($cascaded as $dependent) {
-                $dependentReason = $this->cascadeReason($slug, $reason);
+        // The dependents rule, the cascade set and the "is it already in that state?" question are
+        // all answered inside the transaction, from rows locked FOR UPDATE. The state change and
+        // its reasoned audit rows then commit together or not at all.
+        [$moves, $rows] = $this->underLock(
+            fn (array &$graph): array => $this->planSwitch($graph, $slug, $name, $enabled, $reason, $cascade),
+            $actorId,
+        );
 
-                if ((bool) $dependent->is_enabled === false) {
-                    continue;
-                }
+        $this->announce($moves, $rows, $actorId);
 
-                $this->write($dependent, false, $dependentReason, $actorId);
-                $this->auditSwitch($dependent, false, $dependentReason, $slug);
+        $row = $rows[(int) $module->getKey()] ?? null;
 
-                $moved[] = [$dependent, false, $dependentReason, true, $slug];
-            }
-
-            if ((bool) $module->is_enabled !== $enabled) {
-                $this->write($module, $enabled, $reason, $actorId);
-                $this->auditSwitch($module, $enabled, $reason, null);
-
-                $moved[] = [$module, $enabled, $reason, false, null];
-            }
-        });
-
-        // Module::booted() flushes on save; doing it again after the commit guarantees that no
-        // request can read a stale gate map from inside the transaction window.
-        Modules::flushCache();
-
-        // Listeners only ever hear about a state that has actually been committed.
-        foreach ($moved as [$changed, $state, $why, $wasCascaded, $because]) {
-            ModuleStateChanged::dispatch($changed->refresh(), $state, $why, $actorId, $wasCascaded, $because);
+        if ($row instanceof Module) {
+            $module->setRawAttributes($row->getAttributes(), true);
+        } else {
+            // Nothing moved for this row (a no-op, or only its dependents went down): the caller
+            // still gets the committed state rather than whatever its instance held.
+            $module->refresh();
         }
 
-        return $module->refresh();
+        return [
+            'module' => $module,
+            'changed' => $moves !== [],
+            'cascaded' => array_values(array_map(
+                static fn (array $move): string => $move['slug'],
+                array_filter($moves, static fn (array $move): bool => $move['cascaded_from'] !== null),
+            )),
+        ];
     }
 
     /**
@@ -411,8 +364,9 @@ final class ModuleService
      *
      * Each module is then decided on its own: a core module, or one still blocked by a dependent
      * outside the batch, is skipped with its reason rather than taking the whole batch down with
-     * it. Every successful flip is a transaction of its own — a partially applied bulk action is a
-     * real state that the report names, a silently abandoned one is not.
+     * it. The whole group is decided against **one** locked read of the graph (each decision sees
+     * the ones before it) and written in **one** transaction: one UPDATE per distinct state and
+     * reason, one audit row per module, one reload of the rows that moved.
      *
      * @param  iterable<int, Module>  $modules
      * @return array{changed: list<string>, skipped: array<string, string>, core: list<string>, cascaded: list<string>}
@@ -420,44 +374,89 @@ final class ModuleService
     public function bulkSetEnabled(iterable $modules, bool $enabled, ?string $reason = null, bool $cascade = false): array
     {
         // D63: refused up front rather than reported as N identical per-module skips.
-        if (! $enabled && $this->clean($reason) === null) {
+        $given = $this->clean($reason);
+
+        if (! $enabled && $given === null) {
             throw new ActionNotAllowedException('A reason is required to switch modules off.');
+        }
+
+        $candidates = [];
+
+        foreach ($modules as $module) {
+            if ($module instanceof Module) {
+                $candidates[] = $module;
+            }
         }
 
         $changed = [];
         $skipped = [];
         $core = [];
+
+        if ($candidates === []) {
+            return ['changed' => [], 'skipped' => [], 'core' => [], 'cascaded' => []];
+        }
+
+        $actorId = $this->actorId();
+
+        [$moves, $rows] = $this->underLock(
+            function (array &$graph) use ($candidates, $enabled, $given, $cascade, &$changed, &$skipped, &$core): array {
+                // Reset on every attempt: a deadlock retry starts the whole decision again.
+                $changed = [];
+                $skipped = [];
+                $core = [];
+                $moves = [];
+
+                foreach ($this->orderForWrite($graph, $candidates, $enabled) as $module) {
+                    $slug = (string) $module->slug;
+
+                    if ($module->isCore() || ($graph['core'][$slug] ?? false) === true) {
+                        $core[] = $slug;
+
+                        continue;
+                    }
+
+                    if (($graph['stored'][$slug] ?? null) === $enabled) {
+                        continue;
+                    }
+
+                    try {
+                        $planned = $this->planSwitch(
+                            $graph,
+                            $slug,
+                            $graph['names'][$slug] ?? (string) $module->name,
+                            $enabled,
+                            $given ?? $this->enableReason($slug),
+                            $cascade,
+                        );
+                    } catch (ActionNotAllowedException $exception) {
+                        $skipped[$slug] = $exception->getMessage();
+
+                        continue;
+                    }
+
+                    if ($planned === []) {
+                        continue;
+                    }
+
+                    $changed[] = $slug;
+
+                    foreach ($planned as $move) {
+                        $moves[] = $move;
+                    }
+                }
+
+                return $moves;
+            },
+            $actorId,
+        );
+
+        $this->announce($moves, $rows, $actorId);
+
         $cascaded = [];
 
-        foreach ($this->orderForWrite($modules, $enabled) as $module) {
-            $slug = (string) $module->slug;
-
-            if ($module->isCore()) {
-                $core[] = $slug;
-
-                continue;
-            }
-
-            if ((bool) $module->is_enabled === $enabled) {
-                continue;
-            }
-
-            $before = $enabled ? [] : $this->cascadeSet($slug);
-
-            try {
-                $this->setEnabled($module, $enabled, $reason, $cascade);
-            } catch (ActionNotAllowedException $exception) {
-                $skipped[$slug] = $exception->getMessage();
-
-                continue;
-            }
-
-            $changed[] = $slug;
-
-            foreach ($before as $dependent) {
-                if (! in_array($dependent, $cascaded, true) && ! in_array($dependent, $changed, true)) {
-                    $cascaded[] = $dependent;
-                }
+        foreach ($moves as $move) {
+            if ($move['cascaded_from'] !== null && ! in_array($move['slug'], $changed, true) && ! in_array($move['slug'], $cascaded, true)) {
+                $cascaded[] = $move['slug'];
             }
         }
 
@@ -465,7 +464,7 @@ final class ModuleService
             'changed' => $changed,
             'skipped' => $skipped,
             'core' => $core,
-            'cascaded' => array_values($cascaded),
+            'cascaded' => $cascaded,
         ];
     }
 
@@ -477,12 +476,12 @@ final class ModuleService
      * a module, so ordering by it ascending is a topological sort; ties keep the caller's order,
      * which is the screen's `sort_order`.
      *
-     * @param  iterable<int, Module>  $modules
+     * @param  ModuleGraph  $graph
+     * @param  list<Module>  $modules
      * @return list<Module>
      */
-    private function orderForWrite(iterable $modules, bool $enabled): array
+    private function orderForWrite(array $graph, array $modules, bool $enabled): array
     {
-        $graph = $this->graph();
         $edges = $enabled ? $graph['dependencies'] : $graph['dependents'];
 
         /** @var array<string, int> $depth */
@@ -532,36 +531,44 @@ final class ModuleService
      * promise in every branch is that **no data is deleted** — disabling a module closes its doors
      * and leaves every row where it is.
      *
+     * **Scoped to the viewer.** `modules.view` is enough to open the preview, but it is not a licence
+     * to read the application's route map. A route is named only when the viewer holds every
+     * permission that route itself demands; a sidebar entry only when they hold the permission it
+     * is shown for. Everything else is still counted (`routes.count`, `sidebar.count`), so the
+     * dialog's figures stay true, but nothing about it is disclosed. A Super Admin sees it all; no
+     * viewer at all sees names for nothing.
+     *
      * @return array<string, mixed>
      */
-    public function impact(Module $module): array
+    public function impact(Module $module, ?Authenticatable $viewer = null): array
     {
         $slug = (string) $module->slug;
         $graph = $this->graph();
-        $names = $graph['names'];
 
         $isCore = $module->isCore();
         $on = $module->isEnabled();
         $target = ! $on;
 
-        $dependents = $graph['dependents'][$slug] ?? [];
-        $blocking = array_values(array_filter(
-            $dependents,
-            static fn (string $dependent): bool => ($graph['enabled'][$dependent] ?? false) === true,
-        ));
+        $blocking = $this->enabledDependentsIn($graph, $slug);
+        $discloses = $this->disclosureFor($viewer);
 
-        $routes = $this->routesFor($slug);
-        $sidebar = $this->sidebarItemsFor($slug);
+        $routes = $this->routeMap()[$slug] ?? [];
+        $visibleRoutes = [];
 
-        $describe = static fn (array $slugs): array => array_values(array_map(
-            static fn (string $one): array => [
-                'slug' => $one,
-                'name' => $names[$one] ?? $one,
-                'enabled' => ($graph['enabled'][$one] ?? false) === true,
-                'is_core' => ($graph['core'][$one] ?? false) === true,
-            ],
-            $slugs,
-        ));
+        foreach ($routes as $route) {
+            if ($discloses($route['requires'])) {
+                $visibleRoutes[] = ['name' => $route['name'], 'uri' => $route['uri'], 'methods' => $route['methods']];
+            }
+        }
+
+        $sidebar = $this->sidebarEntriesFor($slug);
+        $visibleSidebar = [];
+
+        foreach ($sidebar as $item) {
+            if ($discloses($item['permission'] === null ? [] : [[$item['permission']]])) {
+                $visibleSidebar[] = ['panel' => $item['panel'], 'label' => $item['label'], 'path' => $item['path']];
+            }
+        }
 
         return [
             'module' => [
@@ -583,21 +590,26 @@ final class ModuleService
             'blocked' => ! $isCore && $target === false && $blocking !== [],
             'requires_cascade' => ! $isCore && $target === false && $blocking !== [],
 
-            'dependents' => $describe($dependents),
-            'blocking_dependents' => $describe($blocking),
-            'cascade' => $describe($target ? [] : $this->cascadeSet($slug)),
+            'dependents' => $this->describeIn($graph, $graph['dependents'][$slug] ?? []),
+            'blocking_dependents' => $this->describeIn($graph, $blocking),
+            'cascade' => $this->describeIn($graph, $target ? [] : $this->cascadeSetIn($graph, $slug)),
 
-            'dependencies' => $describe($graph['dependencies'][$slug] ?? []),
-            'missing_dependencies' => $describe($this->missingDependencies($slug)),
+            'dependencies' => $this->describeIn($graph, $graph['dependencies'][$slug] ?? []),
+            'missing_dependencies' => $this->describeIn($graph, $this->missingDependenciesIn($graph, $slug)),
 
             'permissions' => [
                 'count' => count(PermissionRegistry::permissionNamesFor($slug)),
             ],
             'routes' => [
                 'count' => count($routes),
-                'items' => $routes,
+                'hidden' => count($routes) - count($visibleRoutes),
+                'items' => $visibleRoutes,
             ],
-            'sidebar_items' => $sidebar,
+            'sidebar' => [
+                'count' => count($sidebar),
+                'hidden' => count($sidebar) - count($visibleSidebar),
+            ],
+            'sidebar_items' => $visibleSidebar,
 
             // Said in every payload, because it is the one thing an administrator needs to trust.
             'data_safety' => 'No data is deleted. Every row this module owns stays exactly where it is and comes back untouched when the module is switched on again.',
@@ -621,17 +633,22 @@ final class ModuleService
     }
 
     /**
-     * The registered routes a module closes when it goes off.
+     * The registered routes a module closes when it goes off — unscoped, for internal callers.
+     * The impact preview never hands this list to a viewer as is (see impact()).
      *
      * @return list<array{name: string|null, uri: string, methods: string}>
      */
     public function routesFor(string $slug): array
     {
-        return $this->routeMap()[$slug] ?? [];
+        return array_values(array_map(
+            static fn (array $route): array => ['name' => $route['name'], 'uri' => $route['uri'], 'methods' => $route['methods']],
+            $this->routeMap()[$slug] ?? [],
+        ));
     }
 
     /**
-     * The navigation entries that disappear when a module goes off, across every panel.
+     * The navigation entries that disappear when a module goes off, across every panel — unscoped,
+     * for internal callers.
      *
      * Read straight from the declarative `Sidebar` tree, so it says what the sidebar will really
      * do — including the panel each item belongs to. Items whose route does not exist yet (a later
@@ -641,65 +658,60 @@ final class ModuleService
      */
     public function sidebarItemsFor(string $slug): array
     {
-        $found = [];
-
-        foreach (['admin', 'collaborator', 'student', 'teacher', 'client'] as $panel) {
-            foreach (Sidebar::tree($panel) as $group) {
-                foreach ($group['items'] ?? [] as $item) {
-                    if (! is_array($item)) {
-                        continue;
-                    }
-
-                    $this->collectSidebarItems($item, $slug, $panel, [(string) ($group['label'] ?? $panel)], $found);
-                }
-            }
-        }
-
-        return $found;
+        return array_values(array_map(
+            static fn (array $item): array => ['panel' => $item['panel'], 'label' => $item['label'], 'path' => $item['path']],
+            $this->sidebarEntriesFor($slug),
+        ));
     }
 
     /*
     |--------------------------------------------------------------------------
-    | Internals
+    | Internals — the graph
     |--------------------------------------------------------------------------
     */
 
     /**
-     * One snapshot of the `modules` table, resolved into the four maps every reader needs.
+     * One snapshot of the `modules` table, resolved into the maps every reader needs.
      *
      * Deliberately not memoised across calls: 79 narrow rows cost less than the risk of answering
      * a dependency question from a snapshot taken before somebody else's write.
      *
-     * @return array{
-     *     dependencies: array<string, list<string>>,
-     *     dependents: array<string, list<string>>,
-     *     enabled: array<string, bool>,
-     *     core: array<string, bool>,
-     *     names: array<string, string>
-     * }
+     * With `$lock`, every row is read `FOR UPDATE`. Every row is involved in a switch: a module's
+     * dependents are found by scanning each row's `depends_on` (an unindexed JSON column), so a
+     * locking read of "just the dependents" would lock every scanned row anyway. Holding them all
+     * until the transaction ends means no concurrent switch can enable a dependent, or disable a
+     * dependency, between the check and the write. Both concurrent readers scan in the same order,
+     * so they queue rather than deadlock.
+     *
+     * @return ModuleGraph
      */
-    private function graph(): array
+    private function graph(bool $lock = false): array
     {
+        $ids = [];
+        $stored = [];
         $dependencies = [];
         $dependents = [];
         $enabled = [];
         $core = [];
         $names = [];
 
-        /** @var array<int, object{slug: string, name: string, is_enabled: mixed, is_core: mixed, depends_on: string|null}> $rows */
+        /** @var array<int, object{id: int|string, slug: string, name: string, is_enabled: mixed, is_core: mixed, depends_on: string|null}> $rows */
         $rows = DB::table('modules')
-            ->select(['slug', 'name', 'is_enabled', 'is_core', 'depends_on', 'sort_order'])
+            ->select(['id', 'slug', 'name', 'is_enabled', 'is_core', 'depends_on', 'sort_order'])
             ->orderBy('sort_order')
             ->orderBy('name')
+            ->when($lock, static fn ($query) => $query->lockForUpdate())
             ->get()
             ->all();
 
         foreach ($rows as $row) {
             $slug = (string) $row->slug;
 
+            $ids[$slug] = (int) $row->id;
             $names[$slug] = (string) $row->name;
+            $stored[$slug] = (bool) $row->is_enabled;
             $core[$slug] = (bool) $row->is_core || Modules::isCore($slug);
-            $enabled[$slug] = $core[$slug] || (bool) $row->is_enabled;
+            $enabled[$slug] = $core[$slug] || $stored[$slug];
             $dependencies[$slug] = [];
         }
 
@@ -726,12 +738,95 @@ final class ModuleService
         }
 
         return [
+            'ids' => $ids,
+            'stored' => $stored,
             'dependencies' => $dependencies,
             'dependents' => $dependents,
             'enabled' => $enabled,
             'core' => $core,
             'names' => $names,
         ];
+    }
+
+    /**
+     * @param  ModuleGraph  $graph
+     * @return list<string>
+     */
+    private function missingDependenciesIn(array $graph, string $slug): array
+    {
+        return array_values(array_filter(
+            $graph['dependencies'][$slug] ?? [],
+            static fn (string $dependency): bool => ($graph['enabled'][$dependency] ?? false) === false,
+        ));
+    }
+
+    /**
+     * @param  ModuleGraph  $graph
+     * @return list<string>
+     */
+    private function enabledDependentsIn(array $graph, string $slug): array
+    {
+        return array_values(array_filter(
+            $graph['dependents'][$slug] ?? [],
+            static fn (string $dependent): bool => ($graph['enabled'][$dependent] ?? false) === true,
+        ));
+    }
+
+    /**
+     * @param  ModuleGraph  $graph
+     * @return list<string>
+     */
+    private function cascadeSetIn(array $graph, string $slug): array
+    {
+        $order = [];
+
+        $walk = function (string $current) use (&$walk, $graph, &$order): void {
+            foreach ($graph['dependents'][$current] ?? [] as $dependent) {
+                if (in_array($dependent, $order, true) || ($graph['enabled'][$dependent] ?? false) === false) {
+                    continue;
+                }
+
+                // Claim the slot before recursing so a cyclic declaration cannot loop for ever.
+                $order[] = $dependent;
+                $walk($dependent);
+            }
+        };
+
+        $walk($slug);
+
+        // Deepest dependents first: reverse discovery order.
+        return array_values(array_reverse($order));
+    }
+
+    /**
+     * @param  ModuleGraph  $graph
+     * @param  list<string>  $slugs
+     * @return list<array{slug: string, name: string, enabled: bool, is_core: bool}>
+     */
+    private function describeIn(array $graph, array $slugs): array
+    {
+        return array_values(array_map(
+            static fn (string $slug): array => [
+                'slug' => $slug,
+                'name' => $graph['names'][$slug] ?? $slug,
+                'enabled' => ($graph['enabled'][$slug] ?? false) === true,
+                'is_core' => ($graph['core'][$slug] ?? false) === true,
+            ],
+            $slugs,
+        ));
+    }
+
+    /**
+     * @param  ModuleGraph  $graph
+     * @param  list<string>  $slugs
+     * @return list<string>
+     */
+    private function namesIn(array $graph, array $slugs): array
+    {
+        return array_values(array_map(
+            static fn (string $slug): string => $graph['names'][$slug] ?? $slug,
+            $slugs,
+        ));
     }
 
     /**
@@ -767,29 +862,197 @@ final class ModuleService
         return $slugs;
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | Internals — deciding and writing a switch
+    |--------------------------------------------------------------------------
+    */
+
     /**
-     * The one write. Only `is_enabled` and the three audit columns move — the settings json and
-     * every related table are deliberately left alone, which is what makes disabling reversible.
+     * Run a switch decision inside one transaction, against the graph read `FOR UPDATE`, and write
+     * whatever it decided before the locks are released.
      *
-     * The model's automatic "Module updated" activity row is suppressed for this save: the switch
-     * is recorded exactly once, by auditSwitch(), with the reason, the old and new state and the
-     * slug. Two rows for one switch made every toggle look like two changes.
+     * @param  Closure(ModuleGraph): list<ModuleMove>  $plan  receives the locked graph by reference
+     * @return array{0: list<ModuleMove>, 1: array<int, Module>}
      */
-    private function write(Module $module, bool $enabled, string $reason, ?int $actorId): void
+    private function underLock(Closure $plan, ?int $actorId): array
     {
-        $module->withReason($reason)->fill([
-            'is_enabled' => $enabled,
-            'disabled_at' => $enabled ? null : now(),
-            'disabled_by' => $enabled ? null : $actorId,
-            'disable_reason' => $enabled ? null : mb_substr($reason, 0, 255),
-        ]);
+        /** @var array{0: list<ModuleMove>, 1: array<int, Module>} $result */
+        $result = DB::transaction(function () use ($plan, $actorId): array {
+            $graph = $this->graph(lock: true);
 
-        $module->disableLogging();
+            $moves = $plan($graph);
 
-        try {
-            $module->save();
-        } finally {
-            $module->enableLogging();
+            return [$moves, $this->writeMoves($moves, $actorId)];
+        }, self::LOCK_ATTEMPTS);
+
+        return $result;
+    }
+
+    /**
+     * Decide one switch against the locked graph and record its effect on that graph, so the next
+     * decision in the same batch sees it. A refusal is thrown before the graph is touched.
+     *
+     * @param  ModuleGraph  $graph
+     * @return list<ModuleMove> dependents first, then the module itself
+     *
+     * @throws ActionNotAllowedException
+     */
+    private function planSwitch(array &$graph, string $slug, string $name, bool $enabled, string $reason, bool $cascade): array
+    {
+        if (! isset($graph['ids'][$slug])) {
+            throw new ActionNotAllowedException(sprintf('"%s" is not installed, so it cannot be switched.', $name));
+        }
+
+        $name = $graph['names'][$slug] ?? $name;
+
+        // The dependents rule only ever guards a disable: turning a module *on* can break nothing.
+        $cascadeSlugs = [];
+
+        if (! $enabled) {
+            if (($graph['core'][$slug] ?? false) === true) {
+                throw ActionNotAllowedException::coreModule($name);
+            }
+
+            $blocking = $this->enabledDependentsIn($graph, $slug);
+
+            if ($blocking !== [] && ! $cascade) {
+                throw $this->dependentsBlockDisable($graph, $name, $blocking);
+            }
+
+            if ($blocking !== []) {
+                $cascadeSlugs = $this->cascadeSetIn($graph, $slug);
+                $this->assertCascadeIsPermitted($graph, $name, $cascadeSlugs);
+            }
+        }
+
+        $moves = [];
+
+        // Dependents come down first, so no enabled module is ever left pointing at a module that
+        // has already gone dark.
+        foreach ($cascadeSlugs as $dependent) {
+            if (! isset($graph['ids'][$dependent]) || ($graph['stored'][$dependent] ?? false) === false) {
+                continue;
+            }
+
+            $moves[] = [
+                'id' => $graph['ids'][$dependent],
+                'slug' => $dependent,
+                'enabled' => false,
+                'reason' => $this->cascadeReason($slug, $reason),
+                'cascaded_from' => $slug,
+            ];
+        }
+
+        if (($graph['stored'][$slug] ?? null) !== $enabled) {
+            $moves[] = [
+                'id' => $graph['ids'][$slug],
+                'slug' => $slug,
+                'enabled' => $enabled,
+                'reason' => $reason,
+                'cascaded_from' => null,
+            ];
+        }
+
+        foreach ($moves as $move) {
+            $graph['stored'][$move['slug']] = $move['enabled'];
+            $graph['enabled'][$move['slug']] = ($graph['core'][$move['slug']] ?? false) || $move['enabled'];
+        }
+
+        return $moves;
+    }
+
+    /**
+     * The writes for a decided set of moves, inside the caller's transaction.
+     *
+     * Only `is_enabled` and the three audit columns move — the settings json and every related
+     * table are deliberately left alone, which is what makes disabling reversible. Moves that land
+     * on the same state with the same stored reason share one UPDATE (a whole group is usually
+     * one statement, plus one per cascade source). The query builder fires no model event, so the
+     * model's automatic "Module updated" row is never written: each switch is recorded exactly once,
+     * by auditSwitch(), with the reason, the old and new state and the slug.
+     *
+     * @param  list<ModuleMove>  $moves
+     * @return array<int, Module> id => the row as it now stands
+     */
+    private function writeMoves(array $moves, ?int $actorId): array
+    {
+        if ($moves === []) {
+            return [];
+        }
+
+        $now = now();
+        $batches = [];
+
+        foreach ($moves as $move) {
+            $stored = $move['enabled'] ? null : mb_substr($move['reason'], 0, 255);
+            $key = json_encode([$move['enabled'], $stored], JSON_THROW_ON_ERROR);
+
+            $batches[$key] ??= ['enabled' => $move['enabled'], 'reason' => $stored, 'ids' => []];
+            $batches[$key]['ids'][] = $move['id'];
+        }
+
+        foreach ($batches as $batch) {
+            DB::table('modules')
+                ->whereIn('id', $batch['ids'])
+                ->update([
+                    'is_enabled' => $batch['enabled'],
+                    'disabled_at' => $batch['enabled'] ? null : $now,
+                    'disabled_by' => $batch['enabled'] ? null : $actorId,
+                    'disable_reason' => $batch['reason'],
+                    'updated_at' => $now,
+                ]);
+        }
+
+        /** @var array<int, Module> $rows */
+        $rows = Module::query()
+            ->whereIn('id', array_values(array_unique(array_column($moves, 'id'))))
+            ->get()
+            ->keyBy(static fn (Module $row): int => (int) $row->getKey())
+            ->all();
+
+        foreach ($moves as $move) {
+            $row = $rows[$move['id']] ?? null;
+
+            if ($row instanceof Module) {
+                $this->auditSwitch($row, $move['enabled'], $move['reason'], $move['cascaded_from']);
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * After the commit: one cache flush, then one event per module that actually moved.
+     *
+     * @param  list<ModuleMove>  $moves
+     * @param  array<int, Module>  $rows
+     */
+    private function announce(array $moves, array $rows, ?int $actorId): void
+    {
+        if ($moves === []) {
+            // Nothing moved: no write, no audit row, no cache churn.
+            return;
+        }
+
+        // Done after the commit, so no request can rebuild the gate map from inside the
+        // transaction window.
+        Modules::flushCache();
+
+        // Listeners only ever hear about a state that has actually been committed.
+        foreach ($moves as $move) {
+            $row = $rows[$move['id']] ?? null;
+
+            if ($row instanceof Module) {
+                ModuleStateChanged::dispatch(
+                    $row,
+                    $move['enabled'],
+                    $move['reason'],
+                    $actorId,
+                    $move['cascaded_from'] !== null,
+                    $move['cascaded_from'],
+                );
+            }
         }
     }
 
@@ -826,16 +1089,17 @@ final class ModuleService
      * The refusal, naming every dependent — an administrator must never have to guess which
      * module is holding the switch (phase-02 §6 "names the dependents").
      *
+     * @param  ModuleGraph  $graph
      * @param  list<string>  $dependents
      */
-    private function dependentsBlockDisable(Module $module, array $dependents): ActionNotAllowedException
+    private function dependentsBlockDisable(array $graph, string $name, array $dependents): ActionNotAllowedException
     {
-        $names = $this->namesFor($dependents);
+        $names = $this->namesIn($graph, $dependents);
         $one = count($names) === 1;
 
         return new ActionNotAllowedException(sprintf(
             '"%s" cannot be switched off: %s %s still enabled and %s on it. Switch %s off first, or confirm the cascade.',
-            (string) $module->name,
+            $name,
             implode(', ', $names),
             $one ? 'is' : 'are',
             $one ? 'depends' : 'depend',
@@ -846,14 +1110,13 @@ final class ModuleService
     /**
      * A cascade may not smuggle a core module off the air.
      *
+     * @param  ModuleGraph  $graph
      * @param  list<string>  $cascadeSlugs
      *
      * @throws ActionNotAllowedException
      */
-    private function assertCascadeIsPermitted(Module $module, array $cascadeSlugs): void
+    private function assertCascadeIsPermitted(array $graph, string $name, array $cascadeSlugs): void
     {
-        $graph = $this->graph();
-
         $core = array_values(array_filter(
             $cascadeSlugs,
             static fn (string $slug): bool => ($graph['core'][$slug] ?? false) === true,
@@ -865,8 +1128,8 @@ final class ModuleService
 
         throw new ActionNotAllowedException(sprintf(
             '"%s" cannot be switched off: %s would have to go with it, and a core module can never be disabled.',
-            (string) $module->name,
-            implode(', ', $this->namesFor($core)),
+            $name,
+            implode(', ', $this->namesIn($graph, $core)),
         ));
     }
 
@@ -875,6 +1138,17 @@ final class ModuleService
         return mb_substr(sprintf('Cascaded from %s: %s', $slug, $reason), 0, 255);
     }
 
+    private function enableReason(string $slug): string
+    {
+        return sprintf('Module %s enabled from the admin panel', $slug);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Internals — routes, sidebar and what a viewer may be told
+    |--------------------------------------------------------------------------
+    */
+
     /**
      * `slug => routes it gates`, read from the router itself.
      *
@@ -882,7 +1156,11 @@ final class ModuleService
      * `can:<slug>.<ability>` / `permission:<slug>.<ability>` check — the two mechanisms phase-01 §6
      * uses to close a disabled module's doors.
      *
-     * @return array<string, list<array{name: string|null, uri: string, methods: string}>>
+     * Each entry also records what the route demands: one any-of list per permission-bearing
+     * middleware, every list of which must be satisfied. A route guarded only by `module:` (its
+     * permission decided in a policy) demands nothing that can be named here.
+     *
+     * @return array<string, list<RouteEntry>>
      */
     private function routeMap(): array
     {
@@ -890,6 +1168,7 @@ final class ModuleService
 
         foreach (Route::getRoutes() as $route) {
             $slugs = [];
+            $requires = [];
 
             foreach ($route->gatherMiddleware() as $middleware) {
                 if (! is_string($middleware) || ! str_contains($middleware, ':')) {
@@ -898,18 +1177,44 @@ final class ModuleService
 
                 [$name, $argument] = explode(':', $middleware, 2);
 
-                foreach (explode(',', $argument) as $value) {
-                    $value = trim($value);
+                if ($name === 'module' || $name === 'site_module') {
+                    foreach (explode(',', $argument) as $value) {
+                        $value = trim($value);
 
-                    $slug = match ($name) {
-                        'module', 'site_module' => $value,
-                        'can', 'permission', 'role_or_permission' => Modules::moduleForPermission($value),
-                        default => null,
-                    };
+                        if ($value !== '' && ! in_array($value, $slugs, true)) {
+                            $slugs[] = $value;
+                        }
+                    }
 
-                    if (is_string($slug) && $slug !== '' && ! in_array($slug, $slugs, true)) {
+                    continue;
+                }
+
+                if (! in_array($name, ['can', 'permission', 'role_or_permission'], true)) {
+                    continue;
+                }
+
+                // `can:<ability>,<model>` — only the ability names a permission. `permission:` and
+                // `role_or_permission:` take `a|b` (any of) followed by an optional guard.
+                $first = trim(explode(',', $argument, 2)[0]);
+                $candidates = $name === 'can' ? [$first] : array_map('trim', explode('|', $first));
+                $permissions = [];
+
+                foreach ($candidates as $value) {
+                    $slug = $value === '' ? null : Modules::moduleForPermission($value);
+
+                    if (! is_string($slug) || $slug === '') {
+                        continue;
+                    }
+
+                    $permissions[] = $value;
+
+                    if (! in_array($slug, $slugs, true)) {
                         $slugs[] = $slug;
                     }
+                }
+
+                if ($permissions !== []) {
+                    $requires[] = $permissions;
                 }
             }
 
@@ -921,6 +1226,7 @@ final class ModuleService
                 'name' => $route->getName(),
                 'uri' => '/'.ltrim((string) $route->uri(), '/'),
                 'methods' => implode('|', array_values(array_diff($route->methods(), ['HEAD']))),
+                'requires' => $requires,
             ];
 
             foreach ($slugs as $slug) {
@@ -932,20 +1238,45 @@ final class ModuleService
     }
 
     /**
+     * @return list<SidebarEntry>
+     */
+    private function sidebarEntriesFor(string $slug): array
+    {
+        $found = [];
+
+        foreach (['admin', 'collaborator', 'student', 'teacher', 'client'] as $panel) {
+            foreach (Sidebar::tree($panel) as $group) {
+                foreach ($group['items'] ?? [] as $item) {
+                    if (! is_array($item)) {
+                        continue;
+                    }
+
+                    $this->collectSidebarItems($item, $slug, $panel, [(string) ($group['label'] ?? $panel)], $found);
+                }
+            }
+        }
+
+        return $found;
+    }
+
+    /**
      * Walk one declared sidebar item (and its children) looking for this module.
      *
      * @param  array<string, mixed>  $item
      * @param  list<string>  $path
-     * @param  list<array{panel: string, label: string, path: list<string>}>  $found
+     * @param  list<SidebarEntry>  $found
      */
     private function collectSidebarItems(array $item, string $slug, string $panel, array $path, array &$found): void
     {
         $label = isset($item['label']) ? (string) $item['label'] : '';
         $module = isset($item['module']) ? (string) $item['module'] : null;
         $route = isset($item['route']) ? (string) $item['route'] : null;
+        $permission = isset($item['permission']) && is_string($item['permission']) && $item['permission'] !== ''
+            ? $item['permission']
+            : null;
 
         if ($module === $slug && $label !== '' && $route !== null && Route::has($route)) {
-            $found[] = ['panel' => $panel, 'label' => $label, 'path' => $path];
+            $found[] = ['panel' => $panel, 'label' => $label, 'path' => $path, 'permission' => $permission];
         }
 
         foreach ($item['children'] ?? [] as $child) {
@@ -953,6 +1284,65 @@ final class ModuleService
                 $this->collectSidebarItems($child, $slug, $panel, [...$path, $label], $found);
             }
         }
+    }
+
+    /**
+     * What this viewer may be told by name: a predicate over a list of any-of permission groups.
+     *
+     * Permission *holding* is read from the viewer's grants, not through the Gate: `Gate::before`
+     * denies every ability of a disabled module, and the preview of switching one back on is
+     * exactly when an operator needs to see what returns. Fails closed — no viewer, an empty
+     * requirement, or a grant lookup that throws all disclose nothing.
+     *
+     * @return Closure(list<list<string>>): bool
+     */
+    private function disclosureFor(?Authenticatable $viewer): Closure
+    {
+        if (! $viewer instanceof User) {
+            return static fn (array $requires): bool => false;
+        }
+
+        if ($viewer->isSuperAdmin()) {
+            return static fn (array $requires): bool => true;
+        }
+
+        $held = [];
+
+        try {
+            foreach ($viewer->getAllPermissions() as $permission) {
+                $name = (string) ($permission->name ?? '');
+
+                if ($name !== '') {
+                    $held[$name] = true;
+                }
+            }
+        } catch (Throwable) {
+            $held = [];
+        }
+
+        return static function (array $requires) use ($held): bool {
+            if ($requires === [] || $held === []) {
+                return false;
+            }
+
+            foreach ($requires as $anyOf) {
+                $satisfied = false;
+
+                foreach ($anyOf as $name) {
+                    if (isset($held[$name])) {
+                        $satisfied = true;
+
+                        break;
+                    }
+                }
+
+                if (! $satisfied) {
+                    return false;
+                }
+            }
+
+            return true;
+        };
     }
 
     private function actorId(): ?int

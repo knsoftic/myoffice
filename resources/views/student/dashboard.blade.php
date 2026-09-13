@@ -32,11 +32,12 @@
 
 @section('content')
     @php
-        $timezone = $user->effectiveTimezone();
+        // The zone app_datetime() renders in (the viewer's own, else localization.timezone), so the
+        // "Times shown in" row always names the zone the times on this page are actually in.
+        $timezone = \App\Support\Format::displayTimezone();
 
-        $formatDate = static fn (?\Illuminate\Support\Carbon $date): string => $date === null
-            ? '—'
-            : $date->timezone($timezone)->format('j M Y, g:i A');
+        // Date and time in the configured localization formats; a missing stamp reads as a dash.
+        $formatDate = static fn (mixed $date): string => app_datetime($date) ?: '—';
 
         // Honest fallbacks: the login history row for this session, otherwise the stamp the
         // login listener wrote on the user row.
@@ -164,7 +165,7 @@
                 <div>
                     <dt class="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Member since</dt>
                     <dd class="mt-1 text-sm text-slate-900 dark:text-white">
-                        {{ $user->created_at ? $user->created_at->timezone($timezone)->format('j M Y') : '—' }}
+                        {{ app_date($user->created_at) ?: '—' }}
                     </dd>
                 </div>
 
