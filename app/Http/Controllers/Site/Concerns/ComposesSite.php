@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Site\Concerns;
 
+use App\Contracts\Cms\SectionDataProvider;
 use App\Enums\Cms\SectionPlacement;
+use App\Http\Middleware\EnsureUserIsActive;
 use App\Models\Cms\Page;
 use App\Models\Cms\WebsiteSection;
 use App\Services\Cms\CacheVersion;
 use App\Services\Cms\Data\SeoPayload;
 use App\Services\Cms\SectionService;
+use App\Services\Cms\SnapshotBuilder;
 use App\Support\Cms\SectionRegistry;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -31,9 +34,12 @@ use Throwable;
  *     request — when its `section_key` is not in the registry, its snapshot is not the shape
  *     `SnapshotBuilder` writes, its partial does not exist, or the partial throws while rendering. The
  *     render is probed here so the page view can `@include` the partials it is handed without risk.
- *   · **Preview is explicit and authorised.** `?preview=1` renders drafts only for a user holding the
- *     area's `view` permission; anyone else gets the live page. Preview responses are `no-store` and
- *     `noindex, nofollow` (INV-9).
+ *   · **Status-gated references stay live (§2.15).** CTA blocks and FAQs are re-read under the version
+ *     stamp (`withLiveReferences()`), so an unpublished or trashed one leaves every page at once.
+ *   · **`is_live` providers run per render (§6.1, [D-W3-11]).** Their output is the section's `provider`.
+ *   · **Preview is explicit and authorised.** `?preview=1` renders drafts only for an active user in good
+ *     standing holding the area's `view` permission; anyone else gets the live page. Preview responses
+ *     are `no-store` and `noindex, nofollow` (INV-9).
  *
  * The page view receives `$site` (the §6.9 `SitePayload` fields: `header`, `footer`, `sections`, `seo`,
  * `page`, `isPreview`, `bodyClass`). Each section entry is the snapshot array plus the partial's
@@ -71,7 +77,7 @@ trait ComposesSite
 
         $sections = [];
 
-        foreach (is_array($rows) ? $rows : [] as $row) {
+        foreach ($this->withLiveReferences(is_array($rows) ? $rows : []) as $row) {
             $entry = is_array($row) ? $this->usableSection($row) : null;
 
             if ($entry !== null) {
@@ -80,6 +86,59 @@ trait ComposesSite
         }
 
         return $sections;
+    }
+
+    /**
+     * Re-read the CTA blocks and FAQs the published snapshots reference (§2.15 status-gated and live, §9,
+     * FT-12): a block or question set back to draft, archived or trashed is dropped, and an edit to a
+     * published one is shown. The lookup is one cache entry under the version stamp that every CTA and FAQ
+     * write bumps, so a warm page issues no query for it and a cold one at most three. Preview never comes
+     * through here — a draft payload is resolved live when it is built.
+     *
+     * A failed lookup is reported and fails closed for this request only: the references render as absent
+     * and nothing is cached.
+     *
+     * @param  array<int|string, mixed>  $rows  id, section_key, anchor, sort_order, snapshot
+     * @return array<int|string, mixed>
+     */
+    private function withLiveReferences(array $rows): array
+    {
+        $snapshots = [];
+
+        foreach ($rows as $index => $row) {
+            $snapshot = is_array($row) ? ($row['snapshot'] ?? null) : null;
+            $snapshot = is_string($snapshot) ? json_decode($snapshot, true) : $snapshot;
+
+            if (is_array($snapshot)) {
+                $snapshots[$index] = $snapshot;
+            }
+        }
+
+        $builder = app(SnapshotBuilder::class);
+        $plan = $builder->liveReferencePlan($snapshots);
+
+        if ($plan === null) {
+            return $rows;
+        }
+
+        try {
+            $resolved = app(CacheVersion::class)->remember(
+                'references',
+                $plan,
+                $this->cacheSeconds(),
+                static fn (): array => app(SnapshotBuilder::class)->resolveLiveReferences($plan),
+            );
+        } catch (Throwable $exception) {
+            report($exception);
+
+            $resolved = ['cta' => [], 'faqs' => []];
+        }
+
+        foreach ($snapshots as $index => $snapshot) {
+            $rows[$index]['snapshot'] = $builder->applyLiveReferences($snapshot, is_array($resolved) ? $resolved : ['cta' => [], 'faqs' => []]);
+        }
+
+        return $rows;
     }
 
     /**
@@ -176,7 +235,7 @@ trait ComposesSite
         $chrome = ['header' => null, 'footer' => null];
         $slots = [SectionPlacement::GlobalHeader->value => 'header', SectionPlacement::GlobalFooter->value => 'footer'];
 
-        foreach (is_array($rows) ? $rows : [] as $row) {
+        foreach ($this->withLiveReferences(is_array($rows) ? $rows : []) as $row) {
             $slot = is_array($row) ? ($slots[$row['placement'] ?? ''] ?? null) : null;
 
             if ($slot === null || $chrome[$slot] !== null) {
@@ -212,12 +271,15 @@ trait ComposesSite
     /**
      * Does this request ask for — and may it see — draft content? (`?preview=1`, §6.12.)
      *
-     * The permission, never the login: a student or client signed in is an ordinary visitor (§9).
+     * The permission, never the login: a student or client signed in is an ordinary visitor (§9). The
+     * public routes carry no `active` middleware, so the account's standing is checked here too (§7.6
+     * `auth` + `active` + `can:`): a suspended account, or one that still owes a password change, is a
+     * visitor as well.
      */
     protected function previewRequested(Request $request, string $permission): bool
     {
         return $request->query('preview') === '1'
-            && $request->user()?->can($permission) === true;
+            && EnsureUserIsActive::permits($request->user(), $permission);
     }
 
     /**
@@ -306,6 +368,14 @@ trait ComposesSite
             'view' => $view,
         ]);
 
+        // phase-03 §6.1 [D-W3-11]: a live type's data is resolved per render — for the published page
+        // and the draft preview alike — so a newly published row appears without re-publishing the
+        // section. The provider caches itself under the version stamp; it reads its options from the
+        // snapshot, so an unsaved model carrying the snapshot is all it is handed.
+        if (SectionRegistry::isLive($key)) {
+            $section['provider'] = $this->liveProviderOutput($id, $key, $snapshot);
+        }
+
         try {
             View::make($view, $this->partialVariables($section))->render();
         } catch (Throwable $exception) {
@@ -315,6 +385,43 @@ trait ComposesSite
         }
 
         return $section;
+    }
+
+    /**
+     * The output of an `is_live` type's `SectionDataProvider`, or null when it has none, cannot be built
+     * or throws (reported with the section's one warning — the section then renders its empty state).
+     *
+     * @param  array<string, mixed>  $snapshot
+     */
+    private function liveProviderOutput(int $id, string $key, array $snapshot): mixed
+    {
+        $class = SectionRegistry::provider($key);
+
+        if ($class === null || ! class_exists($class)) {
+            return null;
+        }
+
+        try {
+            $provider = app($class);
+
+            if (! $provider instanceof SectionDataProvider && ! method_exists($provider, 'resolve')) {
+                $this->warn($id, $key, sprintf('live section provider [%s] has no resolve()', $class));
+
+                return null;
+            }
+
+            $model = (new WebsiteSection)->forceFill([
+                'id' => $id,
+                'section_key' => $key,
+                'published_content' => $snapshot,
+            ]);
+
+            return $provider->resolve($model);
+        } catch (Throwable $exception) {
+            $this->warn($id, $key, 'live section provider threw', $exception);
+
+            return null;
+        }
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Core;
 
+use App\Events\SettingsChanged;
 use App\Models\Setting;
 use App\Models\User;
 use App\Services\Core\Concerns\WritesAuditTrail;
@@ -332,7 +333,7 @@ final class SettingsService
                 $this->deleteFileFromDisk($file['disk'], $file['path']);
             }
 
-            $this->afterWrite();
+            $this->afterWrite(array_keys($changes), $actor);
         }
 
         return $changes;
@@ -394,7 +395,7 @@ final class SettingsService
                 $this->deleteFileFromDisk($file['disk'], $file['path']);
             }
 
-            $this->afterWrite();
+            $this->afterWrite(array_keys($changes), $actor);
         }
 
         return $changes;
@@ -444,7 +445,7 @@ final class SettingsService
             $this->deleteFileFromDisk($file['disk'], $file['path']);
         }
 
-        $this->afterWrite();
+        $this->afterWrite([$group.'.'.$key], $actor);
 
         return true;
     }
@@ -726,13 +727,18 @@ final class SettingsService
     }
 
     /**
-     * Flush the cached payload and bring the runtime configuration back in line.
+     * Flush the cached payload, bring the runtime configuration back in line, and tell listeners which
+     * keys moved (`SettingsChanged` — the public website cache is one: its pages embed these values).
+     *
+     * @param  list<string>  $keys  dotted keys whose stored value changed
      */
-    private function afterWrite(): void
+    private function afterWrite(array $keys, ?Authenticatable $actor): void
     {
         $this->settings->flush();
 
         ConfigureFromSettings::apply();
+
+        SettingsChanged::dispatch(array_values($keys), $actor instanceof User ? (int) $actor->getKey() : null);
     }
 
     /*

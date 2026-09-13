@@ -13,6 +13,7 @@ use App\Services\Cms\Exceptions\UnsupportedUploadException;
 use App\Services\Cms\Media\GdImageProcessor;
 use App\Support\SettingsRepository;
 use finfo;
+use Illuminate\Contracts\Auth\Access\Authorizable;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Database\DatabaseManager;
@@ -21,6 +22,7 @@ use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use RuntimeException;
@@ -821,6 +823,22 @@ final class MediaService
         }
     }
 
+    /**
+     * Does the acting user hold a permission? A console process with no user is trusted code.
+     */
+    private function actorCan(string $permission): bool
+    {
+        try {
+            $user = Auth::user();
+        } catch (Throwable) {
+            $user = null;
+        }
+
+        return $user === null
+            ? app()->runningInConsole()
+            : $user instanceof Authorizable && $user->can($permission);
+    }
+
     private function findByChecksum(string $checksum): ?MediaAsset
     {
         /** @var MediaAsset|null */
@@ -831,11 +849,27 @@ final class MediaService
      * Return an existing row for re-uploaded bytes: restored from the trash, its file rewritten if it
      * went missing, and empty descriptive columns filled from this upload's metadata.
      *
+     * An upload is not a restore and not an edit: bringing a trashed asset back needs
+     * `website_media.restore` — the ability `MediaPolicy::restore()` checks, which the registry does not
+     * declare today, so in practice only a Super Admin (an administrator deleted it on purpose) — and
+     * filling another asset's empty alt text, title or caption needs `website_media.edit`. Console context
+     * (seeders, commands) has no user and is trusted code.
+     *
      * @param  array<string, mixed>  $meta
+     *
+     * @throws UnsupportedUploadException for a trashed asset the uploader may not restore
      */
     private function reuse(MediaAsset $asset, array $meta, UploadedFile $file, string $mime): MediaAsset
     {
-        return $this->db->connection()->transaction(function () use ($asset, $meta, $file, $mime): MediaAsset {
+        if ($asset->trashed() && ! $this->actorCan(self::MODULE.'.restore')) {
+            throw new UnsupportedUploadException(
+                'This file is already in the media library\'s trash. Ask someone who can restore media to bring it back.'
+            );
+        }
+
+        $mayDescribe = $this->actorCan(self::MODULE.'.edit');
+
+        return $this->db->connection()->transaction(function () use ($asset, $meta, $file, $mime, $mayDescribe): MediaAsset {
             if ($asset->trashed()) {
                 $asset->restore();
             }
@@ -843,7 +877,7 @@ final class MediaService
             $fills = [];
 
             foreach (['alt_text' => 255, 'title' => 191, 'caption' => 500] as $key => $limit) {
-                $value = $this->plain($meta[$key] ?? null, $limit);
+                $value = $mayDescribe ? $this->plain($meta[$key] ?? null, $limit) : null;
 
                 if ($value !== null && trim((string) $asset->getAttribute($key)) === '') {
                     $fills[$key] = $value;

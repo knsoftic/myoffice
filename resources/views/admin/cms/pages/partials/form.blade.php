@@ -12,6 +12,7 @@
         'ogAsset' => $ogAsset,            // ?MediaAsset
         'sectionsCount' => $sectionsCount,// int, edit only
         'slugLocked' => ! $can['changeSlug'], // optional; derived from pages.change_status when absent
+        'liveLocked' => $canEdit && ! $can['changeLive'], // optional; live columns locked, body editable
         'readonly' => ! $canEdit,
     ])
 
@@ -30,6 +31,10 @@
     $page = $page ?? null;
     $exists = $page !== null && $page->exists;
     $readonly = (bool) ($readonly ?? false);
+    // A live page's title, address, layout, excerpt, banner and template go live on save, so they need
+    // the publish permission (PagePolicy::changeLiveAttributes); the body stays an editable draft.
+    $liveLocked = (bool) ($liveLocked ?? false);
+    $lockedLive = $readonly || $liveLocked;
     $templates = $templates ?? ['site.pages.default' => 'Default', 'site.pages.wide' => 'Wide', 'site.pages.legal' => 'Legal'];
     $layoutValue = old('layout', $page?->layout instanceof PageLayout ? $page->layout->value : ($page?->layout ?? PageLayout::Content->value));
     $slugLocked = array_key_exists('slugLocked', get_defined_vars())
@@ -62,6 +67,13 @@
 
     {{-- ── Content ─────────────────────────────────────────────────────────── --}}
     <div x-show="is('content')" class="space-y-5 rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 sm:p-5 dark:bg-slate-900 dark:ring-slate-800">
+        @if ($liveLocked && ! $readonly)
+            <div class="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/25">
+                <x-ui.icon name="lock-closed" class="mt-0.5 h-4 w-4 shrink-0" />
+                <p>This page is live. Its title, address, layout, excerpt, banner and template change only with the publish permission; the body is saved as a draft for a publisher to put live.</p>
+            </div>
+        @endif
+
         <div
             x-data="cmsSlug(@js([
                 'slug' => (string) old('slug', $page?->slug ?? ''),
@@ -77,7 +89,7 @@
                 :value="$page?->title"
                 required
                 maxlength="200"
-                :readonly="$readonly"
+                :readonly="$lockedLive"
                 x-on:input="fromTitle($event.target.value)"
                 class="sm:col-span-2"
             />
@@ -118,7 +130,7 @@
                     Use lowercase letters, numbers and single hyphens, not at the start or end.
                 </p>
                 @if ($slugLocked)
-                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">This is a system page: changing its address needs the publish permission.</p>
+                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">{{ $exists && $page->is_system ? 'This is a system page' : 'This page is live' }}: changing its address needs the publish permission.</p>
                 @elseif ($exists && $page->status === ContentStatus::Published)
                     <p class="mt-1 text-xs text-amber-700 dark:text-amber-400">Changing the address of a live page breaks links from outside the site. Menus update automatically.</p>
                 @endif
@@ -126,7 +138,7 @@
             </div>
 
             <div class="sm:col-span-2">
-                <x-ui.form.textarea name="excerpt" label="Excerpt" :value="$page?->excerpt" :rows="2" maxlength="500" :readonly="$readonly" help="Used as the search and social description when the SEO tab leaves it empty." id="field-excerpt" />
+                <x-ui.form.textarea name="excerpt" label="Excerpt" :value="$page?->excerpt" :rows="2" maxlength="500" :readonly="$lockedLive" help="Used as the search and social description when the SEO tab leaves it empty." id="field-excerpt" />
                 @include('admin.cms.partials.length-meter', ['for' => 'field-excerpt', 'max' => 500])
             </div>
         </div>
@@ -137,7 +149,7 @@
                 label="Layout"
                 :options="PageLayout::options()"
                 :selected="$layoutValue"
-                :disabled="$readonly"
+                :disabled="$lockedLive"
                 x-on:change="layout = $event.target.value"
                 help="Rich text for policies and simple pages; sections to build it from blocks."
             />
@@ -176,7 +188,7 @@
 
     {{-- ── Banner ──────────────────────────────────────────────────────────── --}}
     <div x-show="is('banner')" x-cloak class="space-y-4 rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 sm:p-5 dark:bg-slate-900 dark:ring-slate-800">
-        <x-ui.form.toggle name="show_banner" label="Show a banner at the top of the page" :checked="(bool) ($page?->show_banner ?? true)" :disabled="$readonly" />
+        <x-ui.form.toggle name="show_banner" label="Show a banner at the top of the page" :checked="(bool) ($page?->show_banner ?? true)" :disabled="$lockedLive" />
 
         @include('admin.cms.partials.media-picker', [
             'name' => 'banner_media_id',
@@ -185,13 +197,13 @@
             'kind' => 'image',
             'selected' => isset($bannerAsset) && $bannerAsset ? [$bannerAsset] : [],
             'selectedIds' => array_filter([$page?->banner_media_id]),
-            'readonly' => $readonly,
+            'readonly' => $lockedLive,
             'profile' => 'Banner 21:9',
         ])
 
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <x-ui.form.input name="banner_heading" label="Banner heading" :value="$page?->banner_heading" maxlength="200" placeholder="Defaults to the title" :readonly="$readonly" />
-            <x-ui.form.input name="banner_subheading" label="Banner subheading" :value="$page?->banner_subheading" maxlength="300" :readonly="$readonly" />
+            <x-ui.form.input name="banner_heading" label="Banner heading" :value="$page?->banner_heading" maxlength="200" placeholder="Defaults to the title" :readonly="$lockedLive" />
+            <x-ui.form.input name="banner_subheading" label="Banner subheading" :value="$page?->banner_subheading" maxlength="300" :readonly="$lockedLive" />
         </div>
     </div>
 
@@ -211,7 +223,7 @@
     {{-- ── Settings ────────────────────────────────────────────────────────── --}}
     <div x-show="is('settings')" x-cloak class="space-y-4 rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 sm:p-5 dark:bg-slate-900 dark:ring-slate-800">
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <x-ui.form.select name="template" label="Template" :options="$templates" :selected="$page?->template" placeholder="Default template" :disabled="$readonly" help="Only these templates exist; anything else is refused." />
+            <x-ui.form.select name="template" label="Template" :options="$templates" :selected="$page?->template" placeholder="Default template" :disabled="$lockedLive" help="Only these templates exist; anything else is refused." />
             <x-ui.form.input name="sort_order" type="number" label="Sort order" :value="$page?->sort_order ?? 0" min="0" :readonly="$readonly" help="Orders the admin list and the legal menu seeder." />
         </div>
 

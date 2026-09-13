@@ -7,6 +7,7 @@ use App\Services\Cms\MediaService;
 use App\Services\Cms\SitemapGenerator;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
@@ -41,24 +42,32 @@ Artisan::command('cms:media-recount', function (MediaService $media) {
 })->purpose('Recount media_assets.usage_count from every reference (phase-03 §10.4)');
 
 Artisan::command('cms:verify-published-snapshots', function (ContentPublisher $publisher) {
-    $failures = 0;
+    $problems = [];
 
     WebsiteSection::query()
         ->where('status', ContentStatus::Published->value)
         ->where('is_enabled', true)
-        ->each(function (WebsiteSection $section) use ($publisher, &$failures): void {
+        ->each(function (WebsiteSection $section) use ($publisher, &$problems): void {
             foreach ($publisher->verify($section) as $problem) {
-                $failures++;
-                $this->error(sprintf('Section #%d: %s', (int) $section->getKey(), $problem));
+                $problems[] = sprintf('Section #%d: %s', (int) $section->getKey(), $problem);
+                $this->error(end($problems));
             }
         });
 
-    if ($failures === 0) {
+    if ($problems === []) {
         $this->info('Every live section has a valid published snapshot.');
+
+        return 0;
     }
 
-    return $failures === 0 ? 0 : 1;
-})->purpose('Assert every live section has a valid published snapshot (phase-03 §10.4)');
+    // Nobody reads a scheduled command's console: the failure must reach the error log and its alerting.
+    Log::critical('cms:verify-published-snapshots found live sections that cannot render as published.', [
+        'count' => count($problems),
+        'problems' => array_slice($problems, 0, 50),
+    ]);
+
+    return 1;
+})->purpose('Assert every live section has a valid published snapshot and its media files exist (phase-03 §10.4)');
 
 Schedule::command('cms:publish-scheduled')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('cms:sitemap-generate')->dailyAt('02:30')->withoutOverlapping();

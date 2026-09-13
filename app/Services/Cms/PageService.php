@@ -44,7 +44,8 @@ use Throwable;
  * Invariants:
  *
  *   · **INV-1 — a draft write never touches the live copy.** Nothing here writes `published_content`,
- *     `published_hash`, `published_at` or `published_by` on an existing page.
+ *     `published_hash`, `published_at` or `published_by` on an existing page, and an editor without
+ *     `pages.change_status` cannot change a column a live or scheduled page shows ([D-W3-10]).
  *   · **INV-4 — the hash cannot lie.** `content_hash` is always `ContentHasher::pageHash()` of the stored
  *     (sanitised) body, so `has_unpublished_changes` agrees with what `ContentPublisher` writes.
  *   · **INV-13.** The body is sanitised with `RichText::sanitize()` on write (and again on render).
@@ -246,11 +247,14 @@ final class PageService
 
     /**
      * Save the draft (§6.4 `saveDraft()`): only the keys present change. The body goes to `content` and
-     * its hash; the live columns change at once. Identical data writes nothing and no revision.
+     * its hash. The columns visitors read directly change at once — so on a published page they, and on
+     * a scheduled page they and the body, change only for someone holding `pages.change_status`
+     * ([D-W3-10]). Identical data writes nothing and no revision.
      *
      * @param  array<string, mixed>  $data
      *
-     * @throws InvalidSectionContentException for malformed input, or a page in the trash
+     * @throws InvalidSectionContentException for malformed input, a page in the trash, or a live change
+     *                                        without `pages.change_status`
      * @throws ContentActionNotAllowedException for a reserved or taken slug, a system page's slug changed
      *                                          without `pages.change_status`, or an archived page
      */
@@ -283,6 +287,11 @@ final class PageService
 
             if (array_key_exists('slug', $changes)) {
                 $this->assertSystemSlugChangeAllowed($row);
+            }
+
+            $this->assertLiveChangeAllowed($row, $changes);
+
+            if (array_key_exists('slug', $changes)) {
                 $this->assertSlugAvailable((string) $changes['slug'], (int) $row->id);
             }
 
@@ -932,22 +941,68 @@ final class PageService
             return;
         }
 
+        if (! $this->actorMayPublish()) {
+            throw new ContentActionNotAllowedException(sprintf(
+                'The address of "%s" is part of the site\'s legal pages: only someone who can publish pages may change it.',
+                $row->title
+            ));
+        }
+    }
+
+    /**
+     * [D-W3-10], INV-1, §6.4 "saveDraft writes content only": an editor cannot put anything live.
+     *
+     *   · On a **published** page the columns visitors read directly (`LIVE_COLUMNS`: title, slug, layout,
+     *     excerpt, banner, template) change only for someone holding `pages.change_status`; the body is
+     *     a draft and stays editable.
+     *   · On a **scheduled** page everything that will go live at the scheduled moment — those columns
+     *     and the body — needs `pages.change_status`, or an unreviewed edit would publish itself.
+     *
+     * Console context (seeders, commands) has no user and is trusted code, as for a system page's slug.
+     *
+     * @param  array<string, mixed>  $changes
+     *
+     * @throws InvalidSectionContentException naming each refused field
+     */
+    private function assertLiveChangeAllowed(object $row, array $changes): void
+    {
+        $status = (string) $row->status;
+        $guarded = match ($status) {
+            ContentStatus::Published->value => self::LIVE_COLUMNS,
+            ContentStatus::Scheduled->value => [...self::LIVE_COLUMNS, 'content'],
+            default => [],
+        };
+
+        $refused = array_values(array_intersect(array_keys($changes), $guarded));
+
+        if ($refused === [] || $this->actorMayPublish()) {
+            return;
+        }
+
+        $message = $status === ContentStatus::Scheduled->value
+            ? 'This page is scheduled to publish itself: changing it needs the publish permission.'
+            : 'Visitors see this on the live page: changing it needs the publish permission. The body can still be saved as a draft.';
+
+        throw InvalidSectionContentException::withErrors(
+            sprintf('"%s" is %s: only someone who can publish pages may change %s.', $row->title, $status, implode(', ', $refused)),
+            array_fill_keys($refused, [$message]),
+        );
+    }
+
+    /**
+     * Does the acting user hold `pages.change_status`? A console process with no user is trusted code.
+     */
+    private function actorMayPublish(): bool
+    {
         try {
             $user = $this->auth->guard()->user();
         } catch (Throwable) {
             $user = null;
         }
 
-        $allowed = $user === null
+        return $user === null
             ? app()->runningInConsole()
             : $user instanceof Authorizable && $user->can('pages.change_status');
-
-        if (! $allowed) {
-            throw new ContentActionNotAllowedException(sprintf(
-                'The address of "%s" is part of the site\'s legal pages: only someone who can publish pages may change it.',
-                $row->title
-            ));
-        }
     }
 
     private function assertWritable(object $row): void

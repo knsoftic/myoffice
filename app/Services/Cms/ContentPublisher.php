@@ -7,6 +7,7 @@ namespace App\Services\Cms;
 use App\Enums\Cms\ContentStatus;
 use App\Enums\Cms\RevisionEvent;
 use App\Models\Cms\CmsRevision;
+use App\Models\Cms\MediaAsset;
 use App\Models\Cms\Page;
 use App\Models\Cms\WebsiteSection;
 use App\Models\User;
@@ -21,6 +22,7 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Storage;
 use Throwable;
 
 /**
@@ -394,7 +396,87 @@ final class ContentPublisher
             $problems[] = sprintf('Media placed on the section no longer exist: #%s.', implode(', #', $missing));
         }
 
+        return array_merge($problems, $this->snapshotMediaProblems($snapshot));
+    }
+
+    /**
+     * §10.4: every image or video the **published snapshot** renders must still have its row and its
+     * original file on disk — the case a half-finished deploy or a lost storage volume produces, which
+     * the database alone cannot show.
+     *
+     * @param  array<string, mixed>  $snapshot
+     * @return list<string>
+     */
+    private function snapshotMediaProblems(array $snapshot): array
+    {
+        $ids = [];
+
+        // The CTA block is re-read live on render (§2.15), so its frozen copy is not what visitors see.
+        unset($snapshot['cta']);
+        $this->collectMediaIds($snapshot, $ids);
+
+        if ($ids === []) {
+            return [];
+        }
+
+        $assets = MediaAsset::query()->withTrashed()->whereIn('id', array_keys($ids))->get()
+            ->keyBy(static fn (MediaAsset $asset): int => (int) $asset->getKey());
+
+        $gone = [];
+        $unreadable = [];
+
+        foreach (array_keys($ids) as $id) {
+            $asset = $assets->get($id);
+
+            if (! $asset instanceof MediaAsset) {
+                $gone[] = $id;
+
+                continue;
+            }
+
+            try {
+                $present = Storage::disk((string) $asset->disk)->exists($asset->path());
+            } catch (Throwable $exception) {
+                report($exception);
+                $present = false;
+            }
+
+            if (! $present) {
+                $unreadable[] = $id;
+            }
+        }
+
+        $problems = [];
+
+        if ($gone !== []) {
+            $problems[] = sprintf('The published snapshot renders media rows that no longer exist: #%s.', implode(', #', $gone));
+        }
+
+        if ($unreadable !== []) {
+            $problems[] = sprintf('The published snapshot renders media whose file is missing from storage: #%s.', implode(', #', $unreadable));
+        }
+
         return $problems;
+    }
+
+    /**
+     * Walk a snapshot for the media arrays `MediaService::toSnapshot()` writes (an `id` with a `url` and a
+     * `mime_type`), wherever they sit: roles, galleries, items, a CTA background.
+     *
+     * @param  array<int|string, mixed>  $node
+     * @param  array<int, true>  $ids
+     */
+    private function collectMediaIds(array $node, array &$ids): void
+    {
+        if (array_key_exists('url', $node) && array_key_exists('mime_type', $node) && is_numeric($node['id'] ?? null)) {
+            $ids[(int) $node['id']] = true;
+        }
+
+        foreach ($node as $child) {
+            if (is_array($child)) {
+                $this->collectMediaIds($child, $ids);
+            }
+        }
     }
 
     /*

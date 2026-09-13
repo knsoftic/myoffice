@@ -204,6 +204,11 @@ final class MenuController extends Controller
             ->with(['page' => static fn ($query) => $query->withTrashed()->select(['id', 'title', 'status', 'deleted_at'])])
             ->get(['id', 'link_type', 'page_id', 'route_name', 'url', 'anchor']);
 
+        // Every anchor a section answers to, read once — never one EXISTS query per anchor item.
+        $anchored = $items->contains(static fn (MenuItem $item): bool => filled($item->anchor))
+            ? WebsiteSection::query()->whereNotNull('anchor')->distinct()->pluck('anchor')->map(static fn (mixed $anchor): string => mb_strtolower((string) $anchor))->flip()->all()
+            : [];
+
         foreach ($items as $item) {
             $type = $item->link_type instanceof MenuItemLinkType ? $item->link_type : MenuItemLinkType::tryFrom((string) $item->link_type);
             $id = (int) $item->getKey();
@@ -221,7 +226,7 @@ final class MenuController extends Controller
                 MenuItemLinkType::Url => blank($item->url) ? 'no address entered' : null,
                 MenuItemLinkType::SectionAnchor => blank($item->anchor)
                     ? 'no section chosen'
-                    : (WebsiteSection::query()->where('anchor', ltrim((string) $item->anchor, '#'))->exists() ? null : 'no section uses this anchor'),
+                    : (isset($anchored[mb_strtolower(ltrim((string) $item->anchor, '#'))]) ? null : 'no section uses this anchor'),
                 MenuItemLinkType::None => null,
                 null => 'unknown link type',
             };

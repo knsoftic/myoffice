@@ -99,6 +99,12 @@ final class SeoService
 
     private const MODULE = 'seo';
 
+    /** Every route a `route:` SEO target may name belongs to the public site. */
+    private const PUBLIC_ROUTE_PREFIX = 'site.';
+
+    /** `site.*` routes that are not pages of their own: crawler files and the `/{slug}` catch-all. */
+    private const NON_TARGET_ROUTES = ['site.robots', 'site.sitemap', 'site.sitemap.chunk', 'site.page'];
+
     private const ROUTE_KEY_PATTERN = '/^[A-Za-z0-9_.\-]{1,100}$/';
 
     private const SITEMAP_JOB = 'App\\Jobs\\Cms\\RegenerateSitemap';
@@ -485,6 +491,12 @@ final class SeoService
                 continue;
             }
 
+            // §6.5 "anything behind auth is excluded with no exception": only the public site's own
+            // parameterless pages, whatever route key a row was stored under.
+            if (! $this->isPublicRouteKey($name)) {
+                continue;
+            }
+
             $path = $this->routePath($name);
 
             if ($path === null) {
@@ -503,6 +515,30 @@ final class SeoService
         }
 
         return $entries->unique(static fn (SitemapEntry $entry): string => $entry->loc)->values();
+    }
+
+    /**
+     * May a route name carry SEO of its own (the SEO manager's `route:` targets) and appear in the sitemap?
+     * Only a page of the public site: a `site.*` name, never a preview, feed or the `/{slug}` catch-all
+     * (pages are `page:` targets), and — once the route is registered — a GET route with no parameters,
+     * so it has exactly one public URL. A `site.*` name a later phase has not registered yet is accepted
+     * (its row simply contributes nothing until the route exists); an admin, portal or auth route never is.
+     */
+    public function isPublicRouteKey(string $name): bool
+    {
+        if (! str_starts_with($name, self::PUBLIC_ROUTE_PREFIX)
+            || str_starts_with($name, 'site.preview.')
+            || in_array($name, self::NON_TARGET_ROUTES, true)) {
+            return false;
+        }
+
+        $route = $this->router->getRoutes()->getByName($name);
+
+        if ($route === null) {
+            return true;
+        }
+
+        return in_array('GET', $route->methods(), true) && $route->parameterNames() === [];
     }
 
     /**

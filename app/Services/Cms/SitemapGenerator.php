@@ -25,7 +25,8 @@ use Throwable;
  *   generate()    the XML — a `<urlset>`, or above 40 000 URLs a `<sitemapindex>` of `/sitemap-{n}.xml`
  *   cached()      `generate()` behind the version-stamped cache (24 h); what the public route serves
  *   regenerate()  rebuild now, refresh the cache and append a `sitemap_generations` row either way
- *   extend()      register a URL provider when `App\Support\SitemapRegistry` is not available
+ *   extend()      register a URL provider directly (later phases use `App\Support\SitemapRegistry::register()`,
+ *                 which this class reads too)
  *
  * Invariants:
  *
@@ -50,7 +51,7 @@ final class SitemapGenerator
     /** @var list<string> */
     public const TRIGGERS = ['manual', 'publish', 'scheduled'];
 
-    /** The contract's registry (§6.5), read when a later phase has shipped it. */
+    /** The contract's registry (§6.5), `App\Support\SitemapRegistry`. */
     private const REGISTRY = 'App\\Support\\SitemapRegistry';
 
     /** @var array<string, object> */
@@ -184,6 +185,17 @@ final class SitemapGenerator
                 return $xml;
             }
 
+            // A chunk number that cannot exist is answered from the cached file count, never by building
+            // the whole URL set again: `/sitemap-2.xml` … `/sitemap-999999.xml` are anonymous, uncached
+            // 404s, and each would otherwise re-query every page and provider.
+            if ($chunk !== null) {
+                $chunks = $this->cachedChunkCount();
+
+                if ($chunks === 1 || $chunk < 1 || $chunk > $chunks) {
+                    return null;
+                }
+            }
+
             $xml = $this->generate($chunk);
 
             if ($xml !== null) {
@@ -232,6 +244,8 @@ final class SitemapGenerator
 
                     $this->cache->put($this->cacheKey($chunk), $xml, self::CACHE_SECONDS);
                 }
+
+                $this->cache->put($this->chunkCountKey(), $this->chunkCount($urls), self::CACHE_SECONDS);
             }
 
             if ($this->failures !== []) {
@@ -278,6 +292,29 @@ final class SitemapGenerator
     private function cacheKey(?int $chunk): string
     {
         return $this->version->key('sitemap', [$chunk ?? 'index']);
+    }
+
+    private function chunkCountKey(): string
+    {
+        return $this->version->key('sitemap', ['chunks']);
+    }
+
+    /**
+     * How many chunk files the current URL set has, built at most once per cache version.
+     */
+    private function cachedChunkCount(): int
+    {
+        $key = $this->chunkCountKey();
+        $stored = $this->cache->get($key);
+
+        if (is_int($stored) || (is_string($stored) && ctype_digit($stored))) {
+            return max(1, (int) $stored);
+        }
+
+        $count = $this->chunkCount();
+        $this->cache->put($key, $count, self::CACHE_SECONDS);
+
+        return $count;
     }
 
     /**

@@ -202,7 +202,7 @@ final class PageLifecycleTest extends TestCase
         $this->assertNull($this->sectionRow($section)->cta_block_id, 'cta_block_id is nulled on delete.');
 
         $this->bumpPublicCache('FT-12 raw delete');
-        $this->get('/')->assertOk();
+        $this->get('/')->assertOk()->assertDontSee('FT12 CTA Heading');
 
         $this->assertNull($this->sections()->draftPayload($section->fresh())['cta'], 'The section now resolves to no CTA.');
 

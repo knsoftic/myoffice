@@ -20,8 +20,10 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  *
  * Referenced through `website_sections.cta_block_id`, never copied (INV-3), so changing the button
  * once changes it everywhere. **Status-gated and live** — a CTA block is not snapshot-published
- * (§2.15): `draft` simply never renders. The referencing section's own snapshot freezes the resolved
- * CTA at publish time, which is what keeps a half-written CTA off a published page.
+ * (§2.15): `draft` simply never renders. The referencing section's snapshot records *which* block it
+ * published (`cta_ref`); the block itself is re-read under the public cache version on every cold render
+ * (`SnapshotBuilder::resolveLiveReferences()`), so a block set back to draft, archived or trashed leaves
+ * every page at once and an edit to a published block reaches every page at once (§9, FT-12).
  *
  * `usage_count` is a cache recomputed by `CtaBlockService::recount()`; `CtaBlockPolicy::delete()`
  * refuses while it is above zero.

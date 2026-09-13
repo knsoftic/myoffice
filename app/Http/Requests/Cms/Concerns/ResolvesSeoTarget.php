@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests\Cms\Concerns;
 
 use App\Models\Cms\Page;
+use App\Services\Cms\SeoService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 
@@ -13,8 +14,9 @@ use Illuminate\Support\Facades\Route;
  * `route:{name}` for a named route with no row of its own (`route:site.home`). The one store is
  * `seo_meta` (D23), addressed by morph or by `route_key`.
  *
- * A page target must be a live page; a route target must be a registered route or already have a
- * `seo_meta` row. Later-phase model targets are edited from their own entity forms, not from here.
+ * A page target must be a live page; a route target must be a public site page
+ * (`SeoService::isPublicRouteKey()`) that is registered or already has a `seo_meta` row. Later-phase model
+ * targets are edited from their own entity forms, not from here.
  */
 trait ResolvesSeoTarget
 {
@@ -34,6 +36,12 @@ trait ResolvesSeoTarget
 
         if ($type === 'page') {
             return Page::query()->find((int) $value);
+        }
+
+        // Only a page of the public site (`SeoService::isPublicRouteKey()`): an admin, portal or auth route
+        // saved here would default to indexable and land in the anonymous sitemap.xml (§6.5).
+        if (! app(SeoService::class)->isPublicRouteKey($value)) {
+            return null;
         }
 
         if (Route::has($value) || DB::table('seo_meta')->where('route_key', $value)->exists()) {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Events\SettingsChanged;
 use App\Models\Cms\CmsRevision;
 use App\Models\Cms\CtaBlock;
 use App\Models\Cms\Faq;
@@ -35,6 +36,7 @@ use App\Policies\ModulePolicy;
 use App\Policies\RolePolicy;
 use App\Policies\UserPolicy;
 use App\Services\Cms\CacheVersion;
+use App\Services\Cms\PublicCache;
 use App\Support\ConfigureFromSettings;
 use App\Support\Modules;
 use App\Support\SettingsRepository;
@@ -43,6 +45,7 @@ use Closure;
 use Illuminate\Auth\Access\Gate as AccessGate;
 use Illuminate\Contracts\Auth\Access\Gate as GateContract;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Throwable;
@@ -105,7 +108,18 @@ class AppServiceProvider extends ServiceProvider
         $this->registerGateRules();
         $this->registerPolicies();
         $this->registerBladeDirectives();
+        $this->registerPublicCacheInvalidation();
         $this->configureFromSettings();
+    }
+
+    /**
+     * phase-03 §6.7 / INV-8: a saved setting the public pages embed (company, contact, SEO, website,
+     * maintenance, ...) bumps the public cache version once per save, after commit. Event discovery is
+     * off (EventListenerServiceProvider), so the listener is wired here explicitly.
+     */
+    private function registerPublicCacheInvalidation(): void
+    {
+        Event::listen(SettingsChanged::class, [PublicCache::class, 'settingsChanged']);
     }
 
     /**

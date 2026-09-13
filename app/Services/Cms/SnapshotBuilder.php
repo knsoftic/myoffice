@@ -38,11 +38,21 @@ use Throwable;
  *                                  'value', 'is_live', 'media'], ...]],   // enabled only, in order
  *       'media'    => [role => media array | list of media arrays],       // MediaService::toSnapshot()
  *       'cta'      => ?array,                                             // resolved CTA block
+ *       'cta_ref'  => ?['id' => int, 'key' => ?string],                   // the block this publish referenced
  *       'menus'    => [field => ?tree],                                   // every menu_ref field
  *       'faqs'     => ?list,                                              // the faq type only
  *       'provider' => mixed,                                              // non-live provider output
  *       'built_at' => ISO-8601,
  *     ]
+ *
+ * **CTA blocks and FAQs are status-gated and live (§2.15).** They are resolved into the snapshot so the
+ * shape is complete, but the public renderer re-resolves them under the cache version stamp
+ * (`liveReferencePlan()` → `resolveLiveReferences()` → `applyLiveReferences()`): a block or question set
+ * back to draft, archived or trashed disappears from every published page on the next cold render, and
+ * an edit to a published one appears — without re-publishing the referencing sections (§9, FT-12). What
+ * the publish froze is only the *choice*: which block (`cta_ref`), which FAQ source and category (the
+ * section's `fields`), and — for the `selected` source — which questions in which order (the pivot is
+ * folded into the snapshot, §2.15).
  *
  * Invariants:
  *
@@ -61,6 +71,9 @@ use Throwable;
  */
 final class SnapshotBuilder
 {
+    /** The most questions one FAQ section shows. */
+    private const FAQ_LIMIT = 100;
+
     /** @var array<string, bool> */
     private array $tables = [];
 
@@ -94,6 +107,7 @@ final class SnapshotBuilder
             'items' => [],
             'media' => [],
             'cta' => null,
+            'cta_ref' => null,
             'menus' => [],
             'faqs' => null,
             'provider' => null,
@@ -113,6 +127,7 @@ final class SnapshotBuilder
         foreach ($fields as $name => $field) {
             if ($field['type'] === SectionRegistry::TYPE_CTA_REF) {
                 $snapshot['cta'] = $this->cta($row->cta_block_id === null ? null : (int) $row->cta_block_id);
+                $snapshot['cta_ref'] = $this->ctaReference($row->cta_block_id === null ? null : (int) $row->cta_block_id);
             }
 
             if ($field['type'] === SectionRegistry::TYPE_MENU_REF) {
@@ -326,6 +341,34 @@ final class SnapshotBuilder
             ? null
             : MediaAsset::query()->whereKey($block->background_media_id)->first();
 
+        return $this->ctaPayload($block, $background instanceof MediaAsset ? $background : null);
+    }
+
+    /**
+     * Which block the section references at publish time, whatever that block's status — so a block that
+     * was a draft when the section went live appears once it is published, and a different row that later
+     * takes the same id is never mistaken for it (the key is immutable while referenced, §6.13).
+     *
+     * @return array{id: int, key: string|null}|null
+     */
+    private function ctaReference(?int $id): ?array
+    {
+        if ($id === null) {
+            return null;
+        }
+
+        $key = CtaBlock::query()->withTrashed()->whereKey($id)->value('key');
+
+        return ['id' => $id, 'key' => is_string($key) ? $key : null];
+    }
+
+    /**
+     * A published block as the public array the `cta` partial reads.
+     *
+     * @return array<string, mixed>
+     */
+    private function ctaPayload(CtaBlock $block, ?MediaAsset $background): array
+    {
         $button = static function (?string $label, ?string $url, mixed $style, bool $newTab): ?array {
             $label = trim((string) $label);
             $url = trim((string) $url);
@@ -579,14 +622,263 @@ final class SnapshotBuilder
                 break;
         }
 
-        return $query->limit(100)->get(['f.id', 'f.question', 'f.answer'])
-            ->map(static fn (object $faq): array => [
-                'id' => (int) $faq->id,
-                'question' => (string) $faq->question,
-                'answer' => RichText::sanitize((string) $faq->answer),
-            ])
+        return $query->limit(self::FAQ_LIMIT)->get(['f.id', 'f.question', 'f.answer'])
+            ->map(fn (object $faq): array => $this->faqPayload($faq))
             ->values()
             ->all();
+    }
+
+    /**
+     * @return array{id: int, question: string, answer: string}
+     */
+    private function faqPayload(object $faq): array
+    {
+        return [
+            'id' => (int) $faq->id,
+            'question' => (string) $faq->question,
+            'answer' => RichText::sanitize((string) $faq->answer),
+        ];
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Live references (§2.15: CTA blocks and FAQs are status-gated and live)
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * What a set of published snapshots references that must be re-read live: the CTA blocks (by the id
+     * and key the publish recorded) and the FAQ sources. Sorted, so it doubles as a stable cache key.
+     * Reads nothing; null when nothing is referenced.
+     *
+     * @param  array<int|string, mixed>  $snapshots
+     * @return array{cta: array<int, string|null>, faq_categories: list<string>, faq_featured: bool, faq_ids: list<int>}|null
+     */
+    public function liveReferencePlan(array $snapshots): ?array
+    {
+        $plan = ['cta' => [], 'faq_categories' => [], 'faq_featured' => false, 'faq_ids' => []];
+
+        foreach ($snapshots as $snapshot) {
+            if (! is_array($snapshot)) {
+                continue;
+            }
+
+            $reference = $this->snapshotCtaReference($snapshot);
+
+            if ($reference !== null) {
+                $plan['cta'][$reference['id']] = $reference['key'];
+            }
+
+            if (! is_array($snapshot['faqs'] ?? null)) {
+                continue;
+            }
+
+            [$source, $category] = $this->snapshotFaqSource($snapshot);
+
+            if ($source === FaqSource::Selected) {
+                $plan['faq_ids'] = array_merge($plan['faq_ids'], $this->snapshotFaqIds($snapshot));
+            } elseif ($source === FaqSource::Featured) {
+                $plan['faq_featured'] = true;
+            } elseif ($category !== '') {
+                $plan['faq_categories'][] = $category;
+            }
+        }
+
+        ksort($plan['cta']);
+        $plan['faq_categories'] = array_values(array_unique($plan['faq_categories']));
+        sort($plan['faq_categories']);
+        $plan['faq_ids'] = array_values(array_unique($plan['faq_ids']));
+        sort($plan['faq_ids']);
+
+        if ($plan['cta'] === [] && $plan['faq_categories'] === [] && ! $plan['faq_featured'] && $plan['faq_ids'] === []) {
+            return null;
+        }
+
+        return $plan;
+    }
+
+    /**
+     * Read the plan's CTA blocks and questions as they are now — published, not trashed — in at most three
+     * queries (blocks, their background images, questions), whatever the number of sections. Returns plain
+     * arrays, so the result can be cached under the version stamp every CTA and FAQ write bumps.
+     *
+     * @param  array{cta: array<int, string|null>, faq_categories: list<string>, faq_featured: bool, faq_ids: list<int>}  $plan
+     * @return array{cta: array<int, array<string, mixed>>, faqs: list<array{id: int, question: string, answer: string, category: string|null, featured: bool}>}
+     */
+    public function resolveLiveReferences(array $plan): array
+    {
+        $resolved = ['cta' => [], 'faqs' => []];
+
+        if ($plan['cta'] !== []) {
+            $blocks = CtaBlock::query()
+                ->whereIn('id', array_keys($plan['cta']))
+                ->where('status', ContentStatus::Published->value)
+                ->get();
+
+            $backgroundIds = $blocks->pluck('background_media_id')->filter()->map(static fn (mixed $id): int => (int) $id)->unique()->values()->all();
+            $backgrounds = $backgroundIds === []
+                ? collect()
+                : MediaAsset::query()->whereIn('id', $backgroundIds)->get()->keyBy(static fn (MediaAsset $asset): int => (int) $asset->getKey());
+
+            foreach ($blocks as $block) {
+                $id = (int) $block->getKey();
+                $expectedKey = $plan['cta'][$id] ?? null;
+
+                if ($expectedKey !== null && $expectedKey !== $block->key) {
+                    continue; // not the block that was published
+                }
+
+                $background = $block->background_media_id === null ? null : $backgrounds->get((int) $block->background_media_id);
+                $resolved['cta'][$id] = $this->ctaPayload($block, $background instanceof MediaAsset ? $background : null);
+            }
+        }
+
+        if ($plan['faq_categories'] !== [] || $plan['faq_featured'] || $plan['faq_ids'] !== []) {
+            $rows = $this->db->connection()->table('faqs as f')
+                ->leftJoin('faq_categories as c', static function ($join): void {
+                    $join->on('c.id', '=', 'f.faq_category_id')->whereNull('c.deleted_at')->where('c.is_enabled', true);
+                })
+                ->whereNull('f.deleted_at')
+                ->where('f.status', ContentStatus::Published->value)
+                ->where(static function ($query) use ($plan): void {
+                    if ($plan['faq_categories'] !== []) {
+                        $query->orWhereIn('c.slug', $plan['faq_categories']);
+                    }
+
+                    if ($plan['faq_featured']) {
+                        $query->orWhere('f.is_featured', true);
+                    }
+
+                    if ($plan['faq_ids'] !== []) {
+                        $query->orWhereIn('f.id', $plan['faq_ids']);
+                    }
+                })
+                ->orderBy('f.sort_order')->orderBy('f.id')
+                ->get(['f.id', 'f.question', 'f.answer', 'f.is_featured', 'c.slug as category_slug']);
+
+            foreach ($rows as $row) {
+                $resolved['faqs'][] = $this->faqPayload($row) + [
+                    'category' => $row->category_slug === null ? null : (string) $row->category_slug,
+                    'featured' => (bool) $row->is_featured,
+                ];
+            }
+        }
+
+        return $resolved;
+    }
+
+    /**
+     * One snapshot with its `cta` and `faqs` replaced by what `resolveLiveReferences()` read: a block or
+     * question that is no longer published is simply absent, never a dangling reference.
+     *
+     * @param  array<string, mixed>  $snapshot
+     * @param  array{cta: array<int, array<string, mixed>>, faqs: list<array<string, mixed>>}  $resolved
+     * @return array<string, mixed>
+     */
+    public function applyLiveReferences(array $snapshot, array $resolved): array
+    {
+        $reference = $this->snapshotCtaReference($snapshot);
+
+        if ($reference !== null || array_key_exists('cta', $snapshot)) {
+            $snapshot['cta'] = $reference === null ? null : ($resolved['cta'][$reference['id']] ?? null);
+        }
+
+        if (! is_array($snapshot['faqs'] ?? null)) {
+            return $snapshot;
+        }
+
+        [$source, $category] = $this->snapshotFaqSource($snapshot);
+        $live = [];
+
+        if ($source === FaqSource::Selected) {
+            $byId = [];
+
+            foreach ($resolved['faqs'] as $faq) {
+                $byId[(int) $faq['id']] = $faq;
+            }
+
+            foreach ($this->snapshotFaqIds($snapshot) as $id) {
+                if (isset($byId[$id])) {
+                    $live[] = $byId[$id];
+                }
+            }
+        } else {
+            foreach ($resolved['faqs'] as $faq) {
+                $matches = $source === FaqSource::Featured
+                    ? (bool) ($faq['featured'] ?? false)
+                    : $category !== '' && ($faq['category'] ?? null) === $category;
+
+                if ($matches) {
+                    $live[] = $faq;
+                }
+            }
+        }
+
+        $snapshot['faqs'] = array_map(
+            static fn (array $faq): array => ['id' => (int) $faq['id'], 'question' => (string) $faq['question'], 'answer' => (string) $faq['answer']],
+            array_slice($live, 0, self::FAQ_LIMIT),
+        );
+
+        return $snapshot;
+    }
+
+    /**
+     * The CTA reference a snapshot records — `cta_ref`, or for a snapshot published before that key
+     * existed, the resolved block's own id and key.
+     *
+     * @param  array<string, mixed>  $snapshot
+     * @return array{id: int, key: string|null}|null
+     */
+    private function snapshotCtaReference(array $snapshot): ?array
+    {
+        $reference = $snapshot['cta_ref'] ?? null;
+
+        if (! is_array($reference)) {
+            $reference = is_array($snapshot['cta'] ?? null) ? $snapshot['cta'] : null;
+        }
+
+        $id = $reference['id'] ?? null;
+
+        if (! is_int($id) && ! (is_string($id) && ctype_digit($id))) {
+            return null;
+        }
+
+        $key = $reference['key'] ?? null;
+
+        return (int) $id > 0 ? ['id' => (int) $id, 'key' => is_string($key) && $key !== '' ? $key : null] : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $snapshot
+     * @return array{0: FaqSource, 1: string}
+     */
+    private function snapshotFaqSource(array $snapshot): array
+    {
+        $fields = is_array($snapshot['fields'] ?? null) ? $snapshot['fields'] : [];
+
+        return [
+            FaqSource::tryFrom((string) ($fields['source'] ?? '')) ?? FaqSource::Category,
+            trim((string) ($fields['faq_category_ref'] ?? '')),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $snapshot
+     * @return list<int>
+     */
+    private function snapshotFaqIds(array $snapshot): array
+    {
+        $ids = [];
+
+        foreach ((array) ($snapshot['faqs'] ?? []) as $faq) {
+            $id = is_array($faq) ? ($faq['id'] ?? null) : null;
+
+            if (is_int($id) || (is_string($id) && ctype_digit($id))) {
+                $ids[] = (int) $id;
+            }
+        }
+
+        return $ids;
     }
 
     /**

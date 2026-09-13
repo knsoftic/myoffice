@@ -17,7 +17,7 @@
       $seoCompleteness   int
       $menuItems         Collection<MenuItem>           menu items pointing at this page
       $revisionCount     int
-      $can               array{edit, changeSlug, publish, delete, duplicate, revisions, seo: bool}
+      $can               array{edit, changeLive, changeSlug, publish, delete, duplicate, revisions, seo: bool}
       $mediaLibrary      optional picker library (SectionController::mediaLibrary() shape)
 
     Writes:
@@ -36,7 +36,7 @@
     use App\Enums\Cms\ContentStatus;
     use Illuminate\Support\Facades\Route as RouteFacade;
 
-    $can = array_merge(['edit' => false, 'changeSlug' => false, 'publish' => false, 'delete' => false, 'duplicate' => false, 'revisions' => false, 'seo' => false], $can ?? []);
+    $can = array_merge(['edit' => false, 'changeLive' => false, 'changeSlug' => false, 'publish' => false, 'delete' => false, 'duplicate' => false, 'revisions' => false, 'seo' => false], $can ?? []);
     $canEdit = (bool) $can['edit'];
     $canPublish = (bool) $can['publish'];
     $canCreate = (bool) $can['duplicate'];
@@ -219,6 +219,7 @@
                 'ogAsset' => null,
                 'sectionsCount' => collect($sections ?? [])->count(),
                 'slugLocked' => ! $can['changeSlug'],
+                'liveLocked' => $canEdit && ! $can['changeLive'],
                 'readonly' => ! $canEdit,
             ])
 

@@ -265,6 +265,8 @@ verified and committed 2026-09-13
 | [x] | Suite **1350 tests / 39,156 assertions** green sequentially and in random order; HTTP smoke 171/171 |
 | [ ] | Manual browser pass (L.8: 375 / 768 / 1280 px, light and dark, focus trap) — FT-51 is asserted on the rendered HTML only (T7) |
 | [ ] | Deferred §10 pieces: the §10.1 events and `BumpPublicCacheVersion` (the services bump the cache stamp after commit instead, FT-25 asserts +1), the five §10.2 queued jobs (derivatives run synchronously after commit), four of the five §10.3 notifications, `cms:warm-cache` / `cms:prune-revisions` / `cms:check-links`, the §13.2 dashboard widgets |
+| [x] | Review round 1 closed (1 critical, 1 high, 4 medium, lows): `is_live` section providers resolved per render behind `App\Contracts\Cms\SectionDataProvider` ([D-W3-11]); CTA blocks and FAQs status-gated and live on the public page (§2.15, §9, FT-12); `pages.edit` alone cannot change a live page's live columns or edit a scheduled page ([D-W3-10]); `SettingsChanged` → `PublicCache` bump (INV-8); `SitemapRegistry` / `SitemapUrlProvider` / `PublicCache` shipped under the contract names |
+| [x] | Review-fix verification: suite **1365 tests / 39,349 assertions** green sequentially and in random order; `tests/Feature/Cms` 118 tests; HTTP smoke 212/212 on `my_office` in a rolled-back transaction; seeders converge with 0 changes (D65) |
 
 **Committed** — Phase 3 is a rollback point.
 ### [ ] PHASE 4 — Services, portfolio, blog, careers
@@ -299,6 +301,59 @@ verified and committed 2026-09-13
 ---
 
 ## 6. Change Log
+
+### 2026-09-13 — Phase 3 review round 1 fixed, verified and committed
+
+- **Critical — live section providers never ran** ([D-W3-11]). `SnapshotBuilder` skipped `is_live => true`
+  providers and nothing resolved them at render time, so every later-phase feed (services, blog, testimonials,
+  team, courses) would have shown its empty state. `ComposesSite::usableSection()` now calls the provider on
+  every render, for the published page and the draft preview, through the new
+  `App\Contracts\Cms\SectionDataProvider` interface; a provider that throws is reported and the section renders
+  its empty state. A live provider must cache itself under the version stamp.
+- **High — unpublished, archived or trashed CTA blocks and FAQs kept rendering** (§2.15, §9). **Behaviour
+  change:** CTA and FAQ content is now resolved when the page renders — one cached lookup under the version stamp
+  that every CTA / FAQ write bumps. The published snapshot keeps only the *choice*: the new `cta_ref` key (id +
+  key), the FAQ source and category, and the selected question ids. A draft, archived or trashed block or
+  question leaves every page at once, a disabled FAQ category takes its questions with it, and an edit appears
+  without re-publishing the section. The cold seeded home page sits at exactly the FT-27 budget of 8 queries.
+- **Medium fixes**:
+  - [D-W3-10] **Behaviour change:** `pages.edit` without `pages.change_status` gets a 422 on a live page's
+    title, layout, excerpt, banner and template, a 403 on its slug (a system page keeps its existing 422), and a
+    403 on any edit to a scheduled page. Enforced in `PageService::saveDraft()`, `PagePolicy`
+    (`changeLiveAttributes`) and the editor form (lock notice, read-only live fields); the body is still saved
+    as a draft.
+  - INV-8: `SettingsService` fires the new `App\Events\SettingsChanged` (keys only, never values) once per
+    save; `PublicCache::settingsChanged()` bumps the page cache when a group the site shows changed.
+  - §6.5: SEO `route:` targets and the sitemap accept only public, parameterless `site.*` GET routes
+    (`SeoService::isPublicRouteKey()`), so no admin, auth or preview URL can reach the anonymous sitemap.
+  - §7.6 / §9: preview and the maintenance bypass need an active account with no password change owed
+    (`EnsureUserIsActive::permits()`, side-effect free); the preview routes load the row only after the
+    signature or permission passed, so a missing id answers exactly like an existing one.
+- **Low fixes**: `/sitemap-{n}.xml` for a chunk that cannot exist is answered from a cached chunk count and
+  never rebuilds the URL set; re-uploading the bytes of a trashed media asset needs `website_media.restore`
+  and filling its empty descriptions needs `website_media.edit`; the menu link check reads section anchors in
+  one query; `cms:verify-published-snapshots` also checks every published media file exists on disk and writes
+  `Log::critical` when it fails.
+- **Contract names now in code** (the review found them missing): `App\Support\SitemapRegistry`
+  (`register()` requires a `SitemapUrlProvider`; `pages` / `static` keys are reserved),
+  `App\Contracts\Cms\SitemapUrlProvider`, `App\Services\Cms\PublicCache` (a front over `CacheVersion`).
+  Remaining contract-name → code map: `WebsiteSectionRegistry` = `App\Support\Cms\SectionRegistry`,
+  `WebsiteSectionService` = `SectionService`, `SitemapService` = `SitemapGenerator`, `MenuService::tree()` =
+  `SnapshotBuilder::menuTree` + `MenuService::resolveUrl`, `PublicPageService` / `SitePayload` =
+  `ComposesSite` / `RendersPages` and the `$site` object, `x-cms.*` components = `admin/cms/partials/*`; no
+  `BumpPublicCacheVersion` listener exists (services bump `CacheVersion` themselves).
+- **Two edits outside the CMS folders**: `SettingsService` dispatches `SettingsChanged`; `EnsureUserIsActive`
+  gains the static `permits()`.
+- **For the Phase 4 integrator**: phase-04-integration §4.7 (live providers in `ComposesSite`) is already done
+  — skip it. Live providers read their options from `published_content['fields']`, not the top level that
+  `MarketingSectionProvider::options()` reads.
+- **Tests added**: `Cms/Behaviour/LiveReferencesAndProvidersTest` (4), `PageLiveColumnsTest` (2),
+  `PublicSiteHardeningTest` (9), with two fixture providers under `Cms/Behaviour/Fixtures`. **Test changed**:
+  `PageLifecycleTest::test_deleting_a_referenced_entity_cannot_orphan_json` (FT-12) now also asserts the hard-deleted
+  CTA heading is absent from the public page — strengthened, nothing loosened.
+- **Dev database** `my_office`: backed up (`mysqldump`), forward `migrate` had nothing to run; Module,
+  Permission, Role, Setting and WebsiteCms seeders re-run with 0 created / 0 updated / 0 grants added; settings
+  (178 rows), module `is_enabled` (82) and role grants (2,520) byte-identical before and after (D65).
 
 ### 2026-09-13 — Phase 3 (public website CMS) verified and committed
 
@@ -564,6 +619,13 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-13 | Phase 3 full suite, random order | `php artisan test --order-by=random` on the same tree | PASS — **1350 tests / 39,156 assertions**, 799 s |
 | 2026-09-13 | Phase 3 full suite in the shared working tree | `php artisan test --order-by=random` with unit 04's files present | 1 failed / 1349 passed — only T23 (unit 04 reads two undeclared `website.*` keys) |
 | 2026-09-13 | Phase 3 HTTP smoke | probe through the real HTTP kernel on `my_office` inside a rolled-back transaction | PASS — 171/171: 24 admin CMS screens 200 for Super Admin, 403 for Accountant, Student and Client, 302 for a guest; public pages, sitemap and generated robots.txt 200; `/register` 404; unsigned preview 404, forged 403; a draft heading never reaches a guest, Student, Client or Accountant (live, `?preview=1`, preview route) but does reach a Super Admin preview (`no-store`); every panel still reaches only its own dashboard; row counts identical after rollback |
+| 2026-09-13 | Phase 3 review-fix forward migrate + seed convergence (D65) | backup; `php artisan migrate`; Module / Permission / Role / Setting / WebsiteCms seeders on `my_office`; before/after SQL snapshot compared byte for byte | PASS — nothing to migrate; 82 modules / 812 permissions / 18 roles, 0 created, 0 updated, 0 grants added, none revoked; settings (178), module `is_enabled` (82) and role grants (2,520) identical |
+| 2026-09-13 | Phase 3 review-fix routes, build, lint | `route:list`; `npm run build`; `php -l` + `pint --test` on the 29 changed PHP files | PASS — 151 routes (78 `admin.website.*`, 7 `site.*`), no duplicate names; build OK; lint and pint clean |
+| 2026-09-13 | Phase 3 review-fix acceptance | `tests/Feature/Cms` inside the full run | PASS — 118 tests / 5,808 assertions; FT-01 … FT-51 + FT-36b each mapped to a passing test; 15 new review-regression tests |
+| 2026-09-13 | Phase 3 review-fix full suite, sequential | `php artisan test` on the commit tree (a copy without unit 04's untracked files, T23) | PASS — **1365 tests / 39,349 assertions**, 973 s |
+| 2026-09-13 | Phase 3 review-fix full suite, random order | `php artisan test --order-by=random` on the same tree | PASS — **1365 tests / 39,349 assertions**, 1109 s, seed 1789315968 |
+| 2026-09-13 | T23 / T33 in the shared working tree | `php artisan test --filter=SettingsSplitTruthRegressionTest` with unit 04's files present | 1 failed / 7 passed — only unit 04's undeclared `website.contact_budget_options` / `website.testimonial_auto_approve` reads |
+| 2026-09-13 | Phase 3 review-fix HTTP smoke | probe through the real HTTP kernel on `my_office` inside a rolled-back transaction (commit tree) | PASS — 212/212: 24 admin CMS screens 200 for Super Admin, 403 for Accountant / Student / Client, 302 for a guest; public pages, sitemap and robots.txt 200; impossible sitemap chunks 404; preview answers 404 / 403 identically for an existing and a missing id; a draft never reaches a guest, Student, Client, Accountant, a suspended Super Admin or one owing a password change; a CTA set to draft and a FAQ set to draft leave `/`, a CTA edit reaches `/` without re-publishing; the SEO Expert gets 422 on a live page's title / excerpt, 403 on a non-system live slug, and saves the body as a draft the guest never sees; SEO targets `route:admin.dashboard` / `route:login` / `route:site.page` 422; panels reach only their own dashboards; row counts and CMS row fingerprints identical after rollback |
 
 ---
 
@@ -611,6 +673,15 @@ data, all with a named fix:
 | T27 | Media URLs inside published snapshots are absolute (`APP_URL`); menu links are root-relative (K-8, M-10). | low | Set `APP_URL` correctly before the first image is published on a real host. The seeded snapshots carry no absolute URL (L.7 check = 0). |
 | T28 | Contract gaps shipped as known omissions: no `menus.store` (the `mobile` slot cannot be created, G-1); FAQ categories toggle through `PUT` (G-2); robots.txt text is edited on the SEO settings tab under `settings.edit` (G-3); a signed preview link answers 503 while the site is closed because preview routes carry `site` (M-26). | low | Integration F.6 / M-22. |
 | T29 | "Live" hero statistics are frozen inside the cached page for `website.cache_ttl_minutes` (1440) (M-17). | low | A number can be a day old; a publish flushes it. |
+
+**Recorded by the Phase 3 review-fix verification (2026-09-13)**:
+
+| # | Item | Severity | Note |
+|---|---|---|---|
+| T30 | **A public page whose body contains the session CSRF token is never cached** (`CachePublicResponse`, R-4). The seeded home page is cacheable only because it holds no form; FT-24 fails if that stops being true. | med | Rule for later phases: a form on a cached public page (Phase 4 contact, Phase 15 admission) must fetch its token after load or post to a route outside `site.cache` — never render `@csrf` into a page meant to be cached, or that page silently stops caching. Not yet mirrored into `CLAUDE.md`. |
+| T31 | `website_media.restore` is not declared in `PermissionRegistry`, so only a Super Admin can bring a trashed asset back by re-uploading its bytes (the same gate as `MediaPolicy::restore`, T24). | low | Declare `restore` for `website_media` when a restore screen is added. |
+| T32 | The cold seeded home page is at exactly the FT-27 budget of 8 queries after CTA / FAQ references became live. | low | No headroom: the next query a Phase 3 render path adds fails FT-27. Later phases' live providers must cache under the version stamp. |
+| T33 | T23 still applies to the shared working tree: unit 04's untracked `ContactController`, `PublicContactRequest` and `ModeratedContentController` read undeclared `website.*` keys, so `SettingsSplitTruthRegressionTest` is red there. | med | The review-fix suite was therefore run on a copy of the commit tree without unit 04's files, as for the Phase 3 commit. |
 
 **Build-time items from the contract audit (BT-1 … BT-10)** — the documentation convergence is **closed** after
 three rounds ([`docs/design/consistency-audit-final.md`](docs/design/consistency-audit-final.md): all RD items

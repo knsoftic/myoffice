@@ -58,7 +58,9 @@ final class EnsurePublicSiteAvailable
             return $next($request);
         }
 
-        if ($request->user()?->can(self::BYPASS_PERMISSION) === true) {
+        // The permission, held by an account in good standing: public routes carry no `active`
+        // middleware, so a suspended account or one owing a password change is a visitor here too.
+        if (EnsureUserIsActive::permits($request->user(), self::BYPASS_PERMISSION)) {
             $request->attributes->set('site_state', $state);
 
             $response = $next($request);

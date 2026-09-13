@@ -169,6 +169,7 @@ final class PageController extends Controller
                 ->count(),
             'can' => [
                 'edit' => $user->can('update', $page),
+                'changeLive' => $user->can('changeLiveAttributes', $page),
                 'changeSlug' => $user->can('changeSlug', $page),
                 'publish' => $user->can('publish', $page),
                 'delete' => $user->can('delete', $page),

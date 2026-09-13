@@ -8,6 +8,7 @@ use App\Enums\Cms\SectionPlacement;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Site\Concerns\ComposesSite;
 use App\Http\Controllers\Site\Concerns\RendersPages;
+use App\Http\Middleware\EnsureUserIsActive;
 use App\Models\Cms\Page;
 use App\Models\Cms\WebsiteSection;
 use App\Services\Cms\SeoService;
@@ -38,9 +39,17 @@ final class PreviewController extends Controller
         private readonly SeoService $seo,
     ) {}
 
-    public function page(Request $request, Page $page): Response
+    /**
+     * The id arrives as a plain number and the row is loaded only after the signature or the permission
+     * has passed, so an unauthorised request is answered the same way whether or not the id exists — a
+     * draft cannot be discovered by counting (§9).
+     */
+    public function page(Request $request, string $id): Response
     {
         $this->authorisePreview($request, 'pages.view');
+
+        /** @var Page $page */
+        $page = Page::query()->findOrFail((int) $id);
 
         return $this->renderPage($page, draft: true);
     }
@@ -49,9 +58,12 @@ final class PreviewController extends Controller
      * One section's draft in its frame: a header or footer draft replaces the live one; any other
      * section renders alone between the live header and footer (the editor's preview pane, §8.5).
      */
-    public function section(Request $request, WebsiteSection $section): Response
+    public function section(Request $request, string $id): Response
     {
         $this->authorisePreview($request, 'website_sections.view');
+
+        /** @var WebsiteSection $section */
+        $section = WebsiteSection::query()->findOrFail((int) $id);
 
         $draft = $this->draftSection($section);
         $chrome = $this->chrome();
@@ -81,8 +93,8 @@ final class PreviewController extends Controller
     }
 
     /**
-     * A valid signature, or a user holding the permission. Otherwise 403 for a bad signature, 404 for
-     * none.
+     * A valid signature, or an active user in good standing holding the permission (§7.6 `auth` +
+     * `active` + `can:`). Otherwise 403 for a bad signature, 404 for none.
      */
     private function authorisePreview(Request $request, string $permission): void
     {
@@ -90,7 +102,7 @@ final class PreviewController extends Controller
             return;
         }
 
-        if ($request->user()?->can($permission) === true) {
+        if (EnsureUserIsActive::permits($request->user(), $permission)) {
             return;
         }
 

@@ -69,6 +69,30 @@ final class EnsureUserIsActive
     /** Shown when the password is older than `security.force_password_change_days`. */
     private const EXPIRED_MESSAGE = 'Your password has expired. Choose a new one to continue.';
 
+    /**
+     * The same standing `handle()` enforces, as a side-effect-free yes/no, followed by the permission —
+     * for a route that cannot carry `active` because anonymous visitors use it too (the public site's
+     * draft preview and maintenance bypass, phase-03 §6.10 / §7.6). A non-Active account, a pending forced
+     * password change or an expired password is refused; nobody is logged out or redirected from here.
+     */
+    public static function permits(mixed $user, string $permission): bool
+    {
+        if (! $user instanceof User) {
+            return false;
+        }
+
+        $middleware = app(self::class);
+        $status = $middleware->statusOf($user);
+
+        if (($status !== null && ! $status->canLogin())
+            || (bool) ($user->must_change_password ?? false)
+            || $middleware->passwordHasExpired($user)) {
+            return false;
+        }
+
+        return $user->can($permission);
+    }
+
     public function handle(Request $request, Closure $next): Response
     {
         $user = $request->user();
