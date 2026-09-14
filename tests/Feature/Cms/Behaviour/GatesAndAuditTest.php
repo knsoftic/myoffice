@@ -9,14 +9,20 @@ use App\Models\Activity;
 use App\Models\Cms\CmsRevision;
 use App\Models\User;
 use App\Support\Exceptions\NonPublicSettingException;
+use App\Support\SettingsRegistry;
+use Closure;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Routing\Route as RouteDefinition;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
+use ReflectionProperty;
 use Tests\Feature\Cms\Behaviour\Concerns\CmsBehaviourFixtures;
 use Tests\Feature\Concerns\InteractsWithRbac;
 use Tests\TestCase;
+use Throwable;
 
 /**
  * phase-03 §11.9 — the gating, settings-isolation and audit rows that are about behaviour and data rather
@@ -167,6 +173,114 @@ final class GatesAndAuditTest extends TestCase
         }
     }
 
+    /**
+     * FT-42, review round 2 — the throw is only a guard while nothing swallows it. A site view that wraps
+     * site_setting() in rescue() turns a wrongly flagged key into its default plus a log line, and the loud
+     * failure INV-10 and §13.2 ask for ("a white screen, not a silent leak") never happens. So no public view
+     * rescues the helper, and a key the registry stops marking public:
+     *
+     *   · fails the render of the page when the shared layout or the 503 holding page reads it;
+     *   · takes its section off the page when a section partial reads it — a throwing partial is isolated,
+     *     omitted and logged ([D-W3-11]) — and is never rendered with its default.
+     */
+    public function test_a_site_view_reading_a_non_public_setting_fails_the_render(): void
+    {
+        $offenders = [];
+
+        foreach (['views/site', 'views/components/site'] as $root) {
+            foreach (File::allFiles(resource_path($root)) as $file) {
+                $source = (string) file_get_contents($file->getPathname());
+
+                if (preg_match('/rescue\s*\(\s*(?:static\s+)?(?:fn|function)\b[^;]*?\bsite_setting\s*\(/s', $source) === 1) {
+                    $offenders[] = $root.'/'.str_replace('\\', '/', $file->getRelativePathname());
+                }
+            }
+        }
+
+        $this->assertSame([], $offenders, 'A site view rescues site_setting(), hiding a non-public key: '.implode(', ', $offenders));
+
+        $this->publishHeroHeading('FT42 Loud Hero');
+        $this->assertNotNull($this->snapshotOf($this->seededSection('about')), 'The seeded about section is published.');
+
+        // Layout reads (each a rescued read before this fix): the whole render fails.
+        foreach ([
+            'appearance.default_theme' => 'site/partials/theme-script (every page)',
+            'seo.google_site_verification' => 'components/site/seo (every page)',
+            'website.show_theme_toggle' => 'site/sections/header and components/site/theme-toggle',
+        ] as $key => $where) {
+            $this->withKeyNotPublic($key, function () use ($key, $where): void {
+                $this->withoutExceptionHandling();
+                $caught = null;
+
+                try {
+                    $this->get('/');
+                } catch (Throwable $exception) {
+                    $caught = $exception;
+                } finally {
+                    $this->withExceptionHandling();
+                }
+
+                $this->assertTrue($this->chainHas($caught, NonPublicSettingException::class), sprintf(
+                    'A render reading %s after it stopped being public must fail loudly (%s); it %s.',
+                    $key,
+                    $where,
+                    $caught === null ? 'rendered with a default instead' : 'failed with '.$caught::class.': '.$caught->getMessage(),
+                ));
+            });
+        }
+
+        // Section reads (each a rescued read before this fix): the section is omitted and logged, never
+        // rendered with the default.
+        $logged = [];
+
+        Event::listen(MessageLogged::class, static function (MessageLogged $event) use (&$logged): void {
+            $logged[] = $event;
+        });
+
+        foreach (['website.hero_video_enabled' => 'hero', 'website.image_lazy_loading' => 'about'] as $key => $section) {
+            $logged = [];
+
+            $this->withKeyNotPublic($key, function () use ($section): void {
+                $response = $this->get('/')->assertOk();
+
+                if ($section === 'hero') {
+                    $response->assertDontSee('FT42 Loud Hero');
+                }
+            });
+
+            // The log names Blade's ViewException; the NonPublicSettingException message it wraps names the key.
+            $omitted = array_filter($logged, static fn (MessageLogged $event): bool => $event->level === 'warning'
+                && ($event->context['section_key'] ?? null) === $section
+                && str_contains((string) ($event->context['exception'] ?? ''), NonPublicSettingException::forKey($key)->getMessage()));
+
+            $this->assertNotSame([], $omitted, sprintf('Reading %s after it stopped being public must take the %s section off the page, logged; logged: %s', $key, $section, json_encode(array_map(static fn (MessageLogged $event): array => [$event->level, $event->message, $event->context], $logged))));
+        }
+
+        // The 503 holding page reads defensively, but never past INV-10.
+        $this->setSetting('maintenance.maintenance_mode', true);
+
+        $this->withKeyNotPublic('contact.email', function (): void {
+            $this->withoutExceptionHandling();
+            $caught = null;
+
+            try {
+                $this->get('/');
+            } catch (Throwable $exception) {
+                $caught = $exception;
+            } finally {
+                $this->withExceptionHandling();
+            }
+
+            $this->assertTrue($this->chainHas($caught, NonPublicSettingException::class), 'The holding page must fail loudly on a non-public key, not print its default.');
+        });
+
+        $this->setSetting('maintenance.maintenance_mode', false);
+
+        // With the registry intact the same page renders, hero included.
+        $this->bumpPublicCache('FT-42 registry restored');
+        $this->get('/')->assertOk()->assertSee('FT42 Loud Hero');
+    }
+
     /** FT-43 */
     public function test_every_cms_write_is_audited(): void
     {
@@ -299,6 +413,47 @@ final class GatesAndAuditTest extends TestCase
         $this->assertNoLeak((string) $holding->getContent());
 
         $this->actingAs($admin)->get('/admin')->assertOk();
+    }
+
+    /**
+     * Run `$render` as a guest, on a fresh cache version, while the registry says `$key` is not public (the
+     * mis-flagged key FT-42 guards against). The registry's normalised definitions are restored whatever
+     * happens.
+     */
+    private function withKeyNotPublic(string $key, Closure $render): void
+    {
+        [$group, $name] = explode('.', $key, 2);
+
+        $this->assertTrue(SettingsRegistry::field($key)['public'] ?? false, $key.' starts out public.');
+
+        $property = new ReflectionProperty(SettingsRegistry::class, 'normalised');
+        $original = SettingsRegistry::all();
+        $flipped = $original;
+        $flipped[$group][$name]['public'] = false;
+
+        $this->bumpPublicCache('FT-42 '.$key.' no longer public');
+        $this->becomeGuest();
+        $property->setValue(null, $flipped);
+
+        try {
+            $render();
+        } finally {
+            $property->setValue(null, $original);
+        }
+    }
+
+    /**
+     * Whether `$exception`, or any exception it wraps (Blade wraps a view's in a ViewException), is a `$class`.
+     */
+    private function chainHas(?Throwable $exception, string $class): bool
+    {
+        for ($current = $exception; $current !== null; $current = $current->getPrevious()) {
+            if ($current instanceof $class) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

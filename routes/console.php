@@ -6,7 +6,9 @@ use App\Services\Cms\ContentPublisher;
 use App\Services\Cms\MediaService;
 use App\Services\Cms\SitemapGenerator;
 use Illuminate\Foundation\Inspiring;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schedule;
 
@@ -41,6 +43,38 @@ Artisan::command('cms:media-recount', function (MediaService $media) {
     $this->info('Media usage counts refreshed.');
 })->purpose('Recount media_assets.usage_count from every reference (phase-03 §10.4)');
 
+/*
+| The page cache's garbage collector (review round 2, phase-03 §6.7 / D22). A publish never deletes the
+| pages it invalidates, and Laravel's database store only removes an expired row when that same key is
+| read again — which an orphaned page never is. Without this the `cache` table grows forever. Only rows
+| that have already expired are removed; the version stamp and anything stored `forever` are untouched,
+| and a store that expires entries itself (redis, file, array) has nothing to prune.
+*/
+Artisan::command('cms:cache-prune {--chunk=1000 : rows deleted per statement}', function () {
+    $store = (string) config('cache.default');
+    $config = (array) config('cache.stores.'.$store, []);
+
+    if (($config['driver'] ?? null) !== 'database') {
+        $this->info(sprintf('The [%s] cache store expires its own entries: nothing to prune.', $store));
+
+        return 0;
+    }
+
+    $chunk = max(1, min(10_000, (int) $this->option('chunk')));
+    $now = Carbon::now()->getTimestamp();
+    $table = DB::connection($config['connection'] ?? null)->table((string) ($config['table'] ?? 'cache'));
+    $deleted = 0;
+
+    do {
+        $batch = (clone $table)->where('expiration', '<=', $now)->limit($chunk)->delete();
+        $deleted += $batch;
+    } while ($batch === $chunk);
+
+    $this->info(sprintf('%d expired cache row(s) pruned.', $deleted));
+
+    return 0;
+})->purpose('Delete expired rows from the database cache store, orphaned public pages included (phase-03 §6.7)');
+
 Artisan::command('cms:verify-published-snapshots', function (ContentPublisher $publisher) {
     $problems = [];
 
@@ -73,3 +107,4 @@ Schedule::command('cms:publish-scheduled')->everyFiveMinutes()->withoutOverlappi
 Schedule::command('cms:sitemap-generate')->dailyAt('02:30')->withoutOverlapping();
 Schedule::command('cms:media-recount')->dailyAt('04:00')->withoutOverlapping();
 Schedule::command('cms:verify-published-snapshots')->dailyAt('04:30');
+Schedule::command('cms:cache-prune')->hourly()->withoutOverlapping();

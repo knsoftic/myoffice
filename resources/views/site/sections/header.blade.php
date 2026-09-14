@@ -72,7 +72,7 @@
         ->take(3)
         ->values();
 
-    $themeToggle = filter_var(rescue(static fn () => site_setting('website.show_theme_toggle', true), true), FILTER_VALIDATE_BOOLEAN);
+    $themeToggle = filter_var(site_setting('website.show_theme_toggle', true), FILTER_VALIDATE_BOOLEAN);
 
     $hasDrawer = $hasSection && (filled(data_get($navigation, 'items')) || $drawerButtons !== [] || $topLinks->isNotEmpty());
 

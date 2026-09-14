@@ -53,6 +53,13 @@ final class MenuItemController extends Controller
         $this->authorize('menus.edit');
         $this->authorize('update', $item);
 
+        // Switching a link on or off is `menus.change_status` (the toggle route's gate), whichever route
+        // carries it: the editor posts the current state back, so only an actual change needs the right.
+        if ($request->has('is_enabled') && $request->boolean('is_enabled') !== (bool) $item->is_enabled) {
+            $this->authorize('menus.change_status');
+            $this->authorize('toggle', $item);
+        }
+
         return $this->attempt($request, function () use ($request, $item): Response {
             $item = $this->menus->updateItem($item, $request->menuItemPayload());
 

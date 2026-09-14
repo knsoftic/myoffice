@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Cms;
 
+use App\Events\ModuleStateChanged;
 use App\Events\SettingsChanged;
 use App\Support\SettingsRegistry;
 use Closure;
@@ -100,5 +101,22 @@ final class PublicCache
         }
 
         $this->version->bumpAfterCommit(sprintf('Settings changed: %s', implode(', ', array_slice($visible, 0, 10))));
+    }
+
+    /**
+     * The `ModuleStateChanged` listener: one bump per module whose switch actually moved (the event fires
+     * once per moved module, after the commit). What a public page shows depends on `Modules::enabled()` —
+     * a statistic resolves to null when its module is off (INV-12), a content module's strip and routes
+     * disappear (D26) — so a stored page, statistics block or sitemap must not outlive the switch by up
+     * to `website.cache_ttl_minutes`. Any module, because a later phase's public output may depend on one
+     * this class cannot name.
+     */
+    public function moduleChanged(ModuleStateChanged $event): void
+    {
+        $this->version->bumpAfterCommit(sprintf(
+            'Module %s %s',
+            $event->slug(),
+            $event->wasEnabled() ? 'enabled' : 'disabled',
+        ));
     }
 }

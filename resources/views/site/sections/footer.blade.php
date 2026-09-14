@@ -18,7 +18,8 @@
     Contact block (Phase 2 `contact.*`): address with city and country, phone, WhatsApp, email and the
     business hours, each only when set. Business hours are wall-clock "HH:MM" strings, not timestamps,
     so they are printed as entered (never shifted through a timezone) and consecutive days with the same
-    hours are grouped ("Mon–Fri 09:00–18:00").
+    hours are grouped ("Mon–Fri 09:00–18:00"). Below it, `contact.map_embed` through RichText::sanitize()
+    (§8.14, §12.2 Q3) — only an allowlisted map iframe ever renders.
 
     Copyright: `copyright_override`, else `company.copyright_text`, else "© {year} {company}";
     `{year}` (and `{company}`) are interpolated, the year through app_date() in the display timezone.
@@ -103,7 +104,20 @@
         }
     }
 
-    $hasContact = $showContact && ($address !== '' || $phone !== '' || $whatsappHref !== null || $email !== '' || $hoursRows !== []);
+    // §8.14 / §12.2 Q3: the map embed, only through the sanitiser (its iframe allowlist admits
+    // www.google.com/maps/embed and nothing else). The setting holds "the embed URL or iframe": a bare
+    // https URL is wrapped in an iframe first, with the URL escaped, and the sanitiser still decides. Sanitised
+    // here as well as in <x-site.prose> so a refused embed leaves no empty map box behind.
+    $mapEmbed = trim((string) site_setting('contact.map_embed', ''));
+
+    if ($mapEmbed !== '' && preg_match('~^https://\S+$~i', $mapEmbed) === 1) {
+        $mapEmbed = '<iframe src="'.e($mapEmbed).'" title="'.e(($companyName !== '' ? $companyName.' ' : '').'location map').'"></iframe>';
+    }
+
+    $mapEmbed = $mapEmbed !== '' ? \App\Support\RichText::sanitize($mapEmbed) : '';
+    $hasMap = $showContact && str_contains($mapEmbed, '<iframe');
+
+    $hasContact = $showContact && ($address !== '' || $phone !== '' || $whatsappHref !== null || $email !== '' || $hoursRows !== [] || $hasMap);
 
     // Badges: repeater items first, then the two fixed badge slots.
     $badges = collect(data_get($items ?? [], 'link', []))
@@ -251,6 +265,10 @@
                                     </div>
                                 @endif
                             </address>
+
+                            @if ($hasMap)
+                                <x-site.prose :html="$mapEmbed" size="sm" class="mt-6 overflow-hidden rounded-xl ring-1 ring-white/10" />
+                            @endif
                         </div>
                     @endif
                 </div>

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Middleware;
 
 use App\Services\Cms\CacheVersion;
+use App\Support\Cms\PublicOrigin;
 use Closure;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Cookie\QueueingFactory as CookieJar;
@@ -29,16 +30,31 @@ use Throwable;
  * page unreachable at once (INV-8).
  *
  * **Query whitelist.** Only `page`, `category` and `ref`, each with a strict value pattern. `ref` (the §38
- * referral code) is whitelisted **and keyed**, so one visitor's `?ref=COL-1024` page is never served to a
- * visitor without it. Any other key, an array value or a value outside its pattern bypasses the cache.
+ * referral code, phase-08-09's `[A-Z0-9][A-Z0-9-]{3,31}`) is whitelisted on every cached route **and
+ * keyed**, so one visitor's `?ref=COL-1024` page is never served to a visitor without it. `page` and
+ * `category` are keyed only on a route that declares it reads them —
+ *
+ *   Route::get('blog', ...)->middleware(['site', 'site.cache:page,category']);
+ *
+ * — because on any other route they cannot change the page, and keying them there would let anyone mint a
+ * stored copy per value. Any other key, an undeclared `page` / `category`, an array value or a value
+ * outside its pattern bypasses the cache.
+ *
+ * **Storage is bounded** (review round 2). Only the application's own host (`PublicOrigin::servesHost()`:
+ * `config('app.url')` and `seo.canonical_base_url`) reads or writes the cache, so a spoofed `Host` header
+ * mints nothing; at most `MAX_QUERY_VARIANTS` query-string variants are stored per cache version (a plain
+ * path is bounded by the pages that answer 200 and is never capped); and `cms:cache-prune` deletes the
+ * expired rows the database store would otherwise keep forever.
  *
  * **Bypass** — the page renders normally, is not served from the cache, and is not stored — when:
  *
  *   · the request is not a GET (HEAD included);
+ *   · the request's host is not the public site's own (`PublicOrigin::servesHost()`);
  *   · the user is authenticated;
  *   · the request is a preview (`ResolvePreviewMode::isPreview()`, INV-9);
  *   · `website.cache_enabled` is off;
- *   · the query string carries a key outside the whitelist, or a whitelisted key with an unsafe value;
+ *   · the query string carries a key outside the whitelist, a `page` / `category` the route does not
+ *     declare, or a whitelisted key with an unsafe value;
  *   · the session holds flash data (a toast, validation errors, old input) — before or after the render;
  *   · the response is not a 200, has no string body, or says `Cache-Control: no-store`;
  *   · the response carries a `Set-Cookie`, or a cookie was queued while it rendered, other than the session
@@ -62,13 +78,22 @@ final class CachePublicResponse
 {
     /** The query keys that may reach a cached page, each with the only value shape that is keyed. */
     public const QUERY_WHITELIST = [
-        'page' => '/^[0-9]{1,6}$/',
+        'page' => '/^[1-9][0-9]{0,3}$/',
         'category' => '/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/',
-        'ref' => '/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/',
+        'ref' => '/^[A-Za-z0-9][A-Za-z0-9-]{3,31}$/',
     ];
+
+    /** Whitelisted keys that are keyed on every cached route; the others only where the route declares them. */
+    public const ALWAYS_KEYED = ['ref'];
+
+    /** Query-string variants stored per cache version, across every route; past it a variant still renders. */
+    public const MAX_QUERY_VARIANTS = 500;
 
     /** The `CacheVersion` namespace every stored page lives under. */
     public const CACHE_NAMESPACE = 'page';
+
+    /** The `CacheVersion` namespace of the per-version variant counter. */
+    public const VARIANT_COUNTER_NAMESPACE = 'page-variants';
 
     /** What a browser (or proxy) may do with a cacheable public page (§6.7). */
     public const BROWSER_CACHE_CONTROL = 'public, max-age=300';
@@ -96,9 +121,12 @@ final class CachePublicResponse
         private readonly CookieJar $cookies,
     ) {}
 
-    public function handle(Request $request, Closure $next): Response
+    /**
+     * @param  string  ...$queryKeys  the whitelisted keys beyond `ALWAYS_KEYED` this route reads (`page`, `category`)
+     */
+    public function handle(Request $request, Closure $next, string ...$queryKeys): Response
     {
-        $parts = $this->cacheableParts($request);
+        $parts = $this->cacheableParts($request, $queryKeys);
 
         if ($parts === null) {
             return $next($request);
@@ -106,6 +134,7 @@ final class CachePublicResponse
 
         // Read the stamp before rendering: see the class docblock.
         $key = $this->version->key(self::CACHE_NAMESPACE, $parts);
+        $variantCounter = $parts[4] === [] ? null : $this->version->key(self::VARIANT_COUNTER_NAMESPACE, ['count']);
 
         $stored = $this->read($key);
 
@@ -139,6 +168,7 @@ final class CachePublicResponse
 
         $request->attributes->set(self::PENDING_ATTRIBUTE, [
             'key' => $key,
+            'variant_counter' => $variantCounter,
             'seconds' => $this->ttlSeconds(),
             'payload' => [
                 'format' => self::PAYLOAD_FORMAT,
@@ -169,8 +199,14 @@ final class CachePublicResponse
             return;
         }
 
+        $seconds = max(60, (int) ($pending['seconds'] ?? 60));
+
         try {
-            $this->cache->put($pending['key'], $pending['payload'], max(60, (int) ($pending['seconds'] ?? 60)));
+            if (is_string($pending['variant_counter'] ?? null) && ! $this->claimVariantSlot($pending['variant_counter'], $seconds)) {
+                return;
+            }
+
+            $this->cache->put($pending['key'], $pending['payload'], $seconds);
         } catch (Throwable $exception) {
             report($exception);
         }
@@ -179,11 +215,17 @@ final class CachePublicResponse
     /**
      * The key parts of a request that may be served from (and stored into) the cache, or null to bypass.
      *
-     * @return list<mixed>|null
+     * @param  list<string>  $declared  the route's `site.cache:` parameters
+     * @return array{0: string, 1: string, 2: string, 3: string, 4: array<string, string>}|null
      */
-    private function cacheableParts(Request $request): ?array
+    private function cacheableParts(Request $request, array $declared): ?array
     {
         if (! $request->isMethod('GET')) {
+            return null;
+        }
+
+        // A client-chosen Host never reads or writes the shared copy: see "Storage is bounded".
+        if (! PublicOrigin::servesHost($request)) {
             return null;
         }
 
@@ -209,6 +251,10 @@ final class CachePublicResponse
             $pattern = self::QUERY_WHITELIST[$name] ?? null;
 
             if ($pattern === null || ! is_string($value) || preg_match($pattern, $value) !== 1) {
+                return null;
+            }
+
+            if (! in_array($name, self::ALWAYS_KEYED, true) && ! in_array($name, $declared, true)) {
                 return null;
             }
 
@@ -335,6 +381,19 @@ final class CachePublicResponse
         $response->isNotModified($request);
 
         return $response;
+    }
+
+    /**
+     * Count one more stored query-string variant for this cache version; false once `MAX_QUERY_VARIANTS`
+     * have been stored, so a flood of distinct `?ref=` values renders but writes nothing. The counter lives
+     * as long as the pages it counts and dies with the version, like them.
+     */
+    private function claimVariantSlot(string $counterKey, int $seconds): bool
+    {
+        $this->cache->add($counterKey, 0, $seconds);
+        $count = $this->cache->increment($counterKey);
+
+        return is_numeric($count) && (int) $count <= self::MAX_QUERY_VARIANTS;
     }
 
     private function sessionHasFlash(Request $request): bool

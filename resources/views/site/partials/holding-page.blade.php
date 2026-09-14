@@ -11,8 +11,8 @@
     Rules this page keeps, because it is what visitors and crawlers see while the site is down:
       · 503 comes from the middleware; this page says `noindex, nofollow` itself as well;
       · no header section, no navigation, no sign-in link, no stack trace, no analytics;
-      · it must render even when half the stack is unavailable — every setting is read defensively,
-        the Phase 3 helper may not be wired yet, and when the Vite build is missing the page falls back
+      · it must render even when half the stack is unavailable — every setting is read defensively
+        (except that a key which is not public still throws, INV-10), and when the Vite build is missing the page falls back
         to a small inline stylesheet instead of failing;
       · brand colour and logo still apply (the same brand palette partial as the panels), and Light /
         Dark follows the visitor's stored choice or `appearance.default_theme`.
@@ -23,9 +23,18 @@
 
     $variant = ($variant ?? 'holding') === 'maintenance' ? 'maintenance' : 'holding';
 
-    $siteSetting = static fn (string $key, mixed $default = null): mixed => function_exists('site_setting')
-        ? rescue(static fn () => site_setting($key, $default), $default)
-        : $default;
+    // Defensive against a broken stack, never against INV-10: a key that is not public still fails the render.
+    $siteSetting = static function (string $key, mixed $default = null): mixed {
+        try {
+            return site_setting($key, $default);
+        } catch (\App\Support\Exceptions\NonPublicSettingException $exception) {
+            throw $exception;
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return $default;
+        }
+    };
 
     $companyName = trim((string) ($company ?? $siteSetting('company.name', '') ?? ''));
     $pageHeading = trim((string) ($heading ?? ''));

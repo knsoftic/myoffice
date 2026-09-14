@@ -168,6 +168,49 @@ final class StatisticsTest extends TestCase
         $this->get('/')->assertOk()->assertDontSee('FT31 Years')->assertSee('FT31 Learners');
     }
 
+    /**
+     * Review round 2 (build-order F2, INV-12): a source that exists but counts **zero** — the empty table a
+     * later phase has just migrated — is not a claim the site makes. `resolve()` still reports the true
+     * count; the item falls back to its manual value, and with none it renders nothing at all.
+     */
+    public function test_a_live_count_of_zero_falls_back_like_an_unresolved_metric(): void
+    {
+        $hero = $this->heroWithoutStatistics();
+
+        // Founded this year: the metric resolves, and its honest value is zero.
+        $this->setSetting('company.founded_year', '2026');
+
+        $item = $this->sections()->upsertItem($hero, 'statistic', [
+            'label' => 'FTZ Years Running',
+            'value_mode' => 'auto',
+            'metric' => StatisticMetric::YearsExperience->value,
+            'manual_value' => null,
+            'suffix' => '+',
+        ]);
+
+        $this->publisher()->publish($hero);
+
+        $this->assertSame('0.00', $this->provider()->resolve(StatisticMetric::YearsExperience), 'The live count itself is still reported truthfully.');
+        $this->assertNull($this->provider()->valueFor($item->fresh()), 'A zero live count with no fallback resolves to nothing.');
+
+        $html = (string) $this->get('/')->assertOk()->getContent();
+        $this->assertStringNotContainsString('FTZ Years Running', $html, 'A zero statistic must not render its label.');
+        $this->assertStringNotContainsString('0+FTZYearsRunning', $this->squashedText($html));
+
+        // With a manual value the zero falls back to it, exactly as an unresolved metric does.
+        $item = $this->sections()->upsertItem($hero, 'statistic', ['manual_value' => '12'], $item);
+        $this->publisher()->publish($hero->fresh());
+
+        $this->assertSame('12.00', $this->provider()->valueFor($item->fresh()));
+        $this->assertStringContainsString('12+FTZYearsRunning', $this->squashedText((string) $this->get('/')->assertOk()->getContent()));
+
+        // A non-zero live count wins over the manual value again.
+        $this->setSetting('company.founded_year', '2019');
+
+        $this->assertSame('7.00', $this->provider()->valueFor($item->fresh()));
+        $this->assertStringContainsString('7+FTZYearsRunning', $this->squashedText((string) $this->get('/')->assertOk()->getContent()));
+    }
+
     /** FT-45 */
     public function test_disabled_statistic_item_is_excluded_from_the_published_snapshot(): void
     {

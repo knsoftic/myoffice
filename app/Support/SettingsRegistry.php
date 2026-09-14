@@ -2155,6 +2155,11 @@ final class SettingsRegistry
                 'type' => self::TYPE_BOOLEAN,
                 'rules' => ['nullable', 'boolean'],
                 'default' => true,
+                // Review round 2 (phase-03 §13.4 "an honest setting beats a lying one"): the warm-up job
+                // (§10.2 WarmPublicPageCache) has not shipped, so the switch changes nothing. Readonly
+                // until it does; then drop this flag and the "Not active yet" help.
+                'help' => 'Not active yet: pages are re-rendered by the first visitor after a publish. Publishing always clears the cache.',
+                'readonly' => true,
                 'span' => 6,
                 'sort' => 30,
             ],
@@ -2219,7 +2224,10 @@ final class SettingsRegistry
                 'type' => self::TYPE_NUMBER,
                 'rules' => ['required', 'integer', 'min:1', 'max:500'],
                 'default' => 20,
-                'help' => 'Published versions are always kept.',
+                // Review round 2 (phase-03 §13.4): revision pruning (§10.4 PruneCmsRevisions /
+                // cms:prune-revisions) has not shipped, so nothing reads this yet. Readonly until it does.
+                'help' => 'Not active yet: every revision is kept until revision pruning ships. Published versions are always kept.',
+                'readonly' => true,
                 'span' => 6,
                 'sort' => 100,
             ],

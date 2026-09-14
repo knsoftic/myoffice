@@ -77,7 +77,7 @@
     $whyHeading = trim((string) data_get($fields, 'why_choose_us_heading', ''));
     $statistics = (array) ($items['statistic'] ?? []);
 
-    $lazy = filter_var(rescue(static fn () => site_setting('website.image_lazy_loading', true), true), FILTER_VALIDATE_BOOLEAN);
+    $lazy = filter_var(site_setting('website.image_lazy_loading', true), FILTER_VALIDATE_BOOLEAN);
     $uid = 'about-'.(data_get($section ?? null, 'id') ?? 'x');
 @endphp
 

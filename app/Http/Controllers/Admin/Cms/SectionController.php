@@ -237,6 +237,7 @@ final class SectionController extends Controller
             'previewUrl' => Route::has('site.preview.section') ? route('site.preview.section', $section) : null,
             'can' => [
                 'edit' => $user->can('update', $section),
+                'anchor' => $user->can('changeAnchor', $section),
                 'publish' => $user->can('publish', $section),
                 'duplicate' => $user->can('duplicate', $section),
                 'delete' => $user->can('delete', $section),
@@ -256,6 +257,11 @@ final class SectionController extends Controller
         if ($request->wantsPublish()) {
             $this->authorize('website_sections.change_status');
             $this->authorize('publish', $section);
+        }
+
+        // A published section's anchor is live on save and breaks `#anchor` menu links: a publisher's act.
+        if ($request->has('anchor') && SectionService::normaliseAnchor($request->validated('anchor')) !== $section->anchor) {
+            $this->authorize('changeAnchor', $section);
         }
 
         return $this->attempt($request, function () use ($request, $section): Response {

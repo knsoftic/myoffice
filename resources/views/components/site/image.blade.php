@@ -1,5 +1,6 @@
 @props([
     'media' => null,
+    'asset' => null,
     'profile' => null,
     'eager' => false,
     'alt' => null,
@@ -29,8 +30,14 @@
         is_video     true renders <video> with `poster` instead        (hero background video)
         poster       the poster image url for a video
 
-    A `MediaAsset` model also works (every read goes through `data_get`), which is what the admin
-    previews of §8.5 pass, but a public page should always be handed the snapshot array.
+    A `MediaAsset` model is accepted too — the contract's own signature (§6.8, phase-04 §6.6):
+
+        <x-site.image :asset="$asset" profile="card" />
+
+    and a model passed as `:media` is treated the same way. Either is turned into the snapshot shape by
+    `MediaService::toSnapshot($asset, $profile)` (url, srcset, WebP srcset, sizes, dimensions, alt), so it
+    renders exactly what a published section would. A section partial should still be handed its snapshot
+    array, which costs no query.
 
     It never renders a broken `srcset`: when the asset's derivatives are not usable
     (`derivatives_status` not ready/skipped) the snapshot simply carries no `srcset` and the original
@@ -42,7 +49,20 @@
 --}}
 
 @php
+    use App\Enums\Cms\ImageProfile as ImageProfileCase;
+    use App\Models\Cms\MediaAsset;
+    use App\Services\Cms\MediaService;
     use App\Support\Cms\ImageProfile as ImageProfileSpec;
+
+    // A model (`:asset`, or a model handed to `:media`) becomes the snapshot array a section carries.
+    $model = $asset instanceof MediaAsset ? $asset : ($media instanceof MediaAsset ? $media : null);
+
+    if ($model !== null) {
+        $media = app(MediaService::class)->toSnapshot(
+            $model,
+            filled($profile) ? ImageProfileCase::tryFrom((string) $profile) : null,
+        );
+    }
 
     $url = (string) (data_get($media, 'url') ?? '');
     $isVideo = (bool) data_get($media, 'is_video', false);

@@ -517,8 +517,10 @@ Route::prefix('admin')
                 Route::get('media/{asset}/usage', [MediaController::class, 'usage'])
                     ->whereNumber('asset')->middleware('can:website_media.view')->name('media.usage');
 
+                // Until GenerateImageDerivatives ships, regeneration decodes and re-encodes inline (GD, up to
+                // 40 MP, every width in two formats): throttled per user like the other heavy CMS writes.
                 Route::post('media/{asset}/regenerate', [MediaController::class, 'regenerate'])
-                    ->whereNumber('asset')->middleware('can:website_media.edit')->name('media.regenerate');
+                    ->whereNumber('asset')->middleware(['can:website_media.edit', 'throttle:6,1,cms-media-regenerate'])->name('media.regenerate');
 
                 Route::delete('media/{asset}', [MediaController::class, 'destroy'])
                     ->whereNumber('asset')->middleware('can:website_media.delete')->name('media.destroy');

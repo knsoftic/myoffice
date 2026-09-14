@@ -220,6 +220,17 @@ final class SectionService
     }
 
     /**
+     * The stored form of an `#anchor` as typed: lower-case, no leading `#`, null when empty. The controller
+     * compares with it to decide whether a save changes a live anchor (`WebsiteSectionPolicy::changeAnchor`).
+     */
+    public static function normaliseAnchor(?string $anchor): ?string
+    {
+        $anchor = $anchor === null ? null : strtolower(trim(ltrim(trim($anchor), '#')));
+
+        return $anchor === '' ? null : $anchor;
+    }
+
+    /**
      * The admin-facing name and the public `#anchor` a menu item can link to (§102).
      *
      * The anchor is a live attribute (the public read selects it directly), so a change bumps the
@@ -231,8 +242,7 @@ final class SectionService
         $this->connection()->transaction(function () use ($section, $name, $anchor): void {
             $row = $this->lockRow((int) $section->getKey());
             $name = $this->cleanName($name);
-            $anchor = $anchor === null ? null : strtolower(trim(ltrim(trim($anchor), '#')));
-            $anchor = $anchor === '' ? null : $anchor;
+            $anchor = self::normaliseAnchor($anchor);
 
             if ($anchor !== null && preg_match(self::ANCHOR_PATTERN, $anchor) !== 1) {
                 throw InvalidSectionContentException::withErrors('The anchor is not valid.', [

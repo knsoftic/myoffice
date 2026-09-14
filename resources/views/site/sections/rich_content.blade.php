@@ -33,7 +33,7 @@
         ->filter(static fn ($item): bool => filled(data_get($item, 'content.title')))
         ->values();
 
-    $lazy = filter_var(rescue(static fn () => site_setting('website.image_lazy_loading', true), true), FILTER_VALIDATE_BOOLEAN);
+    $lazy = filter_var(site_setting('website.image_lazy_loading', true), FILTER_VALIDATE_BOOLEAN);
 @endphp
 
 @if ($heading !== '' || $subheading !== '' || $hasBody || $image !== null || $highlights->isNotEmpty())

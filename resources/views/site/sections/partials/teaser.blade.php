@@ -39,7 +39,7 @@
     $phone = trim((string) site_setting('contact.phone', ''));
     $phoneHref = $phone !== '' ? 'tel:'.preg_replace('/[^\d+]/', '', $phone) : null;
 
-    $lazy = filter_var(rescue(static fn () => site_setting('website.image_lazy_loading', true), true), FILTER_VALIDATE_BOOLEAN);
+    $lazy = filter_var(site_setting('website.image_lazy_loading', true), FILTER_VALIDATE_BOOLEAN);
 @endphp
 
 <x-site.section :anchor="data_get($section ?? null, 'anchor')" background="muted" :label="$heading !== '' ? $heading : null">

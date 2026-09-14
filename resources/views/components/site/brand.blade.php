@@ -39,9 +39,8 @@
     use Illuminate\Support\Facades\Route;
     use Illuminate\Support\Facades\Storage;
 
-    $siteSetting = static fn (string $key, mixed $default = null): mixed => function_exists('site_setting')
-        ? rescue(static fn () => site_setting($key, $default), $default)
-        : $default;
+    // Never rescued (INV-10): a key that is not public must fail the render, not quietly print its default.
+    $siteSetting = static fn (string $key, mixed $default = null): mixed => site_setting($key, $default);
 
     // A settings image is a path on the public disk (or, rarely, an absolute URL).
     $publicUrl = static function (mixed $path): ?string {

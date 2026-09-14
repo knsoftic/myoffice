@@ -16,9 +16,8 @@
 --}}
 
 @php
-    $siteSetting = static fn (string $key, mixed $default = null): mixed => function_exists('site_setting')
-        ? rescue(static fn () => site_setting($key, $default), $default)
-        : $default;
+    // Never rescued (INV-10): a key that is not public must fail the render, not quietly print its default.
+    $siteSetting = static fn (string $key, mixed $default = null): mixed => site_setting($key, $default);
 
     $themeDefault = $siteSetting('appearance.default_theme', 'system');
     $themeDefault = $themeDefault instanceof \BackedEnum ? $themeDefault->value : (string) $themeDefault;

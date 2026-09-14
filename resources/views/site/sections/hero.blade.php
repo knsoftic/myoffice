@@ -42,7 +42,7 @@
     $poster = $withUrl(data_get($media, 'video_poster'));
     $video = $withUrl(data_get($media, 'background_video'));
 
-    $videoEnabled = filter_var(rescue(static fn () => site_setting('website.hero_video_enabled', true), true), FILTER_VALIDATE_BOOLEAN);
+    $videoEnabled = filter_var(site_setting('website.hero_video_enabled', true), FILTER_VALIDATE_BOOLEAN);
     $video = $videoEnabled && $video !== null && (bool) ($video['is_video'] ?? false) ? $video : null;
 
     // What paints when the video does not: its poster, else the background image.

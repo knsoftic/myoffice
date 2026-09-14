@@ -58,6 +58,20 @@ final class WebsiteSectionPolicy
     }
 
     /**
+     * The `#anchor` is read by the public page straight from the row and menu links point at it, so on a
+     * **published** section a change is live the moment it is saved: that needs the publish right, as a
+     * live page's slug does ([D-W3-10], INV-1). On a draft it is just part of the draft.
+     */
+    public function changeAnchor(User $user, WebsiteSection $section): bool
+    {
+        if (! $this->update($user, $section)) {
+            return false;
+        }
+
+        return $section->status !== ContentStatus::Published || $this->allows($user, Ability::ChangeStatus);
+    }
+
+    /**
      * Add, edit, toggle, reorder or delete repeater items (§7.1 — all under `website_sections.edit`).
      */
     public function manageItems(User $user, WebsiteSection $section): bool

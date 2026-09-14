@@ -24,7 +24,7 @@
     $description = trim((string) data_get($fields, 'description', ''));
     $columns = (int) data_get($fields, 'columns', 1) >= 2 && count($questions) > 3 ? 2 : 1;
     $showAll = data_get($fields, 'show_all_link');
-    $openFirst = filter_var(rescue(static fn () => site_setting('website.faq_accordion_open_first', true), true), FILTER_VALIDATE_BOOLEAN);
+    $openFirst = filter_var(site_setting('website.faq_accordion_open_first', true), FILTER_VALIDATE_BOOLEAN);
 @endphp
 
 @if ($questions !== [])

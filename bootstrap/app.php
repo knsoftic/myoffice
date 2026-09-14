@@ -7,6 +7,7 @@ use App\Http\Middleware\EnsurePublicSiteAvailable;
 use App\Http\Middleware\EnsureSiteModuleEnabled;
 use App\Http\Middleware\EnsureUserIsActive;
 use App\Http\Middleware\ResolvePreviewMode;
+use App\Support\Cms\PublicOrigin;
 use App\Support\SettingsRegistry;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -74,6 +75,16 @@ return Application::configure(basePath: dirname(__DIR__))
         | survive it.
         */
         $middleware->web(append: [AuthenticateSession::class]);
+
+        /*
+        | Review round 2 (phase-03 §6.5, §6.7): the `Host` header is client-chosen, and absolute URLs built
+        | from it would otherwise reach pages and feeds that are cached for every visitor. Outside `local`
+        | and the test runner, only the application URL's host (and its subdomains) and the host of
+        | `seo.canonical_base_url` are accepted; anything else is a 400 before routing. The public site
+        | never builds a cached absolute URL from the request either (PublicOrigin), so this is the second
+        | layer, not the only one.
+        */
+        $middleware->trustHosts(at: static fn (): array => PublicOrigin::trustedHostPatterns());
 
         $middleware->alias([
             'active' => EnsureUserIsActive::class,

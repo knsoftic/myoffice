@@ -12,6 +12,7 @@ use App\Models\Cms\Page;
 use App\Models\Cms\SeoMeta;
 use App\Services\Cms\Data\SeoPayload;
 use App\Services\Cms\Data\SitemapEntry;
+use App\Support\Cms\PublicOrigin;
 use App\Support\SettingsRepository;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
 use Illuminate\Contracts\Routing\UrlGenerator;
@@ -23,6 +24,7 @@ use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Routing\Router;
+use Illuminate\Routing\UrlGenerator as RoutingUrlGenerator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\Rule;
@@ -171,6 +173,13 @@ final class SeoService
         if ($canonical === null || preg_match('~^https?://~i', $canonical) !== 1) {
             $path ??= $this->pathFor($target);
             $base = $this->configuredBaseUrl();
+
+            // §6.5 "canonical_base_url + path": a target with no public path of its own (a later phase's
+            // service or course called without one) is canonical at the path being rendered, on the
+            // configured base, never on whatever host and scheme the request arrived with.
+            if ($path === null && $base !== null) {
+                $path = $this->currentPath();
+            }
 
             $canonical = $base !== null && $path !== null
                 ? $base.'/'.ltrim($path, '/')
@@ -598,11 +607,14 @@ final class SeoService
     }
 
     /**
-     * `seo.canonical_base_url` without a trailing slash, or the application URL.
+     * `seo.canonical_base_url` without a trailing slash, or `config('app.url')` — **never the request's
+     * `Host` header**. The sitemap built from it is cached for every visitor under a key with no host in
+     * it, so a request carrying `Host: evil.test` must build exactly what the scheduler builds
+     * (review round 2; `PublicOrigin`).
      */
     public function baseUrl(): string
     {
-        return $this->configuredBaseUrl() ?? rtrim($this->url->to('/'), '/');
+        return $this->configuredBaseUrl() ?? PublicOrigin::applicationUrl();
     }
 
     /*
@@ -871,6 +883,17 @@ final class SeoService
         }
 
         return null;
+    }
+
+    /**
+     * The path of the request being rendered (`/services/web-apps`, `/` for the home page), without the
+     * base path of a sub-directory install — the same shape `route(..., false)` returns.
+     */
+    private function currentPath(): ?string
+    {
+        $request = $this->url instanceof RoutingUrlGenerator ? $this->url->getRequest() : null;
+
+        return $request === null ? null : '/'.ltrim($request->path(), '/');
     }
 
     private function pagePath(string $slug): string

@@ -8,6 +8,7 @@ use App\Enums\Cms\StatisticMetric;
 use App\Enums\Cms\StatisticValueMode;
 use App\Models\Cms\WebsiteSectionItem;
 use App\Support\Modules;
+use App\Support\Money;
 use App\Support\SettingsRepository;
 use BackedEnum;
 use Illuminate\Database\DatabaseManager;
@@ -23,7 +24,7 @@ use Throwable;
  *   all()               live metric value => ?string, memoised 15 minutes under the D22 cache stamp
  *   resolve()           one metric's live value
  *   valueFor()          the single rule the renderer uses for a stored item (`auto` -> live, falling back
- *                       to `manual_value`; `manual` -> `manual_value`)
+ *                       to `manual_value` when the live value is null **or zero**; `manual` -> `manual_value`)
  *   valueForSnapshot()  the same rule for a published snapshot item (`<x-site.stats>` prefers it)
  *
  * Invariants:
@@ -32,6 +33,8 @@ use Throwable;
  *     class is a string such as `"1248.00"`, or null. A metric whose module is disabled, whose table (or
  *     a column it filters on) is absent, or whose query fails resolves to **null** — never `"0.00"` —
  *     so a statistics strip never claims "0 Students Trained" because a later phase is not installed.
+ *     An `auto` item whose live count is **zero** renders the same way (review round 2): its manual value,
+ *     or nothing — so a later phase's freshly migrated, still empty table never puts a "0" on the site.
  *   · **Guarded twice.** A counted metric runs only after `Modules::enabled(module())` **and** a schema
  *     probe proving its table and filtered columns exist (one probe for every table, one UNION ALL
  *     count — a bounded query budget however many later phases install); a failure of a later phase's
@@ -161,8 +164,17 @@ final class StatisticsProvider
         }
 
         $metric = $metric instanceof StatisticMetric ? $metric : StatisticMetric::tryFrom($this->scalar($metric));
+        $live = $metric === null ? null : $this->resolve($metric);
 
-        return ($metric === null ? null : $this->resolve($metric)) ?? $manualValue;
+        // build-order F2 / INV-12: a live count of zero is not a claim a public page makes. The day a later
+        // phase migrates an empty `team_members` or `clients` table the count becomes "0.00", not null, and
+        // the seeded hero would read "0 Team Members". Zero falls back exactly like an unresolved metric:
+        // to the typed `manual_value`, else to nothing at all. (`resolve()` still reports the true count.)
+        if ($live !== null && Money::isZero($live)) {
+            $live = null;
+        }
+
+        return $live ?? $manualValue;
     }
 
     /**

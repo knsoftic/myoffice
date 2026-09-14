@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Events\ModuleStateChanged;
 use App\Events\SettingsChanged;
 use App\Models\Cms\CmsRevision;
 use App\Models\Cms\CtaBlock;
@@ -120,6 +121,9 @@ class AppServiceProvider extends ServiceProvider
     private function registerPublicCacheInvalidation(): void
     {
         Event::listen(SettingsChanged::class, [PublicCache::class, 'settingsChanged']);
+
+        // A module switch changes what the public pages may show (INV-12, D26): same bump, once per moved module.
+        Event::listen(ModuleStateChanged::class, [PublicCache::class, 'moduleChanged']);
     }
 
     /**

@@ -346,7 +346,7 @@
                                 <h3 class="mb-4 text-sm font-semibold text-slate-900 dark:text-white">Label and anchor</h3>
                                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                     <x-ui.form.input name="name" label="Admin label" :value="$section->name" :placeholder="$typeLabel" maxlength="150" :readonly="! $can['edit']" help="Only shown in the admin." />
-                                    <x-ui.form.input name="anchor" label="Anchor" :value="$section->anchor" prefix="#" placeholder="about" maxlength="64" :readonly="! $can['edit']" help="Lowercase letters, numbers and hyphens. Menu items can link to it." />
+                                    <x-ui.form.input name="anchor" label="Anchor" :value="$section->anchor" prefix="#" placeholder="about" maxlength="64" :readonly="! ($can['anchor'] ?? $can['edit'])" :help="($can['edit'] && ! ($can['anchor'] ?? true)) ? 'Visitors’ menu links use it on the live page: changing it needs the publish permission.' : 'Lowercase letters, numbers and hyphens. Menu items can link to it.'" />
                                 </div>
                             </div>
                         </div>

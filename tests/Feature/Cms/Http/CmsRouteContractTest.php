@@ -29,7 +29,8 @@ use Tests\TestCase;
  *
  *   · every admin CMS route (§7.1-§7.5) exists exactly as the contract writes it, behind `auth`,
  *     `active`, `panel:admin`, exactly one `module:` and exactly one `can:` of that module, whose
- *     permission PermissionRegistry declares; the three throttled routes carry their limits;
+ *     permission PermissionRegistry declares; the throttled routes (three from §7, plus media
+ *     regeneration from review round 2) carry their limits;
  *   · the public routes (§7.6) exist, and **no public route carries `module:` or `can:`** (INV-15); the
  *     `site` gate is on every public page but never on robots.txt ([D-W3-13]);
  *   · the `/{slug}` catch-all never shadows a panel, an auth screen, a reserved first segment or a later
@@ -86,6 +87,8 @@ final class CmsRouteContractTest extends TestCase
             'admin.website.cache.flush' => 'throttle:6,1',
             'admin.website.seo.sitemap.regenerate' => 'throttle:6,1',
             'admin.website.media.store' => 'throttle:60,1',
+            // Review round 2: inline derivative regeneration is CPU- and memory-heavy.
+            'admin.website.media.regenerate' => 'throttle:6,1',
         ];
 
         foreach ($throttles as $name => $limit) {

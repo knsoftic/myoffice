@@ -308,9 +308,14 @@
 
                             <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
                                 @foreach (['open_new_tab' => ['Open in a new tab', 'Adds noopener and noreferrer.'], 'rel_nofollow' => ['nofollow', 'For sponsored or untrusted links.'], 'is_enabled' => ['Enabled', 'Disabled items stay here, hidden from visitors.']] as $flag => [$flagLabel, $flagHelp])
-                                    <label class="flex items-start gap-2 rounded-lg p-2 ring-1 ring-slate-200 dark:ring-slate-700">
-                                        <input type="hidden" name="{{ $flag }}" value="0">
-                                        <input type="checkbox" name="{{ $flag }}" value="1" x-model="item.{{ $flag }}" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500/40 dark:border-slate-600 dark:bg-slate-800">
+                                    @php
+                                        // Switching an existing link on or off is menus.change_status; without it the
+                                        // field is not posted at all, so saving the rest never trips the backend check.
+                                        $lockedFlag = $flag === 'is_enabled' && ! $canToggle;
+                                    @endphp
+                                    <label class="flex items-start gap-2 rounded-lg p-2 ring-1 ring-slate-200 dark:ring-slate-700" @if ($lockedFlag) x-bind:class="item.id ? 'opacity-60' : ''" @endif>
+                                        <input type="hidden" name="{{ $flag }}" value="0" @if ($lockedFlag) x-bind:disabled="!! item.id" @endif>
+                                        <input type="checkbox" name="{{ $flag }}" value="1" x-model="item.{{ $flag }}" @if ($lockedFlag) x-bind:disabled="!! item.id" @endif class="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500/40 dark:border-slate-600 dark:bg-slate-800">
                                         <span class="text-sm">
                                             <span class="font-medium text-slate-700 dark:text-slate-200">{{ $flagLabel }}</span>
                                             <span class="block text-xs text-slate-500 dark:text-slate-400">{{ $flagHelp }}</span>
