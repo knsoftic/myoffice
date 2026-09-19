@@ -25,3 +25,4 @@ Thumbs.db
 
 # local workflow scripts (not part of the application)
 .phase-*.js
+.build-*.js
