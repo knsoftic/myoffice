@@ -249,7 +249,7 @@ final class PermissionRegistry
                 'icon' => 'folder',
                 'is_core' => false,
                 'sort' => 130,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::ASSIGN, self::FILES, self::MONEY, self::REPORTS, self::RESTORE),
+                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::ASSIGN, self::FILES, self::MONEY, self::REPORTS, self::RESTORE, self::LOGS),
             ],
             'project_milestones' => [
                 'name' => 'Project Milestones',
@@ -257,7 +257,7 @@ final class PermissionRegistry
                 'icon' => 'flag',
                 'is_core' => false,
                 'sort' => 140,
-                'abilities' => self::merge(self::CRUD, self::STATUS, self::ASSIGN, self::APPROVE, self::MONEY, self::RESTORE),
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::ASSIGN, self::APPROVE, self::MONEY, self::RESTORE, self::REPORTS),
             ],
             'tasks' => [
                 'name' => 'Tasks',
@@ -265,7 +265,17 @@ final class PermissionRegistry
                 'icon' => 'check-circle',
                 'is_core' => false,
                 'sort' => 150,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::ASSIGN, self::FILES, self::RESTORE),
+                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::ASSIGN, self::FILES, self::RESTORE, self::REPORTS, self::LOGS),
+            ],
+            'task_comments' => [
+                'name' => 'Task Comments',
+                'group' => ModuleGroup::SoftwareHouse,
+                'icon' => 'chat-bubble-left-right',
+                'is_core' => false,
+                'sort' => 155,
+                // phase-06 §4.1: a role must be able to discuss a task without holding `tasks.edit`, and
+                // §59 gives a collaborator "add comments" and nothing else.
+                'abilities' => self::merge(self::READ, [Ability::Create, Ability::Edit, Ability::Delete]),
             ],
             'time_tracking' => [
                 'name' => 'Time Tracking',
@@ -273,7 +283,7 @@ final class PermissionRegistry
                 'icon' => 'clock',
                 'is_core' => false,
                 'sort' => 160,
-                'abilities' => self::merge(self::CRUD, self::APPROVE, self::REPORTS, self::RESTORE),
+                'abilities' => self::merge(self::CRUD, self::APPROVE, self::REPORTS, self::RESTORE, self::STATUS, self::LOGS),
             ],
 
             /*
@@ -914,6 +924,8 @@ final class PermissionRegistry
                     'messages',
                     'payout_request',
                     'statement_download',
+                    // phase-06 §4.3 — start a timer and log time on an assigned task, and see own hours.
+                    'time_tracking',
                 ],
             ],
             'student_portal' => [

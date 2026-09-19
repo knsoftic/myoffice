@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Enums\ProgressBasis;
 use App\Enums\Cms\SitemapChangeFrequency;
 use App\Enums\ThemePreference;
 use App\Models\Branch;
@@ -393,6 +394,15 @@ final class SettingsRegistry
                 'icon' => 'user-group',
                 'description' => 'Referral tracking, commission bases and rates, payout policy.',
                 'sort' => 80,
+            ],
+            // phase-06 §5 [D-P6-8]: none of the existing groups is the right home for a timer limit or a
+            // project code prefix, and hiding these in `finance` would make the settings screen lie about
+            // what they control.
+            'projects' => [
+                'label' => 'Projects & Time',
+                'icon' => 'rectangle-stack',
+                'description' => 'Project numbering, progress, and time-tracking rules.',
+                'sort' => 86,
             ],
             'institute' => [
                 'label' => 'Institute',
@@ -1379,6 +1389,7 @@ final class SettingsRegistry
             'institute' => self::instituteFields(),
             'finance' => self::financeFields(),
             'security' => self::securityFields(),
+            'projects' => self::projectsFields(),
             'crm' => self::crmFields(),
             'maintenance' => self::maintenanceFields(),
         ];
@@ -3087,6 +3098,173 @@ final class SettingsRegistry
      *
      * @return array<string, array<string, mixed>>
      */
+    /**
+     * phase-06 §5 — the seventeen keys that govern project numbering, progress and time tracking.
+     *
+     * `default_task_estimate_minutes` lives here rather than as a constant inside a service on purpose:
+     * §6.3 needs a weight for a task nobody estimated, and a documented, editable number is honest where a
+     * magic 60 buried in a method is not.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private static function projectsFields(): array
+    {
+        return [
+            'project_code_prefix' => [
+                'label' => 'Project code prefix',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:12'],
+                'default' => 'PRJ-',
+                'help' => 'Requirement §20\'s "Project ID"; the counter below is zero-padded to five digits.',
+                'span' => 4,
+                'sort' => 10,
+            ],
+            'project_code_next_number' => [
+                'label' => 'Next project number',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['nullable', 'integer', 'min:1'],
+                'default' => 1,
+                'help' => 'Advanced only by the numbering service, under a row lock, never by this form (D62).',
+                'readonly' => true,
+                'span' => 4,
+                'sort' => 20,
+            ],
+            'default_progress_basis' => [
+                'label' => 'Derive progress from',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string'],
+                'default' => ProgressBasis::Milestones->value,
+                'options' => ProgressBasis::options(),
+                'help' => 'Seeds a new project; each project can then be switched on its own.',
+                'span' => 4,
+                'sort' => 30,
+            ],
+            'progress_manual_override_enabled' => [
+                'label' => 'Allow a manual progress override',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'When off, progress is purely derived and the manual mode is refused outright.',
+                'span' => 6,
+                'sort' => 40,
+            ],
+            'default_task_estimate_minutes' => [
+                'label' => 'Assumed estimate for an unestimated task (minutes)',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:10080'],
+                'default' => 60,
+                'help' => 'The weight a task with no estimate carries in the progress average.',
+                'span' => 6,
+                'sort' => 50,
+            ],
+            'allow_time_without_task' => [
+                'label' => 'Allow time logged against a project with no task',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Meetings, setup and other work that belongs to the project rather than to one task.',
+                'span' => 6,
+                'sort' => 60,
+            ],
+            'timer_auto_stop_enabled' => [
+                'label' => 'Stop a forgotten timer automatically',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'span' => 6,
+                'sort' => 70,
+            ],
+            'timer_max_hours' => [
+                'label' => 'Stop a timer after (hours)',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:24'],
+                'default' => 12,
+                'help' => 'The business counterpart of chk_te_duration, which caps one entry at 24 hours whatever a clock change does.',
+                'span' => 4,
+                'sort' => 80,
+            ],
+            'manual_time_backdate_limit_days' => [
+                'label' => 'Backdate a manual entry without a reason for (days)',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:365'],
+                'default' => 7,
+                'help' => 'Beyond this a written reason is mandatory and the entry needs time_tracking.change_status.',
+                'span' => 4,
+                'sort' => 90,
+            ],
+            'manual_time_max_hours_per_day' => [
+                'label' => 'Maximum hours one person may log for a day',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:24'],
+                'default' => 16,
+                'span' => 4,
+                'sort' => 100,
+            ],
+            'working_hours_per_day' => [
+                'label' => 'Working hours per day',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:24'],
+                'default' => 8,
+                'help' => 'The denominator of the utilisation figure in the weekly rollup.',
+                'span' => 6,
+                'sort' => 110,
+            ],
+            'working_days_per_week' => [
+                'label' => 'Working days per week',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:7'],
+                'default' => 6,
+                'help' => 'With the week start in Localization, this defines "this week" in every time report.',
+                'span' => 6,
+                'sort' => 120,
+            ],
+            'task_comment_edit_minutes' => [
+                'label' => 'A comment author may edit for (minutes)',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:1440'],
+                'default' => 15,
+                'help' => 'After the window the comment is fixed; every edit inside it is logged with the old body.',
+                'span' => 4,
+                'sort' => 130,
+            ],
+            'client_can_see_tasks' => [
+                'label' => 'Show tasks in the client panel',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Applies on top of each task\'s own visibility flag: a client sees a task only when both are on.',
+                'span' => 4,
+                'sort' => 140,
+            ],
+            'client_can_see_attachments' => [
+                'label' => 'Show files in the client panel',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Applies on top of each attachment being marked visible to the client.',
+                'span' => 4,
+                'sort' => 150,
+            ],
+            'deadline_reminder_days' => [
+                'label' => 'Warn about a deadline this many days ahead',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:90'],
+                'default' => 3,
+                'help' => 'Covers both a project deadline and a task due date.',
+                'span' => 6,
+                'sort' => 160,
+            ],
+            'overdue_digest_enabled' => [
+                'label' => 'Send the daily overdue digest to project managers',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'span' => 6,
+                'sort' => 170,
+            ],
+        ];
+    }
+
     private static function crmFields(): array
     {
         return [

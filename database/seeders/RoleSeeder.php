@@ -257,6 +257,9 @@ class RoleSeeder extends Seeder
                         'project_milestones',
                         'tasks',
                         'time_tracking',
+                        // phase-06 §4.1: discussing a task is its own slug, so a role can comment without
+                        // holding tasks.edit.
+                        'task_comments',
                         'meetings',
                         'files',
                     ]),
@@ -304,6 +307,8 @@ class RoleSeeder extends Seeder
                     PermissionRegistry::permissionNamesFor('pages', self::READ_EDIT),
                     PermissionRegistry::permissionNamesFor('website_media'),
                     PermissionRegistry::permissionNamesFor('tasks', self::WORK_ON),
+                    // phase-06 §4.3 lists the SEO Expert with the delivery team for task comments.
+                    PermissionRegistry::permissionNamesFor('task_comments'),
                 ),
             ],
             [
@@ -469,6 +474,8 @@ class RoleSeeder extends Seeder
         return $this->merge(
             PermissionRegistry::permissionNamesFor(['projects', 'project_milestones'], self::READ),
             PermissionRegistry::permissionNamesFor('tasks', self::WORK_ON),
+            // phase-06 §4.3: the delivery team may hold a whole conversation on a task.
+            PermissionRegistry::permissionNamesFor('task_comments'),
             PermissionRegistry::permissionNamesFor('time_tracking', self::OWN_ENTRIES),
             PermissionRegistry::permissionNamesFor('files', self::FILE_WORK),
             PermissionRegistry::permissionNamesFor('meetings', self::READ),

@@ -237,6 +237,72 @@ final class Money
      * Used where a business rounds a printed figure (a fee slip to the nearest 10, a payout to
      * the nearest 100). It never changes a stored ledger amount.
      */
+    /**
+     * The weighted average of `[value, weight]` pairs, half-up at `$scale` decimals.
+     *
+     * Added by phase-06 for §6.3, whose three aggregate levels are all the same shape:
+     * `SUM(value * weight) / SUM(weight)`, at the 4 decimals a `decimal(8,4)` percentage column holds.
+     * {@see div()} answers at money scale (2), which would quietly drop two decimals of a progress
+     * figure, and doing the division outside this class would put bcmath arithmetic back into a service —
+     * so the operation lives here with the rest of the rules.
+     *
+     * Returns **null** when the total weight is zero: "the average of nothing" has no answer, and §6.3
+     * needs to tell that apart from a genuine 0 % so it can fall back to the status weight instead.
+     *
+     * @param  iterable<array-key, array{0: string, 1: string}>  $pairs
+     */
+    public static function weightedAverage(iterable $pairs, int $scale = self::RATE_SCALE): ?string
+    {
+        if ($scale < 0) {
+            throw new InvalidArgumentException('Money::weightedAverage(): the scale cannot be negative.');
+        }
+
+        $weighted = '0';
+        $weight = '0';
+
+        foreach ($pairs as [$value, $itemWeight]) {
+            $itemWeight = self::parse((string) $itemWeight);
+
+            if (bccomp($itemWeight, '0', self::WORKING_SCALE) < 0) {
+                throw new InvalidArgumentException('Money::weightedAverage(): a weight cannot be negative.');
+            }
+
+            $weighted = bcadd(
+                $weighted,
+                bcmul(self::parse((string) $value), $itemWeight, self::WORKING_SCALE),
+                self::WORKING_SCALE
+            );
+            $weight = bcadd($weight, $itemWeight, self::WORKING_SCALE);
+        }
+
+        if (bccomp($weight, '0', self::WORKING_SCALE) === 0) {
+            return null;
+        }
+
+        return self::roundHalfUp(bcdiv($weighted, $weight, self::WORKING_SCALE), $scale);
+    }
+
+    /**
+     * Clamp a value into `[$min, $max]` at `$scale` decimals.
+     *
+     * phase-06 §6.3 clamps every derived percentage to `0 .. 100` before it is stored, so a weight table
+     * edited badly can never write a number the `chk_*_progress` constraints would reject.
+     */
+    public static function clamp(string $value, string $min, string $max, int $scale = self::RATE_SCALE): string
+    {
+        $value = self::round($value, $scale);
+
+        if (self::compare($value, $min) < 0) {
+            return self::round($min, $scale);
+        }
+
+        if (self::compare($value, $max) > 0) {
+            return self::round($max, $scale);
+        }
+
+        return $value;
+    }
+
     public static function roundTo(string $amount, int $nearest): string
     {
         if ($nearest < 1) {

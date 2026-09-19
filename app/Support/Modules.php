@@ -4,6 +4,13 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Models\Project\Attachment;
+use App\Models\Project\ProjectMember;
+use App\Models\Project\ProjectValueRevision;
+use App\Models\Project\TaskChecklistItem;
+use App\Models\Project\TaskCommentMention;
+use App\Models\Project\TimeEntry;
+use App\Models\Project\TimeEntrySegment;
 use App\Models\Activity;
 use App\Models\Cms\BlogPostBlogTag;
 use App\Models\Cms\BlogPostView;
@@ -111,6 +118,17 @@ final class Modules
         LeadImport::class => 'leads',
         LeadImportRow::class => 'leads',
         ClientContact::class => 'clients',
+
+        // phase-06: the Project models whose class name does not pluralise into their module slug.
+        // Project, Task, ProjectMilestone and TaskComment all do, so they are deliberately absent.
+        ProjectValueRevision::class => 'projects',
+        ProjectMember::class => 'projects',
+        TaskChecklistItem::class => 'tasks',
+        TaskCommentMention::class => 'task_comments',
+        // §2.9 [D-P6-6]: there is no `files` table — the `files` module slug governs `attachments`.
+        Attachment::class => 'files',
+        TimeEntry::class => 'time_tracking',
+        TimeEntrySegment::class => 'time_tracking',
     ];
 
     /** @var array<string, bool>|null */

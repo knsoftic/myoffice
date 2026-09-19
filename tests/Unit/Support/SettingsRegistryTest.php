@@ -30,7 +30,8 @@ final class SettingsRegistryTest extends TestCase
 {
     private const GROUPS = [
         'company', 'branding', 'appearance', 'localization', 'contact', 'social', 'seo',
-        'mail', 'website', 'collaborator', 'institute', 'finance', 'security', 'crm', 'maintenance',
+        'mail', 'website', 'collaborator', 'projects', 'institute', 'finance', 'security', 'crm',
+        'maintenance',
     ];
 
     private const DEFINITION_KEYS = [
@@ -61,7 +62,7 @@ final class SettingsRegistryTest extends TestCase
     }
 
     #[Test]
-    public function the_fifteen_groups_are_declared_with_their_metadata(): void
+    public function the_sixteen_groups_are_declared_with_their_metadata(): void
     {
         $this->assertSame(self::GROUPS, array_keys(SettingsRegistry::groups()));
 
