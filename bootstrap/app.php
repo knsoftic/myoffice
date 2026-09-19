@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\CachePublicResponse;
+use App\Http\Middleware\EnsureClientContext;
 use App\Http\Middleware\EnsureModuleEnabled;
 use App\Http\Middleware\EnsurePanelAccess;
 use App\Http\Middleware\EnsurePublicSiteAvailable;
@@ -90,6 +91,10 @@ return Application::configure(basePath: dirname(__DIR__))
             'active' => EnsureUserIsActive::class,
             'module' => EnsureModuleEnabled::class,
             'panel' => EnsurePanelAccess::class,
+            // phase-05 §6.9 / D31: every /client route. 403 with an explanatory page when the portal is off,
+            // the login resolves to no client, or the client's status forbids it - re-evaluated every request,
+            // so revoking access takes effect immediately.
+            'client.context' => EnsureClientContext::class,
             // phase-02 §6 "Maintenance": applied to PUBLIC routes only, never to a panel — see the
             // class docblock for why the gate is attached rather than path-sniffed.
             'public_site' => EnsurePublicSiteAvailable::class,

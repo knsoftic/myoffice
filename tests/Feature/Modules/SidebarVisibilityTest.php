@@ -162,6 +162,9 @@ final class SidebarVisibilityTest extends TestCase
                 'Activity Log',
                 'Login History',
                 'Settings',
+                // phase-05 §7: the CRM entries, now that leads and clients have routes.
+                'Leads',
+                'Clients',
                 // phase-03 §7-§8: the nine Website CMS entries whose routes now exist.
                 'Website Overview',
                 'Sections',
@@ -237,10 +240,19 @@ final class SidebarVisibilityTest extends TestCase
 
             $labels = $this->labels(Sidebar::forUser($user));
 
+            $this->assertContains('Dashboard', $labels, $role.' must always reach its own dashboard.');
+
+            // The client panel grew a real nav in Phase 5; the other three still have only a dashboard
+            // until their own phase ships routes. Each entry must be one this account can actually open.
+            $expectedLabels = $panel === PanelType::Client
+                ? ['Dashboard', 'My Projects', 'Milestones', 'Tasks', 'Documents', 'Files', 'Invoices',
+                    'Payments', 'Meetings', 'Messages', 'Support', 'Notifications', 'My Profile']
+                : ['Dashboard'];
+
             $this->assertSame(
-                ['Dashboard'],
+                $expectedLabels,
                 $labels,
-                sprintf('The %s panel only has a dashboard route in Phase 1.', $role)
+                sprintf('The %s panel shows exactly the entries whose routes have shipped.', $role)
             );
         }
     }

@@ -233,7 +233,15 @@ final class PermissionRegistry
                 'icon' => 'briefcase',
                 'is_core' => false,
                 'sort' => 120,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::ASSIGN, self::FILES, self::MONEY, self::IMPORT, self::RESTORE),
+                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::ASSIGN, self::FILES, self::MONEY, self::IMPORT, self::RESTORE, self::LOGS),
+            ],
+            'client_documents' => [
+                'name' => 'Client Documents',
+                'group' => ModuleGroup::SoftwareHouse,
+                'icon' => 'document-text',
+                'is_core' => false,
+                'sort' => 125,
+                'abilities' => self::merge(self::READ, self::FILES, [Ability::Edit, Ability::Delete], self::STATUS),
             ],
             'projects' => [
                 'name' => 'Projects',
@@ -992,6 +1000,14 @@ final class PermissionRegistry
                     'files_download',
                     'notifications',
                     'statement_download',
+                    // phase-05 §4.3 — the names the client panel routes actually check. Appended, never
+                    // renamed: the Phase 1 names above are already granted to the Client role (D4).
+                    'tasks',
+                    'milestones',
+                    'files',
+                    'documents',
+                    'download',
+                    'tickets',
                 ],
             ],
         ]);

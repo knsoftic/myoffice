@@ -11,7 +11,7 @@
 | **Database** | `my_office` (utf8mb4_unicode_ci) |
 | **Created** | 2026-09-12 |
 | **Last updated** | 2026-09-19 |
-| **Current phase** | PHASE 5 — CRM: leads, clients, client panel |
+| **Current phase** | PHASE 6 — Projects, milestones, tasks, time tracking |
 
 ---
 
@@ -272,7 +272,31 @@ verified and committed 2026-09-13
 
 **Committed** — Phase 3 is a rollback point.
 ### [x] PHASE 4 — Services, portfolio, blog, careers
-### [ ] PHASE 5 — CRM: leads (Kanban), clients, client panel
+### [x] PHASE 5 — CRM: leads (Kanban), clients, client panel
+
+Contract: [`docs/phases/phase-05.md`](docs/phases/phase-05.md) · integration plan `docs-pending/phase-05-integration.md` ·
+integrated and committed 2026-09-19
+
+| | Item |
+|---|---|
+| [x] | Schema: 10 migrations / 9 tables (`clients`, `client_contacts`, `client_documents`, `leads`, `lead_activities`, `lead_follow_ups`, `lead_conversions`, `lead_imports`, `lead_import_rows`) + a deferred-FK migration; applied to `my_office`, 0 pending |
+| [x] | Registries: PermissionRegistry **87 modules / 865 permissions** (+`client_documents`, +`clients.view_logs`, +6 `client_portal` abilities appended per D4); SettingsRegistry **15 groups / 192 keys** (+`crm`, 34 keys); 6 CRM model→module mappings in `Modules`; leads + clients sidebar entries, client tree rebuilt to 13 entries |
+| [x] | Enums (13): `ClientStatus`, `ClientType`, `ClientDocumentCategory`, `LeadStatus`, `LeadActivityType`, `LeadContactOutcome`, `LeadConversionType`, `LeadDuplicateMatchType`, `LeadFollowUpStatus`, `LeadFollowUpType`, `LeadImportStatus`, `LeadImportRowStatus`, `LeadImportDuplicateStrategy` |
+| [x] | Services (23): `LeadService`, `LeadBoardService`, `LeadFollowUpService`, `LeadConversionService`, `LeadImportService`, `LeadDuplicateDetector`, `LeadAutoAssigner`, `LeadTimeline`, `LeadExporter`, `ClientService`, `ClientContactService`, `ClientDocumentService`, `ClientPortalService`, `ClientPortalAccess`, `ClientExporter`, `CapturedReferralService` + 6 CRM exceptions |
+| [x] | Numbering: `LeadService` / `ClientService` draw `lead_no` and `client_code` from `App\Services\Finance\DocumentNumberService` (D27); both `*_next_number` keys are readonly in the registry (D62, verified) |
+| [x] | Policies (11) + `ClientPortalPolicy` gate; `EnsureClientContext` middleware aliased `client.context`; `ClientContext` / `ClientPortalRegistry` support classes |
+| [x] | Routes: 66 `admin.*` CRM routes + **24 `client.*` routes, every one carrying `client.context` (D31, verified)**; 409 routes in total with no duplicate name |
+| [x] | Portal extension points: `ClientPortalSection` / `ClientPortalRecordSection` / `ClientPortalDownloadSection` contracts (D28), Documents + Notifications sections registered by `AppServiceProvider::registerPhase05()` |
+| [x] | Capability contracts for later phases: `ClientFinancialsProvider`, `ClientReferenceGuard`; `ReferralRecorder` / `ProjectCreator` bound to null implementations until Phases 6 and 9 |
+| [x] | Public-site wiring: `CrmLeadInquiryTarget` registered against the Phase 4 inquiry router, so a website inquiry becomes a lead |
+| [x] | Scheduler (6 commands): `crm:follow-up-reminders`, `crm:follow-ups-mark-missed`, `crm:record-captured-referrals`, `crm:import-pending-inquiries`, `crm:prune-imports`, `crm:stale-lead-digest`; 4 queued jobs, 11 notifications, 20 events + 8 listeners |
+| [x] | `DemoUserSeeder` gives the demo Client login a real `clients` row (`CL-DEMO01`, portal enabled) — the panel guards stayed as written, nothing was loosened |
+| [x] | Manifests: Phase 5 index rows appended to `tests/Support/index-manifest.php` |
+| [x] | Integration gate `tests/Feature/Crm/CrmSmokeTest.php` — 6 tests: every CRM screen answers for a Super Admin, each is refused without its permission and opens with it, the client panel resolves the signed-in user to their own client, a login with no client row is refused, and both services number their record |
+| [ ] | **Phase 5's full acceptance suite (phase-05 §11) is still owed** — the smoke test is the integration gate, not the acceptance run |
+| [ ] | Carried deviations: `docs-pending/phase-05-integration.md` C.7 (contract deviations) and W.5 (search not applied on some screens, staff logo upload missing) |
+
+**Committed** — Phase 5 is a rollback point.
 ### [ ] PHASE 6 — Projects, milestones, tasks, time tracking
 ### [ ] PHASE 7 — Employees, departments, attendance, leave, payroll
 ### [ ] PHASE 8 — Collaborator management (profiles, panel shell, commission settings)
@@ -303,6 +327,38 @@ verified and committed 2026-09-13
 ---
 
 ## 6. Change Log
+
+### 2026-09-19 — Phase 5 integrated and committed
+
+Phase 5 (CRM: leads with a Kanban board, follow-ups, imports, conversions, clients, client documents and
+the client panel) was built in an earlier session and integrated here against the live tree:
+
+- **275 new files / 17 modified.** 10 migrations / 9 tables already applied to `my_office`, 0 pending.
+  13 enums, 23 services, 11 policies, 6 scheduled commands, 4 queued jobs, 11 notifications, 20 events,
+  8 listeners, 5 contracts, 66 `admin.*` CRM routes and 24 `client.*` routes.
+- **Registries grew, they did not change shape.** 87 modules / 865 permissions (the six new
+  `client_portal` abilities were *appended*, per D4 append-never-rename); a 15th settings group `crm`
+  with 34 keys; `Modules::MODEL_MODULES` gained the six CRM models.
+- **D31 and D62 verified on the live route table and registry, not by eye**: all 24 `client.*` routes
+  carry `client.context`, 409 routes with no duplicate name, and both `*_next_number` counters are
+  readonly. D27's `DocumentNumberService` landed one commit early (in Phase 4's tree) but Phase 5 is
+  still its first consumer — `lead_no` and `client_code` both come from it.
+- **Ten suite failures after integration, every one a legitimate consequence**, fixed at the right end:
+  two tests pinned "fourteen settings groups" (now fifteen); two inquiry-routing tests asserted that
+  *no* inquiry target is registered, which stopped being true the moment Phase 5 registered
+  `CrmLeadInquiryTarget` — the waiting-behaviour test moved to the still-unshipped `course_inquiry`
+  target (Phase 15); three 403s on `/client` were fixed by giving the demo Client login a real `clients`
+  row in `DemoUserSeeder` **rather than loosening the panel guards**; and the sidebar tests were updated
+  for the new Leads / Clients entries and the 13-entry client tree, with the leads sidebar permission
+  aligned to the `leads.view` its route actually checks.
+- **Integration gate**: `tests/Feature/Crm/CrmSmokeTest.php`, 6 tests. Its client-isolation case now
+  asserts on the profile screen — the client dashboard answers but does not print the company name, so
+  the original assertion was testing a screen that never claimed to show it.
+- **Suite 1,529 tests / 60,382 assertions green**, 927 s.
+
+Still owed: Phase 5's full acceptance suite (phase-05 §11); the smoke test is the integration gate, not
+the acceptance run. The C.7 contract deviations and W.5 notes in `docs-pending/phase-05-integration.md`
+are carried forward unchanged.
 
 ### 2026-09-19 — Phase 4 finished and committed
 
@@ -707,6 +763,11 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-14 | Phase 3 review-round-2 full suite, random order | `php artisan test --order-by=random` on the same tree | PASS — **1389 tests / 41,436 assertions**, 856 s, seed 1789357805 |
 | 2026-09-14 | T23 / T33 in the shared working tree | `php artisan test --filter=SettingsSplitTruthRegressionTest` with unit 04's files present | 1 failed / 7 passed — only unit 04's undeclared `website.contact_budget_options` / `website.testimonial_auto_approve` reads |
 | 2026-09-14 | Phase 3 review-round-2 HTTP smoke | probe through the real HTTP kernel on `my_office` inside a rolled-back transaction (commit tree) | PASS — 225/225: 24 admin CMS screens 200 for Super Admin, 403 for Accountant / Student / Client, 302 for a guest; public pages, sitemap, robots.txt 200; a `Host: evil.test` sitemap / robots.txt never names the foreign host and matches what the next visitor gets; preview 404 / 403 identical for existing and missing ids; drafts never reach a guest, Student, Client, Accountant, a suspended Super Admin or one owing a password change; CTA / FAQ set to draft leave `/`; a `menus.edit`-only role gets 403 on toggle and on an `is_enabled` change through `PUT` (nothing written) but saves a label; the SEO Expert gets 403 moving the live `about` anchor, saves a label with the same anchor, sees the lock reason; `SettingsService` refuses both readonly deferred-job settings; an allowlisted Google map embed renders an iframe, a foreign one and a `<script>` render nothing; `layouts.site` exists; `ModuleStateChanged` has a listener; regenerate throttled; SEO targets on non-public routes 422; panels reach only their own dashboards; row counts and CMS / menu / settings / module fingerprints identical after rollback |
+| 2026-09-19 | Phase 5 integration gate | `php artisan test tests/Feature/Crm/CrmSmokeTest.php` | PASS — 6 tests / 32 assertions |
+| 2026-09-19 | Phase 5 full suite | `php artisan test` (run by me) | PASS — **1,529 tests / 60,382 assertions**, 927 s |
+| 2026-09-19 | Phase 5 route guards (D31) | `route:list --json` walked in PHP | PASS — 24/24 `client.*` routes carry `client.context`; 409 routes, 0 duplicate names |
+| 2026-09-19 | Phase 5 counters readonly (D62) | `SettingsRegistry::all()['crm']` read | PASS — `lead_number_next_number` and `client_code_next_number` both readonly |
+| 2026-09-19 | Phase 5 migration state | `php artisan migrate:status` on `my_office` | PASS — all 10 CRM migrations Ran, 0 pending |
 
 ---
 
@@ -774,6 +835,9 @@ data, all with a named fix:
 | T37 | **Rule:** every foreign key into `media_assets` is a usage source and must be read by `MediaService` (`usage()`, the one-asset recount and the full `cms:media-recount` pass). `MediaService` still lists its sources by hand. | rule | `Cms/Behaviour/MediaUsageSourcesTest` is schema-driven (`information_schema.KEY_COLUMN_USAGE`): a later phase's `*_media_id` column fails it until `MediaService` names the table and column, otherwise the D24 delete guard would let a live image be trashed. phase-04-integration §4.6 patches those exact spots; no registry was added. |
 | T38 | Contract-name map additions (phase-03 names → code): enums live in `app/Enums/Cms` (contract: `app/Enums`); `App\Services\Cms\Data\SitemapEntry` is the contract's `SitemapUrl`; there is no `PreviewService` (preview lives in `Site\PreviewController` + `ResolvePreviewMode`); `layouts/site.blade.php` is an alias that `@extends('site.layouts.public')`. | low | Naming only; extends the round-1 map in §6. Later phases may use either layout name. |
 | T39 | `trustHosts()` is on the global middleware stack outside `local` and the test runner: a host that is neither `APP_URL` (or a subdomain) nor `seo.canonical_base_url` gets a 400 before routing. | med | Deployment note for Phase 25: set `APP_URL` (and the canonical base URL when the site has a separate domain) to the real public host before switching `APP_ENV` to production, or every request is refused. |
+| T40 | **Phase 5's full acceptance suite (phase-05 §11) is not written.** `tests/Feature/Crm/CrmSmokeTest.php` (6 tests) is the integration gate only: it proves the screens answer, the permissions bite, the services number their records and the client panel is isolated — it does not walk the contract's FT rows. | med | Owed before Phase 5 can be called acceptance-complete. Every other phase closed with its FT map ticked; this one closed on the gate because the build predates this session. |
+| T41 | `docs-pending/phase-05-integration.md` C.7 (contract deviations) and W.5 (search not applied on some CRM screens, staff logo upload missing) are carried forward as written. | low | Fold into the Phase 5 acceptance work (T40). |
+| T42 | `App\Services\Finance\DocumentNumberService` landed in Phase 4's commit although D27 assigns it to Phase 5. | low | Harmless: Phase 5 is still its first and only consumer (`lead_no`, `client_code`). Noted so the D27 attribution is not read as a contradiction later. |
 
 **Build-time items from the contract audit (BT-1 … BT-10)** — the documentation convergence is **closed** after
 three rounds ([`docs/design/consistency-audit-final.md`](docs/design/consistency-audit-final.md): all RD items

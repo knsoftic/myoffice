@@ -121,3 +121,17 @@ Schedule::command('blog:publish-scheduled')->everyMinute()->withoutOverlapping(5
 Schedule::command('inquiries:route-pending')->hourly()->withoutOverlapping(10);
 Schedule::command('careers:close-expired')->dailyAt('00:10');
 Schedule::command('model:prune', ['--model' => [BlogPostView::class]])->dailyAt('02:30');
+
+/*
+|--------------------------------------------------------------------------
+| CRM (phase-05 §10.5)
+|--------------------------------------------------------------------------
+| The six commands live in app/Console/Commands/Crm and are auto-discovered. crm:follow-up-reminders stamps
+| reminder_sent_at under a row lock, so an overlapping run cannot double-send; withoutOverlapping() is the second net.
+*/
+Schedule::command('crm:follow-up-reminders')->everyFiveMinutes()->withoutOverlapping(10);
+Schedule::command('crm:follow-ups-mark-missed')->hourly()->withoutOverlapping();
+Schedule::command('crm:record-captured-referrals')->everyFifteenMinutes()->withoutOverlapping();
+Schedule::command('crm:import-pending-inquiries')->everyTenMinutes()->withoutOverlapping();
+Schedule::command('crm:prune-imports')->dailyAt('02:30')->withoutOverlapping();
+Schedule::command('crm:stale-lead-digest')->dailyAt('09:15')->withoutOverlapping();

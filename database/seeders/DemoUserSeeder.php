@@ -4,14 +4,17 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
+use App\Enums\PanelType;
 use App\Enums\ThemePreference;
 use App\Enums\UserStatus;
 use App\Models\Branch;
+use App\Models\Crm\Client;
 use App\Models\Role;
 use App\Models\User;
 use Database\Seeders\Concerns\WritesToConsole;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 /**
@@ -114,6 +117,10 @@ class DemoUserSeeder extends Seeder
                     $user->assignRole($role);
                 }
 
+                if ($role->panelType() === PanelType::Client) {
+                    $this->attachDemoClient($user);
+                }
+
                 $rows[] = [
                     (string) $role->name,
                     $role->panelType()->value,
@@ -150,5 +157,38 @@ class DemoUserSeeder extends Seeder
         }
 
         return ! app()->environment('production');
+    }
+
+    /**
+     * Give the demo Client account a real client record, because the client panel resolves the signed-in
+     * user to one (phase-05 §6.9): without it every /client route answers 403, which is correct behaviour
+     * and not something a test should be loosened to accept.
+     */
+    private function attachDemoClient(User $user): void
+    {
+        if (! Schema::hasTable('clients')) {
+            return;
+        }
+
+        $client = Client::withTrashed()->firstOrNew(['user_id' => $user->getKey()]);
+
+        if ($client->exists && $client->trashed()) {
+            $client->restore();
+        }
+
+        $client->fill([
+            'name' => 'Demo Client Ltd',
+            'company_name' => 'Demo Client Ltd',
+            'client_type' => 'company',
+            'email' => $user->email,
+            'status' => 'active',
+            'portal_enabled' => true,
+        ]);
+
+        if ($client->client_code === null) {
+            $client->client_code = 'CL-DEMO01';
+        }
+
+        $client->save();
     }
 }

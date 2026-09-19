@@ -233,4 +233,21 @@ return [
         ['updated_by'],
         ['routed_type', 'routed_id'],
     ],
+
+    /*
+    |----------------------------------------------------------------------
+    | Phase 5 - CRM: clients, contacts, documents, leads and their sub-records
+    |----------------------------------------------------------------------
+    | Every Keys-block index plus a row for each foreign key column (F-9.2).
+    */
+    'clients' => [['client_code'], ['user_id'], ['status', 'company_name'], ['account_manager_id'], ['email_normalized'], ['phone_normalized'], ['whatsapp_normalized'], ['lead_id'], ['referral_code_captured'], ['deleted_at'], ['created_by'], ['updated_by']],
+    'client_contacts' => [['client_id', 'primary_guard'], ['user_id'], ['client_id', 'is_primary'], ['email_normalized'], ['phone_normalized'], ['portal_access'], ['client_id'], ['created_by'], ['updated_by']],
+    'client_documents' => [['client_id', 'category'], ['client_id', 'visible_to_client'], ['checksum'], ['expires_at'], ['client_id'], ['shared_by'], ['created_by'], ['updated_by']],
+    'leads' => [['lead_no'], ['contact_inquiry_id'], ['status', 'follow_up_at', 'id'], ['assigned_to', 'status'], ['created_by', 'status'], ['follow_up_at'], ['last_activity_at'], ['source', 'created_at'], ['email_normalized'], ['phone_normalized'], ['whatsapp_normalized'], ['client_id'], ['referral_code_captured'], ['referral_visit_id'], ['deleted_at'], ['service_id'], ['lead_import_id'], ['assigned_to'], ['assigned_by'], ['duplicate_of_lead_id'], ['converted_by'], ['created_by'], ['updated_by']],
+    'lead_activities' => [['lead_id', 'occurred_at', 'id'], ['type', 'occurred_at'], ['created_by', 'occurred_at'], ['lead_follow_up_id'], ['occurred_at'], ['lead_id'], ['from_user_id'], ['to_user_id'], ['related_lead_id'], ['created_by'], ['updated_by']],
+    'lead_follow_ups' => [['lead_id', 'open_guard'], ['previous_follow_up_id'], ['status', 'reminder_due_at', 'reminder_sent_at'], ['assigned_to', 'status', 'scheduled_at'], ['lead_id', 'scheduled_at'], ['scheduled_at'], ['reminder_due_at'], ['lead_id'], ['assigned_to'], ['completed_by'], ['created_by'], ['updated_by']],
+    'lead_conversions' => [['lead_id', 'active_guard'], ['client_id'], ['project_id'], ['converted_at'], ['converted_by', 'converted_at'], ['collaborator_referral_id'], ['lead_id'], ['converted_by'], ['created_by'], ['updated_by']],
+    'lead_imports' => [['status', 'created_at'], ['file_hash'], ['created_by', 'created_at'], ['created_by'], ['updated_by']],
+    'lead_import_rows' => [['lead_import_id', 'row_number'], ['lead_import_id', 'status'], ['lead_id'], ['lead_import_id'], ['duplicate_lead_id']],
+    // phase-05 promotes these two Phase 4 columns to foreign keys; the index already exists (phase-04 rows).
 ];

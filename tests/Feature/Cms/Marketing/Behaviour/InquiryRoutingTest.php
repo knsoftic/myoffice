@@ -73,18 +73,22 @@ final class InquiryRoutingTest extends TestCase
         $this->assertSame(0, (int) $inquiry->fresh()->routing_attempts);
     }
 
-    public function test_43_without_a_target_a_service_inquiry_waits_without_failing(): void
+    public function test_43_without_a_target_an_inquiry_waits_without_failing(): void
     {
-        $this->assertSame([], $this->router()->targets(), 'Phase 4 ships with no inquiry target registered.');
+        // Phase 5 registered the crm_lead target, so a service inquiry now becomes a lead (test 43a).
+        // The waiting path is still real, and is proved on the course inquiry target, which no phase has
+        // shipped yet: an inquiry for a module that has not arrived waits, and never fails a job.
+        $this->assertNull(
+            $this->router()->target(InquiryType::TARGET_COURSE_INQUIRY),
+            'The course inquiry target arrives with Phase 15.'
+        );
 
-        $service = $this->publishedService('Custom Software Development');
         $inquiry = $this->submitInquiry([
-            'inquiry_type' => InquiryType::Service->value,
-            'service_id' => $service->getKey(),
-            'name' => 'Awaiting Crm Visitor',
+            'inquiry_type' => InquiryType::Course->value,
+            'name' => 'Awaiting Course Visitor',
         ]);
 
-        $this->assertSame('crm_lead', $inquiry->routing_target);
+        $this->assertSame('course_inquiry', $inquiry->routing_target);
         $this->assertSame(InquiryRoutingStatus::Pending, $inquiry->routing_status);
         $this->assertSame('target_unregistered', $inquiry->routing_error);
         $this->assertNull($inquiry->routed_id);
@@ -99,22 +103,23 @@ final class InquiryRoutingTest extends TestCase
         $this->assertSame(0, DB::table('failed_jobs')->count(), 'A missing later phase never lands in failed_jobs.');
 
         $this->assertFalse($this->router()->canRoute($inquiry->fresh()), 'Route now is disabled.');
-        $this->assertSame('Lead module not installed yet', $this->router()->waitingReason($inquiry->fresh()));
+        $this->assertSame('Course inquiry module not installed yet', $this->router()->waitingReason($inquiry->fresh()));
 
         $this->actingAs($this->createSuperAdmin())
             ->get(route('admin.contact-inquiries.index'))
             ->assertOk()
-            ->assertSee('Awaiting Crm Visitor')
-            ->assertSee('Lead module not installed yet')
+            ->assertSee('Awaiting Course Visitor')
+            ->assertSee('Course inquiry module not installed yet')
             ->assertDontSee(route('admin.contact-inquiries.route', $inquiry), false);
     }
 
     public function test_44_registering_a_target_and_running_the_command_routes_the_backlog(): void
     {
-        $inquiry = $this->submitInquiry(['inquiry_type' => InquiryType::Service->value, 'name' => 'Backlog Visitor']);
+        // The crm_lead slot is taken by Phase 5's real target, so the backlog is proved on the course slot.
+        $inquiry = $this->submitInquiry(['inquiry_type' => InquiryType::Course->value, 'name' => 'Backlog Visitor', 'course_name' => 'Backlog Course']);
         $this->assertSame(InquiryRoutingStatus::Pending, $inquiry->routing_status);
 
-        $target = $this->registerFakeTarget();
+        $target = $this->registerFakeTarget(InquiryType::TARGET_COURSE_INQUIRY);
         $marker = $this->lastActivityId();
 
         $this->assertSame(0, Artisan::call('inquiries:route-pending'));
@@ -129,8 +134,8 @@ final class InquiryRoutingTest extends TestCase
         $this->assertSame(1, $target->handled);
 
         $record = FakeRoutedRecord::query()->findOrFail($fresh->routed_id);
-        $this->assertSame(FakeInquiryTarget::slugFor('crm_lead', (int) $inquiry->getKey()), $record->getAttribute('slug'));
-        $this->assertSame('Backlog Visitor', $record->getAttribute('name'));
+        $this->assertSame(FakeInquiryTarget::slugFor(InquiryType::TARGET_COURSE_INQUIRY, (int) $inquiry->getKey()), $record->getAttribute('slug'));
+        $this->assertSame('Backlog Course', $record->getAttribute('name'));
 
         $entries = $this->activitiesSince($marker, 'contact_inquiries', 'routed');
         $this->assertCount(1, $entries, 'One ContactInquiryRouted entry.');

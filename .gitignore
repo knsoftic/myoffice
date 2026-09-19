@@ -26,3 +26,6 @@ Thumbs.db
 # local workflow scripts (not part of the application)
 .phase-*.js
 .build-*.js
+
+# local editor / preview config (not part of the application)
+.claude/

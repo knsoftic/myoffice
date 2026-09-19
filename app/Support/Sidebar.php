@@ -243,7 +243,8 @@ final class Sidebar
                         'icon' => 'megaphone',
                         'route' => 'admin.leads.index',
                         'module' => 'leads',
-                        'permission' => 'leads.view_any',
+                        // The route accepts leads.view: a sales executive sees the leads they own.
+                        'permission' => 'leads.view',
                     ],
                     [
                         'label' => 'Clients',
@@ -1170,6 +1171,15 @@ final class Sidebar
     /**
      * @return array<int, array<string, mixed>>
      */
+    /**
+     * The client panel nav (phase-05 section 8.10).
+     *
+     * Every entry names a route that exists and the permission that route's can: really checks, so an
+     * item is hidden rather than leading to a 403. Later phases that add a portal section append here
+     * and grant its client_portal.* permission to the Client role.
+     *
+     * @return array<int, array<string, mixed>>
+     */
     private static function clientTree(): array
     {
         return [
@@ -1198,18 +1208,32 @@ final class Sidebar
                         'icon' => 'flag',
                         'route' => 'client.milestones.index',
                         'module' => 'client_portal',
-                        'permission' => 'client_portal.project_milestones',
+                        'permission' => 'client_portal.milestones',
                     ],
                     [
                         'label' => 'Tasks',
                         'icon' => 'check-circle',
                         'route' => 'client.tasks.index',
                         'module' => 'client_portal',
-                        'permission' => 'client_portal.project_tasks',
+                        'permission' => 'client_portal.tasks',
+                    ],
+                    [
+                        'label' => 'Documents',
+                        'icon' => 'document-text',
+                        'route' => 'client.documents.index',
+                        'module' => 'client_portal',
+                        'permission' => 'client_portal.documents',
+                    ],
+                    [
+                        'label' => 'Files',
+                        'icon' => 'paper-clip',
+                        'route' => 'client.files.index',
+                        'module' => 'client_portal',
+                        'permission' => 'client_portal.files',
                     ],
                     [
                         'label' => 'Invoices',
-                        'icon' => 'document-text',
+                        'icon' => 'banknotes',
                         'route' => 'client.invoices.index',
                         'module' => 'client_portal',
                         'permission' => 'client_portal.invoices',
@@ -1222,13 +1246,6 @@ final class Sidebar
                         'permission' => 'client_portal.payments',
                     ],
                     [
-                        'label' => 'Files',
-                        'icon' => 'paper-clip',
-                        'route' => 'client.files.index',
-                        'module' => 'client_portal',
-                        'permission' => 'client_portal.files_download',
-                    ],
-                    [
                         'label' => 'Meetings',
                         'icon' => 'video-camera',
                         'route' => 'client.meetings.index',
@@ -1237,7 +1254,7 @@ final class Sidebar
                     ],
                     [
                         'label' => 'Messages',
-                        'icon' => 'chat-bubble-left-ellipsis',
+                        'icon' => 'chat',
                         'route' => 'client.messages.index',
                         'module' => 'client_portal',
                         'permission' => 'client_portal.messages',
@@ -1245,9 +1262,23 @@ final class Sidebar
                     [
                         'label' => 'Support',
                         'icon' => 'lifebuoy',
-                        'route' => 'client.support-tickets.index',
+                        'route' => 'client.tickets.index',
                         'module' => 'client_portal',
-                        'permission' => 'client_portal.support_tickets',
+                        'permission' => 'client_portal.tickets',
+                    ],
+                    [
+                        'label' => 'Notifications',
+                        'icon' => 'bell',
+                        'route' => 'client.notifications.index',
+                        'module' => 'client_portal',
+                        'permission' => 'client_portal.notifications',
+                    ],
+                    [
+                        'label' => 'My Profile',
+                        'icon' => 'user-circle',
+                        'route' => 'client.profile.edit',
+                        'module' => 'client_portal',
+                        'permission' => 'client_portal.profile',
                     ],
                 ],
             ],

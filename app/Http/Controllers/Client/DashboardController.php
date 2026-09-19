@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Client;
 
 use App\Enums\PanelType;
+use App\Http\Controllers\Client\Concerns\ServesClientPortal;
 use App\Http\Controllers\Controller;
 use App\Models\LoginHistory;
 use App\Models\Session;
 use App\Models\User;
+use App\Services\Crm\ClientPortalService;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -16,27 +18,26 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 
 /**
- * Client panel landing page (phase-01 §8).
+ * Client panel landing page — `client.dashboard` (phase-01 §8, phase-05 §6.9, §8.10).
  *
- * Phase 1 has no project or finance tables yet, so this screen shows **no numbers it cannot
- * prove**: only the signed-in client's own identity, account state and login bookkeeping, plus
- * empty states naming the phase that fills each section. No query here can reach another
- * client's row — projects, invoices, payments and tickets arrive from phase 5 onwards.
- *
- * Route: `client.dashboard` (`routes/client.php`, owned by the routes agent).
+ * "Where do we stand": every card is a registered, permitted section's `badgeCount()` for the signed-in user's own
+ * client (ClientPortalService::dashboard()), plus Phase 5's own documents and notifications counts. A card whose
+ * section is not registered is absent — never a zero, never a number this screen cannot prove (D28). The client comes
+ * from ClientContext, which `client.context` resolved for this request.
  */
 final class DashboardController extends Controller
 {
+    use ServesClientPortal;
+
     /**
      * Permission namespace for this panel, as declared in App\Support\PermissionRegistry.
-     * Abilities are `{self::PORTAL}.{ability}` — never spelled out anywhere else here.
      */
     private const PORTAL = 'client_portal';
 
-    /**
-     * Allows the route to be wired either as a single-action controller
-     * (`DashboardController::class`) or as `[DashboardController::class, 'index']`.
-     */
+    public function __construct(
+        private readonly ClientPortalService $portal,
+    ) {}
+
     public function __invoke(Request $request): View
     {
         return $this->index($request);
@@ -44,14 +45,11 @@ final class DashboardController extends Controller
 
     public function index(Request $request): View
     {
-        // Panel entry is already gated by `auth`, `active` and `panel:client`; this is the
-        // per-screen permission (phase-01 §4).
         Gate::authorize(self::PORTAL.'.dashboard');
 
-        /** @var User $user */
-        $user = $request->user();
+        $user = $this->portalUser($request);
+        $client = $this->client();
 
-        // Only ever this user's own rows — the whole point of the screen.
         $logins = LoginHistory::query()
             ->forUser($user)
             ->successful()
@@ -59,7 +57,7 @@ final class DashboardController extends Controller
             ->limit(2)
             ->get();
 
-        return view('client.dashboard', [
+        return view('client.dashboard', array_merge($this->portalViewData($request, $client), [
             'panel' => PanelType::Client,
             'user' => $user,
             'greeting' => $this->greeting($user),
@@ -68,12 +66,10 @@ final class DashboardController extends Controller
             'previousLogin' => $logins->get(1),
             'sessionCount' => Session::query()->forUser($user)->count(),
             'accountLinks' => $this->accountLinks(),
-        ]);
+            'dashboard' => $this->portal->dashboard($client),
+        ]));
     }
 
-    /**
-     * Time-of-day greeting in the user's own timezone.
-     */
     private function greeting(User $user): string
     {
         $hour = (int) now($user->effectiveTimezone())->format('G');
@@ -86,9 +82,6 @@ final class DashboardController extends Controller
     }
 
     /**
-     * Role labels for the chips beside the user's name (the label when the role has one,
-     * otherwise the role name). Roles come from the database, never from a hardcoded list.
-     *
      * @return Collection<int, string>
      */
     private function roleChips(User $user): Collection
@@ -102,10 +95,6 @@ final class DashboardController extends Controller
     }
 
     /**
-     * Quick links to the shared account screens. The account routes live in the routes file
-     * owned by another agent, so each candidate is resolved through Route::has() and a null
-     * result simply hides that link instead of breaking the dashboard.
-     *
      * @return array{profile: string|null, password: string|null, sessions: string|null}
      */
     private function accountLinks(): array
@@ -113,15 +102,13 @@ final class DashboardController extends Controller
         $prefix = PanelType::Client->routePrefix();
 
         return [
-            'profile' => $this->firstUrl(["{$prefix}.account.profile", 'account.profile', 'profile.edit']),
+            'profile' => $this->firstUrl(['client.profile.edit', "{$prefix}.account.profile", 'account.profile', 'profile.edit']),
             'password' => $this->firstUrl(["{$prefix}.account.password", 'account.password']),
             'sessions' => $this->firstUrl(["{$prefix}.account.sessions", 'account.sessions']),
         ];
     }
 
     /**
-     * URL of the first candidate route name that is actually registered.
-     *
      * @param  list<string>  $candidates
      */
     private function firstUrl(array $candidates): ?string

@@ -40,6 +40,14 @@ use App\Models\Cms\Technology;
 use App\Models\Cms\Testimonial;
 use App\Models\Cms\WebsiteSection;
 use App\Models\Cms\WebsiteSectionItem;
+use App\Models\Crm\Client;
+use App\Models\Crm\ClientContact;
+use App\Models\Crm\ClientDocument;
+use App\Models\Crm\Lead;
+use App\Models\Crm\LeadActivity;
+use App\Models\Crm\LeadConversion;
+use App\Models\Crm\LeadFollowUp;
+use App\Models\Crm\LeadImport;
 use App\Models\Module;
 use App\Models\Role;
 use App\Models\User;
@@ -70,6 +78,15 @@ use App\Policies\Cms\TechnologyPolicy;
 use App\Policies\Cms\TestimonialPolicy;
 use App\Policies\Cms\WebsiteSectionItemPolicy;
 use App\Policies\Cms\WebsiteSectionPolicy;
+use App\Policies\Crm\ClientContactPolicy;
+use App\Policies\Crm\ClientDocumentPolicy;
+use App\Policies\Crm\ClientPolicy;
+use App\Policies\Crm\ClientPortalPolicy;
+use App\Policies\Crm\LeadActivityPolicy;
+use App\Policies\Crm\LeadConversionPolicy;
+use App\Policies\Crm\LeadFollowUpPolicy;
+use App\Policies\Crm\LeadImportPolicy;
+use App\Policies\Crm\LeadPolicy;
 use App\Policies\ModulePolicy;
 use App\Policies\RolePolicy;
 use App\Policies\UserPolicy;
@@ -100,6 +117,16 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Throwable;
+use App\Contracts\Projects\ProjectCreator;
+use App\Contracts\Referrals\ReferralRecorder;
+use App\Enums\InquiryType;
+use App\Support\ClientPortalRegistry;
+use App\Support\Inquiry\CrmLeadInquiryTarget;
+use App\Support\Portal\Sections\DocumentsSection;
+use App\Support\Portal\Sections\NotificationsSection;
+use App\Support\Projects\NullProjectCreator;
+use App\Support\Referrals\NullReferralRecorder;
+use Illuminate\Contracts\Foundation\Application;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -145,6 +172,15 @@ class AppServiceProvider extends ServiceProvider
         JobOpening::class => JobOpeningPolicy::class,
         JobApplication::class => JobApplicationPolicy::class,
         ContactInquiry::class => ContactInquiryPolicy::class,
+        // phase-05 §9.3: one policy per CRM model (LeadImportRow is authorised through its batch).
+        Lead::class => LeadPolicy::class,
+        LeadActivity::class => LeadActivityPolicy::class,
+        LeadFollowUp::class => LeadFollowUpPolicy::class,
+        LeadConversion::class => LeadConversionPolicy::class,
+        LeadImport::class => LeadImportPolicy::class,
+        Client::class => ClientPolicy::class,
+        ClientContact::class => ClientContactPolicy::class,
+        ClientDocument::class => ClientDocumentPolicy::class,
     ];
 
     /**
@@ -166,6 +202,10 @@ class AppServiceProvider extends ServiceProvider
 
         // phase-04 §6.10.1: one router per process, so a target Phase 5 / 14-17 registers is the one routing sees.
         $this->app->singleton(InquiryRouter::class);
+        // phase-05 [D-P5-1] / E13 / D28: the two write-side capability contracts. bindIf, so Phase 6 (ProjectCreator) and
+        // Phase 9/10 (ReferralRecorder) rebind them with a plain bind() from their own provider, in either order.
+        $this->app->bindIf(ReferralRecorder::class, NullReferralRecorder::class);
+        $this->app->bindIf(ProjectCreator::class, NullProjectCreator::class);
 
         // phase-04 §8.11 / phase-03 §6.1: the nine public section types. Guarded, because the registry's runtime list
         // is static and outlives one application instance (every test boots a fresh one; a second register() throws).
@@ -191,6 +231,7 @@ class AppServiceProvider extends ServiceProvider
         $this->registerBladeDirectives();
         $this->registerPublicCacheInvalidation();
         $this->registerPhase04();
+        $this->registerPhase05();
         $this->configureFromSettings();
     }
 
@@ -269,6 +310,39 @@ class AppServiceProvider extends ServiceProvider
     }
 
     /**
+     * phase-05: the only path from a contact inquiry to a lead (§6.10, F-2.1 — no listener on the inquiry event) and the
+     * two client-panel sections Phase 5 owns ([D-P5-1]). Both registries are container singletons, so each fresh
+     * application a test boots registers into its own instance; the guards make a second resolution a no-op.
+     */
+    private function registerPhase05(): void
+    {
+        $registerTarget = static function (InquiryRouter $router, Application $app): void {
+            if ($router->target(InquiryType::TARGET_CRM_LEAD) === null) {
+                $router->register($app->make(CrmLeadInquiryTarget::class));
+            }
+        };
+
+        $registerSections = static function (ClientPortalRegistry $registry): void {
+            foreach ([new DocumentsSection, new NotificationsSection] as $section) {
+                if (! $registry->has($section->key())) {
+                    $registry->register($section);
+                }
+            }
+        };
+
+        $this->app->afterResolving(InquiryRouter::class, $registerTarget);
+        $this->app->afterResolving(ClientPortalRegistry::class, $registerSections);
+
+        if ($this->app->resolved(InquiryRouter::class)) {
+            $registerTarget($this->app->make(InquiryRouter::class), $this->app);
+        }
+
+        if ($this->app->resolved(ClientPortalRegistry::class)) {
+            $registerSections($this->app->make(ClientPortalRegistry::class));
+        }
+    }
+
+    /**
      * Authorization policies (phase-01 §6.3).
      */
     private function registerPolicies(): void
@@ -276,6 +350,10 @@ class AppServiceProvider extends ServiceProvider
         foreach (self::POLICIES as $model => $policy) {
             Gate::policy($model, $policy);
         }
+
+        // phase-05 §9.3: ClientPortalPolicy::section() answers for a section key, not a model —
+        // Gate::allows('client-portal-section', 'documents'): unregistered or module-off = 404, no permission = 403.
+        Gate::define(ClientPortalPolicy::ABILITY, [ClientPortalPolicy::class, 'section']);
     }
 
     /**

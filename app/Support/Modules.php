@@ -19,6 +19,12 @@ use App\Models\Cms\ServiceTechnology;
 use App\Models\Cms\SitemapGeneration;
 use App\Models\Cms\TeamMember;
 use App\Models\Cms\WebsiteSectionItem;
+use App\Models\Crm\ClientContact;
+use App\Models\Crm\LeadActivity;
+use App\Models\Crm\LeadConversion;
+use App\Models\Crm\LeadFollowUp;
+use App\Models\Crm\LeadImport;
+use App\Models\Crm\LeadImportRow;
 use App\Models\LoginHistory;
 use App\Models\Module;
 use App\Models\Permission;
@@ -97,6 +103,14 @@ final class Modules
         BlogPostView::class => 'blog_posts',
         BlogPostBlogTag::class => 'blog_posts',
         JobOpening::class => 'jobs',
+
+        // phase-05 §4.1: the lead sub-records belong to the `leads` module, contacts to `clients`.
+        LeadActivity::class => 'leads',
+        LeadFollowUp::class => 'leads',
+        LeadConversion::class => 'leads',
+        LeadImport::class => 'leads',
+        LeadImportRow::class => 'leads',
+        ClientContact::class => 'clients',
     ];
 
     /** @var array<string, bool>|null */

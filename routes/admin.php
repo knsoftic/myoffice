@@ -3,7 +3,11 @@
 declare(strict_types=1);
 
 use App\Enums\Cms\SectionPlacement;
+use App\Enums\LeadStatus;
 use App\Http\Controllers\Admin\ActivityLogController;
+use App\Http\Controllers\Admin\ClientContactController;
+use App\Http\Controllers\Admin\ClientController;
+use App\Http\Controllers\Admin\ClientDocumentController;
 use App\Http\Controllers\Admin\Cms\BlogCategoryController;
 use App\Http\Controllers\Admin\Cms\BlogPostController;
 use App\Http\Controllers\Admin\Cms\BlogTagController;
@@ -37,6 +41,12 @@ use App\Http\Controllers\Admin\Cms\TechnologyController;
 use App\Http\Controllers\Admin\Cms\TestimonialController;
 use App\Http\Controllers\Admin\Cms\WebsiteOverviewController;
 use App\Http\Controllers\Admin\DashboardController;
+use App\Http\Controllers\Admin\LeadActivityController;
+use App\Http\Controllers\Admin\LeadBoardController;
+use App\Http\Controllers\Admin\LeadController;
+use App\Http\Controllers\Admin\LeadConversionController;
+use App\Http\Controllers\Admin\LeadFollowUpController;
+use App\Http\Controllers\Admin\LeadImportController;
 use App\Http\Controllers\Admin\LoginHistoryController;
 use App\Http\Controllers\Admin\ModuleController;
 use App\Http\Controllers\Admin\PermissionController;
@@ -763,5 +773,110 @@ Route::prefix('admin')
             Route::post('contact-inquiries/{inquiry}/assign', [ContactInquiryController::class, 'assign'])->whereNumber('inquiry')->middleware('can:contact_inquiries.assign')->name('contact-inquiries.assign');
             Route::post('contact-inquiries/{inquiry}/spam', [ContactInquiryController::class, 'spam'])->whereNumber('inquiry')->middleware('can:contact_inquiries.change_status')->name('contact-inquiries.spam');
             Route::post('contact-inquiries/{inquiry}/not-spam', [ContactInquiryController::class, 'notSpam'])->whereNumber('inquiry')->middleware('can:contact_inquiries.change_status')->name('contact-inquiries.not-spam');
+        });
+
+        /*
+        |------------------------------------------------------------------
+        | phase-05 §7 — CRM: leads (list, board, follow-ups, import, conversion)
+        |------------------------------------------------------------------
+        | {lead} binds through LeadVisibilityScope, so another rep's lead is a 404 before any action runs (D30).
+        | Controllers repeat the can: and add the policy's record rule.
+        */
+        Route::middleware('module:leads')->group(static function (): void {
+            Route::get('leads', [LeadController::class, 'index'])->middleware('can:leads.view')->name('leads.index');
+            Route::get('leads/board', [LeadBoardController::class, 'index'])->middleware('can:leads.view')->name('leads.board');
+            Route::get('leads/board/column/{status}', [LeadBoardController::class, 'column'])->whereIn('status', LeadStatus::values())->middleware('can:leads.view')->name('leads.board.column');
+            Route::get('leads/follow-ups', [LeadFollowUpController::class, 'index'])->middleware('can:leads.view')->name('leads.follow-ups.index');
+            Route::get('leads/create', [LeadController::class, 'create'])->middleware('can:leads.create')->name('leads.create');
+            Route::post('leads', [LeadController::class, 'store'])->middleware('can:leads.create')->name('leads.store');
+            Route::post('leads/duplicate-check', [LeadController::class, 'duplicateCheck'])->middleware(['can:leads.create', 'throttle:60,1,crm-duplicate-check'])->name('leads.duplicate-check');
+            Route::get('leads/export', [LeadController::class, 'export'])->middleware('can:leads.export')->name('leads.export');
+            // C.7 #8: the link BuildCrmExport puts in the "export ready" notification.
+            Route::get('leads/export/download', [LeadController::class, 'exportDownload'])->middleware('can:leads.export')->name('leads.export.download');
+            Route::post('leads/bulk/assign', [LeadController::class, 'bulkAssign'])->middleware('can:leads.assign')->name('leads.bulk.assign');
+            Route::post('leads/bulk/status', [LeadController::class, 'bulkStatus'])->middleware('can:leads.change_status')->name('leads.bulk.status');
+            Route::post('leads/bulk/destroy', [LeadController::class, 'bulkDestroy'])->middleware('can:leads.delete')->name('leads.bulk.destroy');
+
+            Route::get('leads/import', [LeadImportController::class, 'index'])->middleware('can:leads.import')->name('leads.import.index');
+            Route::get('leads/import/template', [LeadImportController::class, 'template'])->middleware('can:leads.import')->name('leads.import.template');
+            Route::post('leads/import', [LeadImportController::class, 'store'])->middleware('can:leads.import')->name('leads.import.store');
+            Route::get('leads/import/{import}', [LeadImportController::class, 'show'])->whereNumber('import')->middleware('can:leads.import')->name('leads.import.show');
+            Route::put('leads/import/{import}/mapping', [LeadImportController::class, 'mapping'])->whereNumber('import')->middleware('can:leads.import')->name('leads.import.mapping');
+            Route::post('leads/import/{import}/validate', [LeadImportController::class, 'validateRows'])->whereNumber('import')->middleware('can:leads.import')->name('leads.import.validate');
+            Route::post('leads/import/{import}/run', [LeadImportController::class, 'run'])->whereNumber('import')->middleware('can:leads.import')->name('leads.import.run');
+            Route::post('leads/import/{import}/cancel', [LeadImportController::class, 'cancel'])->whereNumber('import')->middleware('can:leads.import')->name('leads.import.cancel');
+            Route::get('leads/import/{import}/errors', [LeadImportController::class, 'errors'])->whereNumber('import')->middleware('can:leads.import')->name('leads.import.errors');
+
+            // C.7 #1: the contract's `can:convert,lead` cannot resolve — this URI has no {lead}.
+            Route::post('leads/conversions/{conversion}/supersede', [LeadConversionController::class, 'supersede'])->whereNumber('conversion')->middleware('can:supersede,conversion')->name('leads.conversions.supersede');
+
+            Route::get('leads/{lead}', [LeadController::class, 'show'])->whereNumber('lead')->middleware('can:view,lead')->name('leads.show');
+            Route::get('leads/{lead}/edit', [LeadController::class, 'edit'])->whereNumber('lead')->middleware('can:update,lead')->name('leads.edit');
+            Route::put('leads/{lead}', [LeadController::class, 'update'])->whereNumber('lead')->middleware('can:update,lead')->name('leads.update');
+            Route::delete('leads/{lead}', [LeadController::class, 'destroy'])->whereNumber('lead')->middleware('can:delete,lead')->name('leads.destroy');
+            Route::post('leads/{lead}/restore', [LeadController::class, 'restore'])->whereNumber('lead')->withTrashed()->middleware('can:leads.restore')->name('leads.restore');
+            Route::get('leads/{lead}/print', [LeadController::class, 'print'])->whereNumber('lead')->middleware('can:leads.print')->name('leads.print');
+            Route::patch('leads/{lead}/status', [LeadController::class, 'status'])->whereNumber('lead')->middleware('can:changeStatus,lead')->name('leads.status');
+            Route::patch('leads/{lead}/assign', [LeadController::class, 'assign'])->whereNumber('lead')->middleware('can:assign,lead')->name('leads.assign');
+            Route::patch('leads/{lead}/board-move', [LeadBoardController::class, 'move'])->whereNumber('lead')->middleware(['can:leads.change_status', 'throttle:120,1,crm-board-move'])->name('leads.board.move');
+            Route::post('leads/{lead}/duplicate-link', [LeadController::class, 'duplicateLink'])->whereNumber('lead')->middleware('can:update,lead')->name('leads.duplicate-link');
+
+            Route::post('leads/{lead}/activities', [LeadActivityController::class, 'store'])->whereNumber('lead')->middleware('can:update,lead')->name('leads.activities.store');
+            Route::put('leads/{lead}/activities/{activity}', [LeadActivityController::class, 'update'])->whereNumber(['lead', 'activity'])->middleware('can:update,activity')->name('leads.activities.update');
+            Route::delete('leads/{lead}/activities/{activity}', [LeadActivityController::class, 'destroy'])->whereNumber(['lead', 'activity'])->middleware('can:delete,activity')->name('leads.activities.destroy');
+
+            Route::post('leads/{lead}/follow-ups', [LeadFollowUpController::class, 'store'])->whereNumber('lead')->middleware('can:update,lead')->name('leads.follow-ups.store');
+            Route::patch('leads/{lead}/follow-ups/{followUp}/complete', [LeadFollowUpController::class, 'complete'])->whereNumber(['lead', 'followUp'])->middleware('can:complete,followUp')->name('leads.follow-ups.complete');
+            Route::patch('leads/{lead}/follow-ups/{followUp}/reschedule', [LeadFollowUpController::class, 'reschedule'])->whereNumber(['lead', 'followUp'])->middleware('can:complete,followUp')->name('leads.follow-ups.reschedule');
+            Route::patch('leads/{lead}/follow-ups/{followUp}/cancel', [LeadFollowUpController::class, 'cancel'])->whereNumber(['lead', 'followUp'])->middleware('can:complete,followUp')->name('leads.follow-ups.cancel');
+
+            Route::get('leads/{lead}/convert', [LeadConversionController::class, 'create'])->whereNumber('lead')->middleware('can:convert,lead')->name('leads.convert.form');
+            Route::post('leads/{lead}/convert', [LeadConversionController::class, 'store'])->whereNumber('lead')->middleware('can:convert,lead')->name('leads.convert.store');
+        });
+
+        /*
+        |------------------------------------------------------------------
+        | phase-05 §7 — CRM: clients, contacts
+        |------------------------------------------------------------------
+        | Money is withheld, not hidden: the financial figures are computed and passed only for clients.view_financial.
+        */
+        Route::middleware('module:clients')->group(static function (): void {
+            Route::get('clients', [ClientController::class, 'index'])->middleware('can:clients.view_any')->name('clients.index');
+            Route::get('clients/create', [ClientController::class, 'create'])->middleware('can:clients.create')->name('clients.create');
+            Route::post('clients', [ClientController::class, 'store'])->middleware('can:clients.create')->name('clients.store');
+            Route::get('clients/export', [ClientController::class, 'export'])->middleware('can:clients.export')->name('clients.export');
+            // C.7 #8: the link BuildCrmExport puts in the "export ready" notification.
+            Route::get('clients/export/download', [ClientController::class, 'exportDownload'])->middleware('can:clients.export')->name('clients.export.download');
+            Route::get('clients/{client}', [ClientController::class, 'show'])->whereNumber('client')->middleware('can:view,client')->name('clients.show');
+            Route::get('clients/{client}/edit', [ClientController::class, 'edit'])->whereNumber('client')->middleware('can:update,client')->name('clients.edit');
+            Route::put('clients/{client}', [ClientController::class, 'update'])->whereNumber('client')->middleware('can:update,client')->name('clients.update');
+            Route::delete('clients/{client}', [ClientController::class, 'destroy'])->whereNumber('client')->middleware('can:delete,client')->name('clients.destroy');
+            Route::post('clients/{client}/restore', [ClientController::class, 'restore'])->whereNumber('client')->withTrashed()->middleware('can:clients.restore')->name('clients.restore');
+            Route::get('clients/{client}/print', [ClientController::class, 'print'])->whereNumber('client')->middleware('can:clients.print')->name('clients.print');
+            Route::patch('clients/{client}/status', [ClientController::class, 'status'])->whereNumber('client')->middleware('can:changeStatus,client')->name('clients.status');
+            Route::patch('clients/{client}/account-manager', [ClientController::class, 'accountManager'])->whereNumber('client')->middleware('can:assign,client')->name('clients.account-manager');
+            Route::get('clients/{client}/financials', [ClientController::class, 'financials'])->whereNumber('client')->middleware('can:viewFinancial,client')->name('clients.financials');
+            Route::post('clients/{client}/portal/enable', [ClientController::class, 'enablePortal'])->whereNumber('client')->middleware('can:managePortal,client')->name('clients.portal.enable');
+            Route::post('clients/{client}/portal/disable', [ClientController::class, 'disablePortal'])->whereNumber('client')->middleware('can:managePortal,client')->name('clients.portal.disable');
+
+            Route::post('clients/{client}/contacts', [ClientContactController::class, 'store'])->whereNumber('client')->middleware('can:update,client')->name('clients.contacts.store');
+            Route::put('clients/{client}/contacts/{contact}', [ClientContactController::class, 'update'])->whereNumber(['client', 'contact'])->middleware('can:update,contact')->name('clients.contacts.update');
+            Route::patch('clients/{client}/contacts/{contact}/primary', [ClientContactController::class, 'primary'])->whereNumber(['client', 'contact'])->middleware('can:update,contact')->name('clients.contacts.primary');
+            Route::delete('clients/{client}/contacts/{contact}', [ClientContactController::class, 'destroy'])->whereNumber(['client', 'contact'])->middleware('can:delete,contact')->name('clients.contacts.destroy');
+        });
+
+        /*
+        |------------------------------------------------------------------
+        | phase-05 §7 — CRM: private client documents (D21)
+        |------------------------------------------------------------------
+        | The list (view_any) and the download (download) are independent grants (test 70).
+        */
+        Route::middleware('module:client_documents')->group(static function (): void {
+            Route::get('clients/{client}/documents', [ClientDocumentController::class, 'index'])->whereNumber('client')->middleware('can:client_documents.view_any')->name('clients.documents.index');
+            Route::post('clients/{client}/documents', [ClientDocumentController::class, 'store'])->whereNumber('client')->middleware('can:client_documents.upload')->name('clients.documents.store');
+            Route::put('clients/{client}/documents/{document}', [ClientDocumentController::class, 'update'])->whereNumber(['client', 'document'])->middleware('can:update,document')->name('clients.documents.update');
+            Route::patch('clients/{client}/documents/{document}/visibility', [ClientDocumentController::class, 'visibility'])->whereNumber(['client', 'document'])->middleware('can:changeVisibility,document')->name('clients.documents.visibility');
+            Route::delete('clients/{client}/documents/{document}', [ClientDocumentController::class, 'destroy'])->whereNumber(['client', 'document'])->middleware('can:delete,document')->name('clients.documents.destroy');
+            Route::get('client-documents/{document}/download', [ClientDocumentController::class, 'download'])->whereNumber('document')->middleware('can:download,document')->name('client-documents.download');
         });
     });

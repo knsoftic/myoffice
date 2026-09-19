@@ -12,6 +12,14 @@ use App\Events\Cms\JobApplicationStatusChanged;
 use App\Events\Cms\StudentReviewApproved;
 use App\Events\Cms\TestimonialApproved;
 use App\Events\Cms\TestimonialSubmitted;
+use App\Events\Crm\ClientCreated;
+use App\Events\Crm\ClientDocumentSharedWithClient;
+use App\Events\Crm\LeadActivityLogged;
+use App\Events\Crm\LeadAssigned;
+use App\Events\Crm\LeadConverted;
+use App\Events\Crm\LeadCreated;
+use App\Events\Crm\LeadFollowUpMissed;
+use App\Events\Crm\LeadImportCompleted;
 use App\Listeners\Cms\FlushPublicContentCache;
 use App\Listeners\Cms\LogApplicationStage;
 use App\Listeners\Cms\LogInquiryRouting;
@@ -21,6 +29,14 @@ use App\Listeners\Cms\NotifyStaffOfInquiry;
 use App\Listeners\Cms\NotifyStaffOfPendingModeration;
 use App\Listeners\Cms\PingSitemap;
 use App\Listeners\Cms\RouteContactInquiry;
+use App\Listeners\Crm\NotifyAssigneeOfMissedFollowUp;
+use App\Listeners\Crm\NotifyClientOfSharedDocument;
+use App\Listeners\Crm\NotifyImporterOfCompletion;
+use App\Listeners\Crm\NotifyLeadAssignee;
+use App\Listeners\Crm\NotifyOfLeadConversion;
+use App\Listeners\Crm\NotifyStaffOfWebsiteLead;
+use App\Listeners\Crm\RecordCapturedReferral;
+use App\Listeners\Crm\TouchLeadActivityCaches;
 use App\Listeners\RecordFailedLogin;
 use App\Listeners\RecordLogout;
 use App\Listeners\RecordSuccessfulLogin;
@@ -74,6 +90,15 @@ final class EventListenerServiceProvider extends ServiceProvider
         StudentReviewApproved::class => [FlushPublicContentCache::class],
         TestimonialSubmitted::class => [NotifyStaffOfPendingModeration::class],
         BlogPostPublished::class => [NotifyAuthorOfPublication::class, FlushPublicContentCache::class, PingSitemap::class],
+        // phase-05 §10.2 / §10.3. No listener on ContactInquirySubmitted: CrmLeadInquiryTarget is the only inquiry path (F-2.1).
+        LeadCreated::class => [RecordCapturedReferral::class, NotifyStaffOfWebsiteLead::class],
+        ClientCreated::class => [RecordCapturedReferral::class],
+        LeadAssigned::class => [NotifyLeadAssignee::class],
+        LeadActivityLogged::class => [TouchLeadActivityCaches::class],
+        LeadFollowUpMissed::class => [NotifyAssigneeOfMissedFollowUp::class],
+        LeadConverted::class => [NotifyOfLeadConversion::class],
+        LeadImportCompleted::class => [NotifyImporterOfCompletion::class],
+        ClientDocumentSharedWithClient::class => [NotifyClientOfSharedDocument::class],
     ];
 
     public function register(): void
