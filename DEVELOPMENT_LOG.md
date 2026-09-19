@@ -178,6 +178,8 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D63 | **Disabling a module requires a reason on the server**, not only in the browser (min 5, max 255 characters), and `ModuleService` refuses an empty reason. | `phase-02.md` §5 requires it; the Phase 2 build enforced it only in the Alpine modal, so any direct request skipped the audit reason. Four Phase 1 tests that disabled a module without a reason are updated — a correctly stricter rule, not a loosened test. |
 | D64 | **`settings.edit_mail` is a narrow ability only Super Admin holds.** Editing the SMTP group and running the mail test need it in addition to `settings.edit`. | Delivers the Phase 1 §5 promise that the Admin role cannot change outgoing mail credentials — a compromised Admin account must not be able to redirect password-reset mail. Added by the Phase 2 build (788 permissions); recorded here after the contract re-review flagged it as undecided. |
 | D65 | **Seeders converge additively on existing roles.** `RoleSeeder` grants registry permissions a system role is missing but never revokes one an administrator granted in the role editor; a fresh install still gets exactly the seeded grants. `DemoUserSeeder` refuses production even with `SEED_DEMO=true`. | `syncPermissions` would silently undo every role-editor change on each deploy that re-runs seeders; and weak demo passwords must be impossible in production, not merely off by default. Raised by the installation-guide review. |
+| D66 | **A milestone on hold can be resumed.** phase-06 §2.13.2 lists `pending` / `in_progress` -> `on_hold` but no row back out except `cancelled`. `MilestoneStatus::allowedTransitions()` adds `on_hold` -> `pending` / `in_progress`, and `MilestoneService` checks the held-from stamp on top. | Taken literally the table traps a held milestone forever — the only way out would be to cancel it, which is a different business fact. The project lifecycle §2.13.1 has exactly the missing row ("`on_hold` -> the status it was held from"), so the omission reads as an editing slip rather than a rule. |
+| D67 | **The clock columns `time_entries.started_at` / `ended_at` and `time_entry_segments.started_at` / `ended_at` are `DATETIME`, not the `TIMESTAMP` phase-06 §2.10-§2.11 names.** Every other Phase 6 stamp stays `TIMESTAMP`. | This server runs `explicit_defaults_for_timestamp = OFF`, where the first `TIMESTAMP NOT NULL` column in a table silently acquires `DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP` — verified on `my_office_test` before the migrations were written. On an append-only clock record that would rewrite `started_at` on any UPDATE and change `duration_seconds` underneath every SUM already taken, breaking INV-P5 silently. `DATETIME` carries no such rule, and with the session timezone pinned to `+00:00` (D61) the two types store the same UTC instant. The other stamps are all nullable, which never triggers the rule. |
 
 ---
 
@@ -298,6 +300,24 @@ integrated and committed 2026-09-19
 
 **Committed** — Phase 5 is a rollback point.
 ### [ ] PHASE 6 — Projects, milestones, tasks, time tracking
+
+Contract: [`docs/phases/phase-06.md`](docs/phases/phase-06.md) · **foundation built 2026-09-19, services and
+screens still to come**
+
+| | Item |
+|---|---|
+| [x] | Enums: all 14 of §3 — `ProjectStatus`, `ProjectType`, `ProgressMode`, `ProgressBasis`, `MilestoneStatus`, `TaskStatus`, `Priority`, `ProjectMemberRole`, `TimeEntrySource`, `TimeEntryStatus`, `TimerStopReason`, `AttachmentVisibility`, `CommentVisibility`, and `CommissionCalculationType` (declared here for the spine, F-5.5). 54 cases; every `label()` / `color()` / weight arm exercised; the four transition tables proved closed over their own enum with no self-transition |
+| [x] | Schema: 11 migrations / 11 tables, applied to `my_office_test` **and** `my_office`, `rollback --step=11` clean (0 tables left), re-migrate clean |
+| [x] | §2.14 objects verified against `information_schema`, not by eye: **13 STORED generated columns, 27 CHECK constraints, 7 named unique indexes, 1 trigger** — the exact counts the contract names |
+| [x] | Every guard proved to bite: **29 database-level assertions** (`net_value` unwritable, `chk_projects_commission` refusing a half-configured override, `trg_pvr_no_delete`, `chk_pvr_change`, `uq_pm_user_active` freeing its slot on soft delete, `chk_tasks_depth` both ways, `uq_te_running`, `uq_tes_open`, an open segment generating 0 seconds and 1500 on close) |
+| [x] | Models: 11, with `Blameable` / `LogsActivityWithContext` / `SoftDeletes`, enum casts, the §2.12 relation map, and the six-alias morph map of §2.9 |
+| [x] | `GuardsServiceOwnedColumns` — INV-P1 / INV-P8 / INV-P13 as model hooks: the five value columns, the progress columns and the attribution columns each name their one owning service, and the service brackets its own write with `unlock()`. **26 model-level assertions** green, including `ImmutableRevisionException` on a revision update or delete and the append-only segment rules of §2.11 |
+| [x] | Phase 5's hand-off now resolves: `Client::projects()` and `LeadConversion::project()` reach `App\Models\Project\Project` instead of throwing |
+| [ ] | §4 PermissionRegistry additions, §5 the `projects` settings group (17 keys), sidebar entries |
+| [ ] | §6 services (`ProjectService`, `ProjectValueService`, `ProjectReferralService`, `MilestoneService`, `TaskService`, `TimerService`, `TimeRollupService`, `TaskCacheService`, `ProjectProgressService`, `AttachmentService`, `ProjectNumberService`) |
+| [ ] | §7 routes (admin, collaborator, and the read-only client contributions), §8 screens, §10 events / notifications / jobs / scheduler |
+| [ ] | §11 acceptance tests P6-01 … P6-55 |
+| [ ] | Phase 6's four manifest files (`tests/Support/*-manifest.php`) and their manifest test. The Phase 4 manifest test walks **its own** table list, so the new tables are not covered by anything today — P6-53 asks for the §2.14 object list to be asserted in CI |
 ### [ ] PHASE 7 — Employees, departments, attendance, leave, payroll
 ### [ ] PHASE 8 — Collaborator management (profiles, panel shell, commission settings)
 
@@ -327,6 +347,47 @@ integrated and committed 2026-09-19
 ---
 
 ## 6. Change Log
+
+### 2026-09-19 — Phase 6 foundation: enums, schema, models
+
+The first slice of Phase 6 (projects, milestones, tasks, time tracking). Built directly in the session —
+no workflow, no background agents, at the user's instruction.
+
+- **14 enums / 54 cases** (§3), including `CommissionCalculationType`, which Phase 6 declares on the
+  finance spine's behalf (F-5.5) because `projects.commission_type` casts to it and Phase 6 migrates
+  first. Verified by exercising every `label()` / `color()` / weight arm — a missing `match` arm is an
+  `UnhandledMatchError` at runtime, not a lint error — and by proving the four transition tables are
+  closed over their own enum and list no self-transition.
+- **11 migrations / 11 tables**, applied to `my_office_test` and then `my_office`; `rollback --step=11`
+  leaves zero Phase 6 tables and re-migrating is clean.
+- **The §2.14 object list matched against `information_schema`, not read by eye**: 13 STORED generated
+  columns, 27 CHECK constraints, 7 named unique indexes, 1 trigger — the exact counts the contract names.
+- **Then every guard was made to bite** — 29 database assertions inside a rolled-back transaction.
+  `net_value` refuses a write, `chk_projects_commission` refuses a half-configured override,
+  `trg_pvr_no_delete` refuses a DELETE, `uq_pm_user_active` frees its slot on soft delete and keeps the
+  history row, `chk_tasks_depth` refuses a parentless subtask *and* a depth-2 one, `uq_te_running` and
+  `uq_tes_open` each refuse a second live timer, and a segment generates 0 seconds while open and 1500
+  when closed.
+- **A real hazard caught before it was written** (D67): this server runs
+  `explicit_defaults_for_timestamp = OFF`, where the first `TIMESTAMP NOT NULL` column in a table silently
+  acquires `ON UPDATE CURRENT_TIMESTAMP`. On `time_entry_segments.started_at` that would have rewritten
+  the clock record on any UPDATE and moved `duration_seconds` underneath every SUM already taken — INV-P5
+  broken silently, with nothing to see in the migration. Probed on the test database first; both clock
+  tables use `DATETIME`, and a check now asserts that no Phase 6 column carries the attribute.
+- **11 models** with enum casts, the §2.12 relation map and the six-alias morph map, plus
+  `GuardsServiceOwnedColumns`: INV-P1, INV-P8 and INV-P13 are model hooks that name the one service
+  allowed to write each column group, and that service brackets its own write with `unlock()`. 26
+  model-level assertions green, including the contract's `ImmutableRevisionException` and the append-only
+  segment rules.
+- **One contract gap recorded rather than silently patched** (D66): §2.13.2 gives a milestone no way out
+  of `on_hold` except `cancelled`. The project lifecycle has exactly that missing row, so the enum adds it
+  and the log says why.
+- **Suite 1,529 tests / 60,437 assertions green**, 938 s — the same tests as before Phase 6, 55 more
+  assertions, no regressions. Phase 5's hand-off now resolves: `Client::projects()` and
+  `LeadConversion::project()` reach a real model instead of throwing.
+
+Still to come in Phase 6: the registry additions, the eleven services, routes, screens, events and the
+P6-01 … P6-55 acceptance suite.
 
 ### 2026-09-19 — Phase 5 integrated and committed
 
@@ -768,6 +829,12 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-19 | Phase 5 route guards (D31) | `route:list --json` walked in PHP | PASS — 24/24 `client.*` routes carry `client.context`; 409 routes, 0 duplicate names |
 | 2026-09-19 | Phase 5 counters readonly (D62) | `SettingsRegistry::all()['crm']` read | PASS — `lead_number_next_number` and `client_code_next_number` both readonly |
 | 2026-09-19 | Phase 5 migration state | `php artisan migrate:status` on `my_office` | PASS — all 10 CRM migrations Ran, 0 pending |
+| 2026-09-19 | Phase 6 enums | scripted walk of all 14 enums | PASS — 54 cases, every label/color/weight arm exercised; 4 transition tables closed over their own enum, no self-transition |
+| 2026-09-19 | Phase 6 migrations | `migrate` on `my_office_test`, `rollback --step=11`, `migrate` again, then `migrate` on `my_office` | PASS — 11/11 forward, 0 Phase 6 tables left after rollback, clean re-migrate |
+| 2026-09-19 | Phase 6 §2.14 object list | `information_schema` counted in PHP | PASS — 13 STORED generated columns, 27 CHECKs, 7 named unique indexes, `trg_pvr_no_delete`, and **0** columns silently carrying `ON UPDATE CURRENT_TIMESTAMP` (D67) |
+| 2026-09-19 | Phase 6 database guards | probe through Eloquent and raw DML in a rolled-back transaction | PASS — **29/29**: generated columns unwritable, all six `projects` CHECKs, the append-only trigger, both `uq_pm_*`, `chk_tasks_depth` both ways, `uq_te_running`, `uq_tes_open`, open segment = 0 s and 1500 s on close |
+| 2026-09-19 | Phase 6 model invariants | probe through Eloquent in a rolled-back transaction | PASS — **26/26**: INV-P1 / INV-P8 / INV-P13 each name their owning service and re-lock after `unlock()`, `ImmutableRevisionException` on update and delete, INV-P10 / INV-P12, the append-only segment rules |
+| 2026-09-19 | Phase 6 foundation full suite | `php artisan test` (run by me) | PASS — **1,529 tests / 60,437 assertions**, 938 s; no regressions from the new models resolving Phase 5's later-phase relations |
 
 ---
 
