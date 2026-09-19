@@ -172,9 +172,25 @@ final class SidebarVisibilityTest extends TestCase
                 'FAQ Categories',
                 'Media Library',
                 'SEO',
+                // phase-04 §8: the fifteen marketing entries appended to the same Website group.
+                'Services',
+                'Service Categories',
+                'Technologies',
+                'Portfolio',
+                'Portfolio Categories',
+                'Team',
+                'Testimonials',
+                'Student Reviews',
+                'Success Stories',
+                'Blog Posts',
+                'Blog Categories',
+                'Blog Tags',
+                'Jobs',
+                'Job Applications',
+                'Contact Inquiries',
             ],
             $labels,
-            'Only the screens whose phase has actually shipped its routes may appear — Phase 1, Phase 2\'s Settings and Phase 3\'s Website CMS.'
+            'Only the screens whose phase has actually shipped its routes may appear — Phase 1, Phase 2\'s Settings, Phase 3\'s Website CMS and Phase 4\'s marketing modules.'
         );
     }
 

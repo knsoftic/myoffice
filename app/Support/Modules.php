@@ -5,11 +5,19 @@ declare(strict_types=1);
 namespace App\Support;
 
 use App\Models\Activity;
+use App\Models\Cms\BlogPostBlogTag;
+use App\Models\Cms\BlogPostView;
 use App\Models\Cms\CtaBlock;
+use App\Models\Cms\JobOpening;
 use App\Models\Cms\MediaAsset;
 use App\Models\Cms\MenuItem;
+use App\Models\Cms\PortfolioItem;
+use App\Models\Cms\PortfolioItemMedia;
+use App\Models\Cms\PortfolioItemTechnology;
 use App\Models\Cms\SeoMeta;
+use App\Models\Cms\ServiceTechnology;
 use App\Models\Cms\SitemapGeneration;
+use App\Models\Cms\TeamMember;
 use App\Models\Cms\WebsiteSectionItem;
 use App\Models\LoginHistory;
 use App\Models\Module;
@@ -79,6 +87,16 @@ final class Modules
         MediaAsset::class => 'website_media',
         SeoMeta::class => 'seo',
         SitemapGeneration::class => 'seo',
+
+        // phase-04: models whose class name does not pluralise into their module slug.
+        PortfolioItem::class => 'portfolio',
+        PortfolioItemMedia::class => 'portfolio',
+        PortfolioItemTechnology::class => 'portfolio',
+        ServiceTechnology::class => 'services',
+        TeamMember::class => 'team',
+        BlogPostView::class => 'blog_posts',
+        BlogPostBlogTag::class => 'blog_posts',
+        JobOpening::class => 'jobs',
     ];
 
     /** @var array<string, bool>|null */

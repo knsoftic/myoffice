@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\Cms\ContentStatus;
+use App\Models\Cms\BlogPostView;
 use App\Models\Cms\WebsiteSection;
 use App\Services\Cms\ContentPublisher;
 use App\Services\Cms\MediaService;
@@ -108,3 +109,15 @@ Schedule::command('cms:sitemap-generate')->dailyAt('02:30')->withoutOverlapping(
 Schedule::command('cms:media-recount')->dailyAt('04:00')->withoutOverlapping();
 Schedule::command('cms:verify-published-snapshots')->dailyAt('04:30');
 Schedule::command('cms:cache-prune')->hourly()->withoutOverlapping();
+
+/*
+|--------------------------------------------------------------------------
+| Services, portfolio, blog, careers, inquiries (phase-04 §10.4)
+|--------------------------------------------------------------------------
+| The three commands are auto-discovered from app/Console/Commands. Times are UTC (D61).
+*/
+
+Schedule::command('blog:publish-scheduled')->everyMinute()->withoutOverlapping(5)->runInBackground();
+Schedule::command('inquiries:route-pending')->hourly()->withoutOverlapping(10);
+Schedule::command('careers:close-expired')->dailyAt('00:10');
+Schedule::command('model:prune', ['--model' => [BlogPostView::class]])->dailyAt('02:30');

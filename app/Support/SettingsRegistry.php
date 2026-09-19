@@ -7,6 +7,7 @@ namespace App\Support;
 use App\Enums\Cms\SitemapChangeFrequency;
 use App\Enums\ThemePreference;
 use App\Models\Branch;
+use App\Models\User;
 use DateTime;
 use DateTimeZone;
 use InvalidArgumentException;
@@ -1325,6 +1326,28 @@ final class SettingsRegistry
         }
     }
 
+    /**
+     * Active accounts for `website.inquiry_default_assignee_id` (phase-04 §5). Never throws: an install with no
+     * users table yet gets an empty list.
+     *
+     * @return array<int|string, string>
+     */
+    public static function userOptions(): array
+    {
+        try {
+            /** @var array<int|string, string> $options */
+            $options = User::query()
+                ->active()
+                ->orderBy('name')
+                ->pluck('name', 'id')
+                ->all();
+
+            return $options;
+        } catch (Throwable) {
+            return [];
+        }
+    }
+
     /*
     |--------------------------------------------------------------------------
     | The declarations
@@ -2123,8 +2146,8 @@ final class SettingsRegistry
     }
 
     /**
-     * phase-03 §5.1a — the 13 keys Phase 3 declares. Phase 4 appends its 21 keys (§5.1b) to this same
-     * method and declares no second `website` group (F-6.3).
+     * phase-03 §5.1a — the 13 keys Phase 3 declares. Phase 4's 21 keys (§5.1b) follow them; 34 in all.
+     * No second `website` group is declared (F-6.3).
      *
      * @return array<string, array<string, mixed>>
      */
@@ -2258,6 +2281,214 @@ final class SettingsRegistry
                 'public' => true,
                 'span' => 6,
                 'sort' => 130,
+            ],
+            // phase-04 §5 — the 21 keys Phase 4 contributes into this group (phase-03 §5.1b). 13 + 21 = 34.
+            'services_per_page' => [
+                'label' => 'Services per page',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:3', 'max:48'],
+                'default' => 12,
+                'public' => true,
+                'span' => 4,
+                'sort' => 140,
+            ],
+            'portfolio_per_page' => [
+                'label' => 'Portfolio items per page',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:3', 'max:48'],
+                'default' => 12,
+                'public' => true,
+                'span' => 4,
+                'sort' => 150,
+            ],
+            'blog_per_page' => [
+                'label' => 'Blog posts per page',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:3', 'max:48'],
+                'default' => 9,
+                'public' => true,
+                'span' => 4,
+                'sort' => 160,
+            ],
+            'blog_related_count' => [
+                'label' => 'Related posts under an article',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:6'],
+                'default' => 3,
+                'help' => '0 hides the related-posts block.',
+                'public' => true,
+                'span' => 4,
+                'sort' => 170,
+            ],
+            'blog_view_dedupe_minutes' => [
+                'label' => 'Count a repeat view after',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:5', 'max:10080'],
+                'default' => 1440,
+                'suffix' => 'minutes',
+                'help' => 'The same reader inside this window counts once. 1440 is one calendar day.',
+                'span' => 4,
+                'sort' => 180,
+            ],
+            'blog_view_prune_days' => [
+                'label' => 'Keep daily view rows for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:7', 'max:730'],
+                'default' => 90,
+                'suffix' => 'days',
+                'help' => 'Older rows are pruned nightly. The lifetime view counter is never reduced.',
+                'span' => 4,
+                'sort' => 190,
+            ],
+            'reviews_per_page' => [
+                'label' => 'Testimonials and reviews per page',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:3', 'max:48'],
+                'default' => 12,
+                'public' => true,
+                'span' => 4,
+                'sort' => 200,
+            ],
+            'team_page_enabled' => [
+                'label' => 'Show the team page',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Off makes /team a 404.',
+                'public' => true,
+                'span' => 4,
+                'sort' => 210,
+            ],
+            'portfolio_detail_enabled' => [
+                'label' => 'Portfolio detail pages',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Off keeps the grid but links nowhere, and /portfolio/{slug} is a 404.',
+                'public' => true,
+                'span' => 4,
+                'sort' => 220,
+            ],
+            'testimonial_auto_approve' => [
+                'label' => 'Approve staff-entered testimonials automatically',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Public and panel submissions always wait for approval, whatever this says.',
+                'span' => 4,
+                'sort' => 230,
+            ],
+            'careers_enabled' => [
+                'label' => 'Careers page and applications',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Off makes /careers a 404 and refuses applications.',
+                'public' => true,
+                'span' => 4,
+                'sort' => 240,
+            ],
+            'careers_notify_emails' => [
+                'label' => 'Mail new applications to',
+                'type' => self::TYPE_TEXTAREA,
+                'rules' => ['nullable', 'string', 'max:2000', 'regex:/^[\s,]*(?:[^@\s,;]+@[^@\s,;]+\.[A-Za-z]{2,}[\s,]*)*$/'],
+                'default' => null,
+                'help' => 'One address per line. The CV is never attached.',
+                'span' => 6,
+                'sort' => 250,
+            ],
+            'cv_max_mb' => [
+                'label' => 'Largest CV upload',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:10'],
+                'default' => 5,
+                'suffix' => 'MB',
+                'help' => 'Never above Security → largest upload.',
+                'span' => 3,
+                'sort' => 260,
+            ],
+            'cv_allowed_types' => [
+                'label' => 'Accepted CV formats',
+                'type' => self::TYPE_MULTISELECT,
+                'rules' => ['required', 'array', 'min:1'],
+                'item_rules' => [
+                    '*' => ['string', 'distinct', 'in:pdf,doc,docx'],
+                ],
+                'default' => ['pdf', 'doc', 'docx'],
+                'options' => [
+                    'pdf' => 'PDF',
+                    'doc' => 'Word (.doc)',
+                    'docx' => 'Word (.docx)',
+                ],
+                'span' => 3,
+                'sort' => 270,
+            ],
+            'contact_notify_emails' => [
+                'label' => 'Mail new inquiries to',
+                'type' => self::TYPE_TEXTAREA,
+                'rules' => ['nullable', 'string', 'max:2000', 'regex:/^[\s,]*(?:[^@\s,;]+@[^@\s,;]+\.[A-Za-z]{2,}[\s,]*)*$/'],
+                'default' => null,
+                'help' => 'One address per line, in addition to staff who can see every inquiry.',
+                'span' => 6,
+                'sort' => 280,
+            ],
+            'contact_budget_options' => [
+                'label' => 'Budget choices on the contact form',
+                'type' => self::TYPE_JSON,
+                'rules' => ['nullable', 'array', 'max:12'],
+                'item_rules' => [
+                    '*' => ['string', 'max:100'],
+                ],
+                'default' => ['Under 50,000', '50,000 – 150,000', '150,000 – 500,000', '500,000 – 1,000,000', 'Above 1,000,000', 'Not sure yet'],
+                'help' => 'A JSON list of labels. The chosen label is stored as typed, so editing the list never rewrites an inquiry.',
+                'public' => true,
+                'span' => 6,
+                'sort' => 290,
+            ],
+            'contact_min_submit_seconds' => [
+                'label' => 'Faster than this is a bot',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:60'],
+                'default' => 3,
+                'suffix' => 'seconds',
+                'span' => 3,
+                'sort' => 300,
+            ],
+            'contact_rate_per_hour' => [
+                'label' => 'Contact submissions per hour per visitor',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:200'],
+                'default' => 20,
+                'span' => 3,
+                'sort' => 310,
+            ],
+            'spam_blocklist' => [
+                'label' => 'Spam words and domains',
+                'type' => self::TYPE_TEXTAREA,
+                'rules' => ['nullable', 'string', 'max:5000'],
+                'default' => null,
+                'help' => 'One word or domain per line, matched without regard to case against the subject and the message.',
+                'span' => 6,
+                'sort' => 320,
+            ],
+            'inquiry_auto_route' => [
+                'label' => 'Route inquiries automatically',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Off leaves every inquiry waiting for a manual "Route now".',
+                'span' => 3,
+                'sort' => 330,
+            ],
+            'inquiry_default_assignee_id' => [
+                'label' => 'Assign new inquiries to',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['nullable', 'integer', 'exists:users,id'],
+                'default' => null,
+                'options' => [self::class, 'userOptions'],
+                'help' => 'Optional. Gives every new inquiry an owner, so reviewers without the full queue still see it.',
+                'span' => 3,
+                'sort' => 340,
             ],
         ];
     }

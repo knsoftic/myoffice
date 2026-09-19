@@ -214,7 +214,7 @@ final class CmsScreensTest extends TestCase
      * scrolls inside its own container (CLAUDE.md §6); no inline width wider than a 375 px phone; no
      * leaked error text; the Light / Dark / System control is on the page.
      */
-    public function test_public_site_is_responsive_and_dark_mode_clean_in_the_rendered_html(): void
+    public function test_public_site_is_responsive_and_dark_mode_clean(): void
     {
         $table = '<table><thead><tr><th>Programme</th><th>Duration</th><th>Fee</th><th>Refund window</th><th>Conditions</th></tr></thead>'
             .'<tbody><tr><td>Full-stack web development bootcamp</td><td>Six months</td><td>PKR 150,000</td><td>Fourteen days</td><td>Refundable before the second class of the first batch week</td></tr></tbody></table>';
@@ -234,7 +234,7 @@ final class CmsScreensTest extends TestCase
      * FT-37 — a static scan of the public views: `{!! !!}` only on `RichText::sanitize()` output (the map
      * embed goes through it too), and no other raw-output path (a PHP tag or an `echo`).
      */
-    public function test_no_unescaped_output_in_site_views_static_scan(): void
+    public function test_no_unescaped_output_in_site_views(): void
     {
         $root = resource_path('views');
         $violations = [];

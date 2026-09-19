@@ -207,7 +207,7 @@ class RoleSeeder extends Seeder
             [
                 'name' => 'HR',
                 'label' => 'Human Resources',
-                'description' => 'Employees, departments, attendance, leave and payroll, with HR reporting.',
+                'description' => 'Employees, departments, attendance, leave, payroll and hiring, with HR reporting.',
                 'panel' => PanelType::Admin,
                 'level' => 20,
                 'is_system' => false,
@@ -215,6 +215,8 @@ class RoleSeeder extends Seeder
                 'permissions' => $this->merge(
                     $staffBase,
                     PermissionRegistry::permissionNamesFor(['employees', 'departments', 'attendance', 'leaves', 'payroll']),
+                    // phase-04 §9.1 / §13 (H7): hiring sits with HR — every opening and every application, CVs included.
+                    PermissionRegistry::permissionNamesFor(['jobs', 'job_applications']),
                     PermissionRegistry::permissionNamesFor('reports', self::REPORTING),
                 ),
             ],
@@ -291,7 +293,11 @@ class RoleSeeder extends Seeder
                 'is_default' => false,
                 'permissions' => $this->merge(
                     $staffBase,
-                    PermissionRegistry::permissionNamesFor(['blog_posts', 'blog_categories', 'seo']),
+                    // phase-04 §9.1 / §13: an author, not an editor — never blog_posts.approve; the catalogue copy read/edit;
+                    // never job_applications or contact_inquiries (F-12.4).
+                    PermissionRegistry::permissionNamesFor('blog_posts', $this->abilitiesExcept('blog_posts', ['approve', 'reject'])),
+                    PermissionRegistry::permissionNamesFor(['blog_categories', 'blog_tags', 'seo']),
+                    PermissionRegistry::permissionNamesFor(['services', 'portfolio', 'team'], self::READ_EDIT),
                     PermissionRegistry::permissionNamesFor('website_sections', self::READ_EDIT),
                     // phase-03 §9: page copy and the whole media library. Never *.change_status: an SEO
                     // edit goes live when someone with publish rights publishes it.
@@ -310,7 +316,10 @@ class RoleSeeder extends Seeder
                 'is_default' => false,
                 'permissions' => $this->merge(
                     $staffBase,
-                    PermissionRegistry::permissionNamesFor(['leads', 'blog_posts', 'blog_categories', 'course_inquiries']),
+                    PermissionRegistry::permissionNamesFor(['leads', 'blog_categories', 'blog_tags', 'course_inquiries']),
+                    // phase-04 §9.1: author-level blog; inquiries assigned to it only — no view_any, no view_logs (F-12.4).
+                    PermissionRegistry::permissionNamesFor('blog_posts', $this->abilitiesExcept('blog_posts', ['approve', 'reject'])),
+                    PermissionRegistry::permissionNamesFor('contact_inquiries', [Ability::View, Ability::Edit, Ability::ChangeStatus]),
                     PermissionRegistry::permissionNamesFor('website_sections', self::READ_EDIT),
                     // phase-03 §9: CTA blocks and FAQs in full; media view + upload only. No pages, no
                     // seo.edit, no publish.
@@ -331,6 +340,8 @@ class RoleSeeder extends Seeder
                     PermissionRegistry::permissionNamesFor('leads'),
                     PermissionRegistry::permissionNamesFor('clients', self::READ_CREATE_EDIT),
                     PermissionRegistry::permissionNamesFor(['course_inquiries', 'demo_classes', 'meetings']),
+                    // phase-04 §9.1.2: its own assigned inquiries, and it may hand one on.
+                    PermissionRegistry::permissionNamesFor('contact_inquiries', [Ability::View, Ability::Assign]),
                 ),
             ],
             [
@@ -346,6 +357,8 @@ class RoleSeeder extends Seeder
                     PermissionRegistry::permissionNamesFor(['course_inquiries', 'admissions', 'demo_classes']),
                     PermissionRegistry::permissionNamesFor('students', self::READ_CREATE_EDIT),
                     PermissionRegistry::permissionNamesFor('student_fees', self::READ_CREATE),
+                    // phase-04 §9.1.2: view the inquiries assigned to the front desk.
+                    PermissionRegistry::permissionNamesFor('contact_inquiries', [Ability::View]),
                 ),
             ],
             [
@@ -373,6 +386,8 @@ class RoleSeeder extends Seeder
                     $staffBase,
                     PermissionRegistry::permissionNamesFor($this->businessModulesIn(ModuleGroup::Institute)),
                     PermissionRegistry::permissionNamesFor('reports', self::FINANCIAL_REPORTING),
+                    // phase-04 §13 (Q2): the blog editor role beside Admin.
+                    PermissionRegistry::permissionNamesFor(['blog_posts', 'blog_categories', 'blog_tags']),
                 ),
             ],
             [

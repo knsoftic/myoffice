@@ -4,41 +4,91 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Dashboard\Cms\BlogActivityWidget;
+use App\Dashboard\Cms\InquiryRoutingBacklogWidget;
+use App\Dashboard\Cms\NewApplicationsWidget;
+use App\Dashboard\Cms\NewInquiriesWidget;
+use App\Dashboard\Cms\OpenJobsWidget;
+use App\Dashboard\Cms\PendingModerationWidget;
+use App\Dashboard\Cms\TopViewedPostsWidget;
 use App\Events\ModuleStateChanged;
 use App\Events\SettingsChanged;
+use App\Models\Cms\BlogCategory;
+use App\Models\Cms\BlogPost;
+use App\Models\Cms\BlogTag;
 use App\Models\Cms\CmsRevision;
+use App\Models\Cms\ContactInquiry;
 use App\Models\Cms\CtaBlock;
 use App\Models\Cms\Faq;
 use App\Models\Cms\FaqCategory;
+use App\Models\Cms\JobApplication;
+use App\Models\Cms\JobOpening;
 use App\Models\Cms\MediaAsset;
 use App\Models\Cms\Menu;
 use App\Models\Cms\MenuItem;
 use App\Models\Cms\Page;
+use App\Models\Cms\PortfolioCategory;
+use App\Models\Cms\PortfolioItem;
 use App\Models\Cms\SeoMeta;
+use App\Models\Cms\Service;
+use App\Models\Cms\ServiceCategory;
 use App\Models\Cms\SitemapGeneration;
+use App\Models\Cms\StudentReview;
+use App\Models\Cms\SuccessStory;
+use App\Models\Cms\TeamMember;
+use App\Models\Cms\Technology;
+use App\Models\Cms\Testimonial;
 use App\Models\Cms\WebsiteSection;
 use App\Models\Cms\WebsiteSectionItem;
 use App\Models\Module;
 use App\Models\Role;
 use App\Models\User;
+use App\Policies\Cms\BlogCategoryPolicy;
+use App\Policies\Cms\BlogPostPolicy;
+use App\Policies\Cms\BlogTagPolicy;
 use App\Policies\Cms\CmsRevisionPolicy;
+use App\Policies\Cms\ContactInquiryPolicy;
 use App\Policies\Cms\CtaBlockPolicy;
 use App\Policies\Cms\FaqCategoryPolicy;
 use App\Policies\Cms\FaqPolicy;
+use App\Policies\Cms\JobApplicationPolicy;
+use App\Policies\Cms\JobOpeningPolicy;
 use App\Policies\Cms\MediaPolicy;
 use App\Policies\Cms\MenuItemPolicy;
 use App\Policies\Cms\MenuPolicy;
 use App\Policies\Cms\PagePolicy;
+use App\Policies\Cms\PortfolioCategoryPolicy;
+use App\Policies\Cms\PortfolioItemPolicy;
 use App\Policies\Cms\SeoMetaPolicy;
+use App\Policies\Cms\ServiceCategoryPolicy;
+use App\Policies\Cms\ServicePolicy;
 use App\Policies\Cms\SitemapGenerationPolicy;
+use App\Policies\Cms\StudentReviewPolicy;
+use App\Policies\Cms\SuccessStoryPolicy;
+use App\Policies\Cms\TeamMemberPolicy;
+use App\Policies\Cms\TechnologyPolicy;
+use App\Policies\Cms\TestimonialPolicy;
 use App\Policies\Cms\WebsiteSectionItemPolicy;
 use App\Policies\Cms\WebsiteSectionPolicy;
 use App\Policies\ModulePolicy;
 use App\Policies\RolePolicy;
 use App\Policies\UserPolicy;
 use App\Services\Cms\CacheVersion;
+use App\Services\Cms\InquiryRouter;
 use App\Services\Cms\PublicCache;
+use App\Services\Cms\SitemapGenerator;
+use App\Support\Cms\PublicFormRateLimits;
+use App\Support\Cms\SectionRegistry;
+use App\Support\Cms\Sections\MarketingSectionTypes;
+use App\Support\Cms\Sitemap\BlogCategorySitemapProvider;
+use App\Support\Cms\Sitemap\BlogPostSitemapProvider;
+use App\Support\Cms\Sitemap\BlogTagSitemapProvider;
+use App\Support\Cms\Sitemap\JobOpeningSitemapProvider;
+use App\Support\Cms\Sitemap\PortfolioSitemapProvider;
+use App\Support\Cms\Sitemap\ServiceSitemapProvider;
+use App\Support\Cms\Sitemap\TeamSitemapProvider;
 use App\Support\ConfigureFromSettings;
+use App\Support\DashboardRegistry;
 use App\Support\Modules;
 use App\Support\SettingsRepository;
 use App\Support\SiteSettings;
@@ -78,6 +128,23 @@ class AppServiceProvider extends ServiceProvider
         MediaAsset::class => MediaPolicy::class,
         CmsRevision::class => CmsRevisionPolicy::class,
         SitemapGeneration::class => SitemapGenerationPolicy::class,
+
+        // phase-04 §6.11: App\Models\Cms\X → App\Policies\Cms\XPolicy is not a discovery path, so all 15 are explicit.
+        ServiceCategory::class => ServiceCategoryPolicy::class,
+        Service::class => ServicePolicy::class,
+        Technology::class => TechnologyPolicy::class,
+        PortfolioCategory::class => PortfolioCategoryPolicy::class,
+        PortfolioItem::class => PortfolioItemPolicy::class,
+        TeamMember::class => TeamMemberPolicy::class,
+        Testimonial::class => TestimonialPolicy::class,
+        StudentReview::class => StudentReviewPolicy::class,
+        SuccessStory::class => SuccessStoryPolicy::class,
+        BlogCategory::class => BlogCategoryPolicy::class,
+        BlogTag::class => BlogTagPolicy::class,
+        BlogPost::class => BlogPostPolicy::class,
+        JobOpening::class => JobOpeningPolicy::class,
+        JobApplication::class => JobApplicationPolicy::class,
+        ContactInquiry::class => ContactInquiryPolicy::class,
     ];
 
     /**
@@ -96,6 +163,19 @@ class AppServiceProvider extends ServiceProvider
 
         // StatisticsProvider is deliberately left unbound (a fresh instance per resolve): its memo is
         // per instance, and sharing one across a request would outlive a publish's cache-stamp bump.
+
+        // phase-04 §6.10.1: one router per process, so a target Phase 5 / 14-17 registers is the one routing sees.
+        $this->app->singleton(InquiryRouter::class);
+
+        // phase-04 §8.11 / phase-03 §6.1: the nine public section types. Guarded, because the registry's runtime list
+        // is static and outlives one application instance (every test boots a fresh one; a second register() throws).
+        $knownSectionTypes = SectionRegistry::keys();
+
+        foreach (MarketingSectionTypes::definitions() as $key => $definition) {
+            if (! in_array($key, $knownSectionTypes, true)) {
+                SectionRegistry::register($key, $definition);
+            }
+        }
     }
 
     /**
@@ -110,6 +190,7 @@ class AppServiceProvider extends ServiceProvider
         $this->registerPolicies();
         $this->registerBladeDirectives();
         $this->registerPublicCacheInvalidation();
+        $this->registerPhase04();
         $this->configureFromSettings();
     }
 
@@ -145,6 +226,45 @@ class AppServiceProvider extends ServiceProvider
             ConfigureFromSettings::apply();
         } catch (Throwable $exception) {
             report($exception);
+        }
+    }
+
+    /**
+     * phase-04: the two public-form rate limiters (§6.9 — registered here, there is no RateLimitServiceProvider), the
+     * seven content dashboard widgets (§8.12, explicit because they live in app/Dashboard/Cms, not the discovery path)
+     * and one sitemap provider per public entity (§13 Phase 3 row, D23). The providers go through Phase 3's
+     * SitemapGenerator::extend() seam, which replaces a key on re-registration; SitemapRegistry::register() refuses a
+     * second instance under the same key, and its static list outlives each fresh application a test boots. Each
+     * piece degrades on its own.
+     */
+    private function registerPhase04(): void
+    {
+        PublicFormRateLimits::register();
+
+        try {
+            DashboardRegistry::registerMany([
+                NewInquiriesWidget::class,
+                InquiryRoutingBacklogWidget::class,
+                PendingModerationWidget::class,
+                NewApplicationsWidget::class,
+                OpenJobsWidget::class,
+                BlogActivityWidget::class,
+                TopViewedPostsWidget::class,
+            ]);
+        } catch (Throwable $exception) {
+            report($exception);
+        }
+
+        foreach ([
+            new ServiceSitemapProvider,
+            new PortfolioSitemapProvider,
+            new BlogPostSitemapProvider,
+            new BlogCategorySitemapProvider,
+            new BlogTagSitemapProvider,
+            new JobOpeningSitemapProvider,
+            new TeamSitemapProvider,
+        ] as $provider) {
+            SitemapGenerator::extend($provider->key(), $provider);
         }
     }
 

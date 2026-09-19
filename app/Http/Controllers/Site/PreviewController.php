@@ -44,31 +44,31 @@ final class PreviewController extends Controller
      * has passed, so an unauthorised request is answered the same way whether or not the id exists — a
      * draft cannot be discovered by counting (§9).
      */
-    public function page(Request $request, string $id): Response
+    public function page(Request $request, string $page): Response
     {
         $this->authorisePreview($request, 'pages.view');
 
-        /** @var Page $page */
-        $page = Page::query()->findOrFail((int) $id);
+        /** @var Page $model */
+        $model = Page::query()->findOrFail((int) $page);
 
-        return $this->renderPage($page, draft: true);
+        return $this->renderPage($model, draft: true);
     }
 
     /**
      * One section's draft in its frame: a header or footer draft replaces the live one; any other
      * section renders alone between the live header and footer (the editor's preview pane, §8.5).
      */
-    public function section(Request $request, string $id): Response
+    public function section(Request $request, string $section): Response
     {
         $this->authorisePreview($request, 'website_sections.view');
 
-        /** @var WebsiteSection $section */
-        $section = WebsiteSection::query()->findOrFail((int) $id);
+        /** @var WebsiteSection $model */
+        $model = WebsiteSection::query()->findOrFail((int) $section);
 
-        $draft = $this->draftSection($section);
+        $draft = $this->draftSection($model);
         $chrome = $this->chrome();
         $sections = [];
-        $placement = $section->placement instanceof SectionPlacement ? $section->placement : SectionPlacement::tryFrom((string) $section->placement);
+        $placement = $model->placement instanceof SectionPlacement ? $model->placement : SectionPlacement::tryFrom((string) $model->placement);
 
         if ($placement === SectionPlacement::GlobalHeader) {
             $chrome['header'] = $draft;
@@ -78,7 +78,7 @@ final class PreviewController extends Controller
             $sections[] = $draft;
         }
 
-        $page = $section->page_id === null ? null : Page::query()->find((int) $section->page_id);
+        $page = $model->page_id === null ? null : Page::query()->find((int) $model->page_id);
         $seo = $page instanceof Page
             ? $this->seo->for($page, true, '/'.$page->slug)
             : $this->seo->for(SeoService::HOME_ROUTE, true, '/');
@@ -86,7 +86,7 @@ final class PreviewController extends Controller
         $site = $this->sitePayload($chrome, $sections, $seo, null, true, 'site-preview site-preview-section');
 
         return $this->withSiteHeaders(
-            response()->view('site.home', ['site' => $site, 'previewSection' => $section->getKey(), 'previewOmitted' => $draft === null]),
+            response()->view('site.home', ['site' => $site, 'previewSection' => $model->getKey(), 'previewOmitted' => $draft === null]),
             $seo,
             true,
         );

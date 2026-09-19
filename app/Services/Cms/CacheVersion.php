@@ -108,6 +108,28 @@ final class CacheVersion
     }
 
     /**
+     * Read a version-stamped entry **without** creating it: the value when this request (or an earlier
+     * one under the same stamp) already stored it, else `null`.
+     *
+     * It exists so a second reader of data the page has already loaded can reuse it instead of issuing
+     * its own query — `SeoService::heroImage()` reads the `sections` entry `ComposesSite` just filled
+     * (FT-27's query budget). A miss is never a failure: every caller keeps its own fallback, so this
+     * can only ever remove a query, never change an answer. A store failure reads as a miss.
+     *
+     * @param  array<int|string, mixed>|string  $parts
+     */
+    public function peek(string $namespace, array|string $parts = []): mixed
+    {
+        try {
+            return $this->cache->get($this->key($namespace, $parts));
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return null;
+        }
+    }
+
+    /**
      * Remember a value under a version-stamped key. A publish makes the entry unreachable.
      *
      * @template TValue

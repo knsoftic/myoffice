@@ -689,7 +689,8 @@ final class Sidebar
                         'permission' => 'seo.view_any',
                     ],
 
-                    // Business entities the site renders stay at the top level (Phase 4 onwards, unchanged).
+                    // Business entities the site renders stay at the top level (phase-04 §8, F-6.7). Flat items only:
+                    // a rendered parent has no URL. Every `permission` is exactly the can: of the route it links to.
                     [
                         'label' => 'Services',
                         'icon' => 'wrench-screwdriver',
@@ -698,11 +699,32 @@ final class Sidebar
                         'permission' => 'services.view_any',
                     ],
                     [
+                        'label' => 'Service Categories',
+                        'icon' => 'squares-2x2',
+                        'route' => 'admin.service-categories.index',
+                        'module' => 'service_categories',
+                        'permission' => 'service_categories.view_any',
+                    ],
+                    [
+                        'label' => 'Technologies',
+                        'icon' => 'puzzle-piece',
+                        'route' => 'admin.technologies.index',
+                        'module' => 'technologies',
+                        'permission' => 'technologies.view_any',
+                    ],
+                    [
                         'label' => 'Portfolio',
                         'icon' => 'photo',
                         'route' => 'admin.portfolio.index',
                         'module' => 'portfolio',
                         'permission' => 'portfolio.view_any',
+                    ],
+                    [
+                        'label' => 'Portfolio Categories',
+                        'icon' => 'rectangle-stack',
+                        'route' => 'admin.portfolio-categories.index',
+                        'module' => 'portfolio_categories',
+                        'permission' => 'portfolio_categories.view_any',
                     ],
                     [
                         'label' => 'Team',
@@ -733,51 +755,48 @@ final class Sidebar
                         'permission' => 'success_stories.view_any',
                     ],
                     [
-                        'label' => 'Blog',
+                        'label' => 'Blog Posts',
                         'icon' => 'newspaper',
-                        'children' => [
-                            [
-                                'label' => 'Posts',
-                                'icon' => 'newspaper',
-                                'route' => 'admin.blog-posts.index',
-                                'module' => 'blog_posts',
-                                'permission' => 'blog_posts.view_any',
-                            ],
-                            [
-                                'label' => 'Categories',
-                                'icon' => 'tag',
-                                'route' => 'admin.blog-categories.index',
-                                'module' => 'blog_categories',
-                                'permission' => 'blog_categories.view_any',
-                            ],
-                        ],
+                        'route' => 'admin.blog-posts.index',
+                        'module' => 'blog_posts',
+                        'permission' => 'blog_posts.view_any',
                     ],
                     [
-                        'label' => 'Careers',
+                        'label' => 'Blog Categories',
+                        'icon' => 'folder',
+                        'route' => 'admin.blog-categories.index',
+                        'module' => 'blog_categories',
+                        'permission' => 'blog_categories.view_any',
+                    ],
+                    [
+                        'label' => 'Blog Tags',
+                        'icon' => 'tag',
+                        'route' => 'admin.blog-tags.index',
+                        'module' => 'blog_tags',
+                        'permission' => 'blog_tags.view_any',
+                    ],
+                    [
+                        'label' => 'Jobs',
                         'icon' => 'briefcase',
-                        'children' => [
-                            [
-                                'label' => 'Jobs',
-                                'icon' => 'briefcase',
-                                'route' => 'admin.jobs.index',
-                                'module' => 'jobs',
-                                'permission' => 'jobs.view_any',
-                            ],
-                            [
-                                'label' => 'Applications',
-                                'icon' => 'inbox-stack',
-                                'route' => 'admin.job-applications.index',
-                                'module' => 'job_applications',
-                                'permission' => 'job_applications.view_any',
-                            ],
-                        ],
+                        'route' => 'admin.jobs.index',
+                        'module' => 'jobs',
+                        'permission' => 'jobs.view_any',
                     ],
                     [
+                        // `view`, not view_any: a hiring manager sees the applications of its own openings (§9.1.3).
+                        'label' => 'Job Applications',
+                        'icon' => 'inbox-stack',
+                        'route' => 'admin.job-applications.index',
+                        'module' => 'job_applications',
+                        'permission' => 'job_applications.view',
+                    ],
+                    [
+                        // `view`, not view_any: a reviewer sees what is assigned to it (§9.1.2).
                         'label' => 'Contact Inquiries',
                         'icon' => 'envelope',
                         'route' => 'admin.contact-inquiries.index',
                         'module' => 'contact_inquiries',
-                        'permission' => 'contact_inquiries.view_any',
+                        'permission' => 'contact_inquiries.view',
                     ],
                 ],
             ],

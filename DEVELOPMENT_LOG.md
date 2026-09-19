@@ -10,8 +10,8 @@
 | **Stack** | Laravel 12.69.2 · PHP 8.2.12 · MariaDB 10.4.32 · Tailwind 3.4 · Alpine 3 · Vite 7 |
 | **Database** | `my_office` (utf8mb4_unicode_ci) |
 | **Created** | 2026-09-12 |
-| **Last updated** | 2026-09-13 |
-| **Current phase** | PHASES 3-25 — automated build in release-slice order (docs/design/build-order.md) |
+| **Last updated** | 2026-09-19 |
+| **Current phase** | PHASE 5 — CRM: leads, clients, client panel |
 
 ---
 
@@ -194,7 +194,7 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | [x] | Breeze (Blade + dark) scaffolded, npm installed, assets built | Tailwind 3.4.19 + Alpine 3 |
 | [x] | `DEVELOPMENT_LOG.md`, `CLAUDE.md`, `docs/phases/phase-01.md` written | this file |
 
-### [~] PHASE 1 — Laravel setup, authentication, roles & permissions
+### [x] PHASE 1 — Laravel setup, authentication, roles & permissions
 
 Contract: [`docs/phases/phase-01.md`](docs/phases/phase-01.md) · built 2026-09-12 · **remediation in progress**
 
@@ -271,7 +271,7 @@ verified and committed 2026-09-13
 | [x] | Review-round-2 verification: suite **1389 tests / 41,436 assertions** green sequentially and in random order; `tests/Feature/Cms` 142 tests; HTTP smoke 225/225 on `my_office` in a rolled-back transaction; seeders: 0 setting values, 0 module `is_enabled`, 0 role grants changed (D65), 2 expected `is_readonly` metadata refreshes |
 
 **Committed** — Phase 3 is a rollback point.
-### [ ] PHASE 4 — Services, portfolio, blog, careers
+### [x] PHASE 4 — Services, portfolio, blog, careers
 ### [ ] PHASE 5 — CRM: leads (Kanban), clients, client panel
 ### [ ] PHASE 6 — Projects, milestones, tasks, time tracking
 ### [ ] PHASE 7 — Employees, departments, attendance, leave, payroll
@@ -303,6 +303,24 @@ verified and committed 2026-09-13
 ---
 
 ## 6. Change Log
+
+### 2026-09-19 — Phase 4 finished and committed
+
+Phase 4 (services, portfolio, team, testimonials, student reviews, success stories, blog, careers,
+contact inquiries) had been built and migrated in an earlier session but never verified. Finished here:
+
+- **1,522 tests / 58,814 assertions green.** The five failures were all in one place — Phase 4 had never
+  written its rows into the four manifests decision **D60** requires, so `MarketingManifestTest` could not
+  match a single route.
+- Generated those rows from the live route table and `information_schema` rather than by hand, so they
+  cannot drift from what the app really registers: **168 route-guard rows**, **76 screen rows**,
+  **20 index-manifest tables** (plus a single-column row for every foreign key and every deferred id) and
+  **23 upload rows** (22 website images through `MediaService`, one private CV on the private disk, D21).
+- 22 screen rows declare the status their route really answers: taxonomy `create`/`edit` and the `show`
+  routes redirect by design (terms are edited inline on the index screen), and `site.blog.preview` is 404
+  without a signed link.
+- Fixed one real test bug: it read `portfolio_item_media` ordered by `id`, but that pivot is a history
+  pivot with no `id` (phase-04 §2.8, D19) — it now reads in gallery order.
 
 ### 2026-09-14 — Phase 3 review round 2 fixed, verified and committed
 
@@ -658,6 +676,8 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-12 | HIGH fixes hand-verified | temporary probe through the real HTTP kernel against `my_office` inside a rolled-back transaction | PASS — 29/29: `users.edit` without `users.change_status` gets a 422 on `status`, 403 on the status endpoint, and a 422 on any self role grant, while still being able to manage weaker accounts |
 | 2026-09-12 | Seeder convergence on live data | `db:seed --class=ModuleSeeder` on `my_office` | PASS — 79 registered, 0 created, 4 updated; the only diff in the table is `is_core` 0→1 on the four portal modules; `is_enabled` byte-identical for all 79 rows |
 | 2026-09-12 | Re-review of all 28 findings | two independent read-only auditors | 29 FIXED, 4 PARTIAL, 8 STALE/NOT_FIXED (low), **1 new medium** carried to Phase 2 |
+| 2026-09-19 | Phase 4 full suite | `php artisan test` (run by me) | PASS — **1,522 tests / 58,814 assertions**, 873 s |
+| 2026-09-19 | Phase 4 manifests | `--filter=MarketingManifestTest` | PASS — 5 tests / 4,372 assertions; 168 routes and 76 GET screens matched against the live route table |
 | 2026-09-13 | Phase 2 checkpoint suite | `php artisan test` (run by me) | PASS — 1020 tests / 30,851 assertions, 227 s |
 | 2026-09-13 | DB timezone pin proof | before/after read of all 67 TIMESTAMP columns under the old SYSTEM and new +00:00 session | PASS — 3,927 values byte-identical; new row UNIX_TIMESTAMP = PHP time() with 0 s drift; backup taken first |
 | 2026-09-13 | Phase 2 security tests | 4 new classes (floors, write guards, input hardening, avatar policy) | PASS — 154 tests |

@@ -6,6 +6,7 @@ namespace App\Services\Cms;
 
 use App\Enums\Cms\ContentStatus;
 use App\Enums\Cms\RobotsDirective;
+use App\Enums\Cms\SectionPlacement;
 use App\Enums\Cms\SitemapChangeFrequency;
 use App\Models\Cms\MediaAsset;
 use App\Models\Cms\Page;
@@ -807,17 +808,18 @@ final class SeoService
     /**
      * The published hero image of the home page, from its snapshot — no join, no draft.
      *
+     * The home page resolves its `home` sections (and stores them under the version stamp) before it
+     * asks for SEO, so the snapshot is already in hand: reading that entry keeps the OG fallback from
+     * re-reading the same row and holds FT-27's query budget as later phases add live statistics. The
+     * entry is written by `ComposesSite::liveSections()` from `forPublic()`, which filters on exactly
+     * the four columns below, so a hit and the query answer identically. A miss (a preview, a non-home
+     * caller, a cold cache, an unreachable store) falls through to the query.
+     *
      * @return array{0: string, 1: int|null, 2: int|null}|null
      */
     private function heroImage(): ?array
     {
-        $published = $this->connection()->table('website_sections')
-            ->where('placement', 'home')->where('section_key', 'hero')
-            ->where('status', ContentStatus::Published->value)->where('is_enabled', true)
-            ->whereNull('deleted_at')
-            ->value('published_content');
-
-        $snapshot = is_string($published) ? json_decode($published, true) : null;
+        $snapshot = $this->liveHomeHeroSnapshot();
 
         foreach (['hero_image', 'background_image', 'video_poster'] as $role) {
             $media = $snapshot['media'][$role] ?? null;
@@ -828,6 +830,50 @@ final class SeoService
         }
 
         return null;
+    }
+
+    /**
+     * The `hero` row of the live `home` placement: the cached rows this request already loaded when
+     * they are there, else one read of the same row.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function liveHomeHeroSnapshot(): ?array
+    {
+        $rows = $this->cache->peek('sections', [SectionPlacement::Home->value, 0]);
+
+        if (is_array($rows)) {
+            foreach ($rows as $row) {
+                if (is_array($row) && ($row['section_key'] ?? null) === 'hero') {
+                    return $this->decodeSnapshot($row['snapshot'] ?? null);
+                }
+            }
+
+            // The placement is loaded and holds no live hero; the query would say the same.
+            return null;
+        }
+
+        return $this->decodeSnapshot(
+            $this->connection()->table('website_sections')
+                ->where('placement', SectionPlacement::Home->value)->where('section_key', 'hero')
+                ->where('status', ContentStatus::Published->value)->where('is_enabled', true)
+                ->whereNull('deleted_at')
+                ->value('published_content')
+        );
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function decodeSnapshot(mixed $value): ?array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        $decoded = is_string($value) ? json_decode($value, true) : null;
+
+        return is_array($decoded) ? $decoded : null;
     }
 
     /**

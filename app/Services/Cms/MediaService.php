@@ -69,6 +69,38 @@ final class MediaService
 
     private const MODULE = 'website_media';
 
+    /**
+     * phase-04 (D24): [table, media column, usage type, label column, detail]. Owners in the trash do not count.
+     *
+     * @var list<array{0: string, 1: string, 2: string, 3: string, 4: string}>
+     */
+    private const PHASE4_MEDIA_SOURCES = [
+        ['service_categories', 'image_media_id', 'service_category', 'name', 'image'],
+        ['services', 'image_media_id', 'service', 'name', 'image'],
+        ['technologies', 'logo_media_id', 'technology', 'name', 'logo'],
+        ['portfolio_categories', 'image_media_id', 'portfolio_category', 'name', 'image'],
+        ['portfolio_items', 'cover_media_id', 'portfolio_item', 'title', 'cover'],
+        ['team_members', 'photo_media_id', 'team_member', 'name', 'photo'],
+        ['testimonials', 'author_photo_media_id', 'testimonial', 'author_name', 'author photo'],
+        ['student_reviews', 'student_photo_media_id', 'student_review', 'student_name', 'student photo'],
+        ['success_stories', 'photo_media_id', 'success_story', 'student_name', 'photo'],
+        ['blog_categories', 'image_media_id', 'blog_category', 'name', 'image'],
+        ['blog_posts', 'featured_image_media_id', 'blog_post', 'title', 'featured image'],
+    ];
+
+    /**
+     * phase-04 (D24): rich-text columns that may embed a library image. [table, columns, usage type, label column].
+     *
+     * @var list<array{0: string, 1: list<string>, 2: string, 3: string}>
+     */
+    private const PHASE4_RICH_TEXT = [
+        ['services', ['full_description'], 'service', 'name'],
+        ['portfolio_items', ['description'], 'portfolio_item', 'title'],
+        ['blog_posts', ['content'], 'blog_post', 'title'],
+        ['job_openings', ['description', 'requirements', 'responsibilities'], 'job_opening', 'title'],
+        ['success_stories', ['story'], 'success_story', 'student_name'],
+    ];
+
     /** @var array<string, string> accepted image MIME => stored extension */
     public const IMAGE_MIMES = [
         'image/jpeg' => 'jpg',
@@ -511,6 +543,28 @@ final class MediaService
             $add('seo_meta', (int) $row->id, (string) ($row->route_key ?? class_basename((string) $row->seoable_type).' #'.$row->seoable_id), 'social image');
         }
 
+        $schema = $connection->getSchemaBuilder();
+
+        foreach (self::PHASE4_MEDIA_SOURCES as [$table, $column, $type, $labelColumn, $detail]) {
+            if (! $schema->hasTable($table)) {
+                continue;
+            }
+
+            foreach ($connection->table($table)->whereNull('deleted_at')->where($column, $id)->get(['id', $labelColumn]) as $row) {
+                $add($type, (int) $row->id, (string) $row->{$labelColumn}, $detail);
+            }
+        }
+
+        if ($schema->hasTable('portfolio_item_media')) {
+            foreach ($connection->table('portfolio_item_media as m')
+                ->join('portfolio_items as p', 'p.id', '=', 'm.portfolio_item_id')
+                ->whereNull('p.deleted_at')
+                ->where('m.media_asset_id', $id)
+                ->get(['p.id', 'p.title']) as $row) {
+                $add('portfolio_item', (int) $row->id, (string) $row->title, 'gallery');
+            }
+        }
+
         if ($token !== '' && $token !== '.') {
             $like = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $token).'%';
 
@@ -529,6 +583,22 @@ final class MediaService
             if ($connection->getSchemaBuilder()->hasTable('faqs')) {
                 foreach ($connection->table('faqs')->whereNull('deleted_at')->where('answer', 'like', $like)->get(['id', 'question']) as $row) {
                     $add('faq', (int) $row->id, (string) $row->question, 'embedded in the answer');
+                }
+            }
+
+            foreach (self::PHASE4_RICH_TEXT as [$table, $columns, $type, $labelColumn]) {
+                if (! $connection->getSchemaBuilder()->hasTable($table)) {
+                    continue;
+                }
+
+                foreach ($connection->table($table)->whereNull('deleted_at')
+                    ->where(function ($query) use ($columns, $like): void {
+                        foreach ($columns as $column) {
+                            $query->orWhere($column, 'like', $like);
+                        }
+                    })
+                    ->get(['id', $labelColumn]) as $row) {
+                    $add($type, (int) $row->id, (string) $row->{$labelColumn}, 'embedded in the text');
                 }
             }
         }
@@ -605,6 +675,27 @@ final class MediaService
             $mark((int) $row->og_image_media_id, 'seo_meta:'.$row->id);
         }
 
+        $schema = $connection->getSchemaBuilder();
+
+        foreach (self::PHASE4_MEDIA_SOURCES as [$table, $column, $type]) {
+            if (! $schema->hasTable($table)) {
+                continue;
+            }
+
+            foreach ($connection->table($table)->whereNull('deleted_at')->whereNotNull($column)->cursor(['id', $column]) as $row) {
+                $mark((int) $row->{$column}, $type.':'.$row->id);
+            }
+        }
+
+        if ($schema->hasTable('portfolio_item_media')) {
+            foreach ($connection->table('portfolio_item_media as m')
+                ->join('portfolio_items as p', 'p.id', '=', 'm.portfolio_item_id')
+                ->whereNull('p.deleted_at')
+                ->cursor(['m.media_asset_id', 'm.portfolio_item_id']) as $row) {
+                $mark((int) $row->media_asset_id, 'portfolio_item:'.$row->portfolio_item_id);
+            }
+        }
+
         $byToken = $connection->table('media_assets')->whereNull('deleted_at')->pluck('directory', 'id')
             ->mapWithKeys(static fn (string $directory, int|string $id): array => [strtoupper(basename(trim($directory, '/'))) => (int) $id])
             ->all();
@@ -634,6 +725,10 @@ final class MediaService
         $scan('pages', ['content', 'published_content'], 'page');
         $scan('website_sections', ['content', 'published_content'], 'section');
         $scan('faqs', ['answer'], 'faq');
+
+        foreach (self::PHASE4_RICH_TEXT as [$table, $columns, $type]) {
+            $scan($table, $columns, $type);
+        }
 
         foreach ($connection->table('media_assets')->whereNull('deleted_at')->cursor(['id', 'usage_count']) as $row) {
             $count = count($places[(int) $row->id] ?? []);

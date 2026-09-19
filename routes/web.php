@@ -2,10 +2,16 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Site\BlogController;
+use App\Http\Controllers\Site\CareerController;
+use App\Http\Controllers\Site\ContactController;
 use App\Http\Controllers\Site\HomeController;
+use App\Http\Controllers\Site\PortfolioController;
 use App\Http\Controllers\Site\PreviewController;
 use App\Http\Controllers\Site\RobotsController;
+use App\Http\Controllers\Site\ServiceController;
 use App\Http\Controllers\Site\SitemapController;
+use App\Http\Controllers\Site\TeamController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -60,5 +66,45 @@ Route::prefix('preview')
         Route::get('page/{page}', [PreviewController::class, 'page'])->whereNumber('page')->name('page');
         Route::get('section/{section}', [PreviewController::class, 'section'])->whereNumber('section')->name('section');
     });
+
+/*
+|--------------------------------------------------------------------------
+| phase-04 §7.1 — services, portfolio, team, blog, careers, contact
+|--------------------------------------------------------------------------
+| `site` on every row; `site_module:<slug>` 404s a disabled module (D26) and sits before `site.cache`.
+| No `can:` on any site.* route (phase-03 INV-15, CmsRouteContractTest): the blog preview authorises in
+| the controller. `site.cache` is off the blog post (view counter), the careers detail + apply form and
+| the contact page (per-request CSRF + SpamGuard token).
+*/
+
+Route::middleware(['site', 'site_module:services', 'site.cache'])->group(function (): void {
+    Route::get('services', [ServiceController::class, 'index'])->name('site.services.index');
+    Route::get('services/{service:slug}', [ServiceController::class, 'show'])->name('site.services.show');
+});
+
+Route::middleware(['site', 'site_module:portfolio', 'site.cache'])->group(function (): void {
+    Route::get('portfolio', [PortfolioController::class, 'index'])->name('site.portfolio.index');
+    Route::get('portfolio/{portfolioItem:slug}', [PortfolioController::class, 'show'])->name('site.portfolio.show');
+});
+
+Route::get('team', [TeamController::class, 'index'])->middleware(['site', 'site_module:team', 'site.cache'])->name('site.team.index');
+
+Route::middleware(['site', 'site_module:blog_posts'])->group(function (): void {
+    Route::get('blog', [BlogController::class, 'index'])->middleware('site.cache')->name('site.blog.index');
+    Route::get('blog/category/{blogCategory:slug}', [BlogController::class, 'category'])->middleware('site.cache')->name('site.blog.category');
+    Route::get('blog/tag/{blogTag:slug}', [BlogController::class, 'tag'])->middleware('site.cache')->name('site.blog.tag');
+    Route::get('blog/{blogPost:slug}', [BlogController::class, 'show'])->name('site.blog.show');
+});
+
+Route::get('preview/blog/{blogPost}', [BlogController::class, 'preview'])->whereNumber('blogPost')->middleware(['site', 'auth', 'active'])->name('site.blog.preview');
+
+Route::middleware(['site', 'site_module:jobs'])->group(function (): void {
+    Route::get('careers', [CareerController::class, 'index'])->middleware('site.cache')->name('site.careers.index');
+    Route::get('careers/{jobOpening:slug}', [CareerController::class, 'show'])->name('site.careers.show');
+    Route::post('careers/{jobOpening:slug}/apply', [CareerController::class, 'apply'])->middleware('throttle:public-apply')->name('site.careers.apply');
+});
+
+Route::get('contact', [ContactController::class, 'index'])->middleware('site')->name('site.contact.index');
+Route::post('contact', [ContactController::class, 'store'])->middleware(['site', 'throttle:public-contact'])->name('site.contact.store');
 
 require __DIR__.'/auth.php';

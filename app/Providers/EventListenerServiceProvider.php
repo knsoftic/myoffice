@@ -4,6 +4,23 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Events\Cms\BlogPostPublished;
+use App\Events\Cms\ContactInquiryRouted;
+use App\Events\Cms\ContactInquirySubmitted;
+use App\Events\Cms\JobApplicationReceived;
+use App\Events\Cms\JobApplicationStatusChanged;
+use App\Events\Cms\StudentReviewApproved;
+use App\Events\Cms\TestimonialApproved;
+use App\Events\Cms\TestimonialSubmitted;
+use App\Listeners\Cms\FlushPublicContentCache;
+use App\Listeners\Cms\LogApplicationStage;
+use App\Listeners\Cms\LogInquiryRouting;
+use App\Listeners\Cms\NotifyAuthorOfPublication;
+use App\Listeners\Cms\NotifyHrOfApplication;
+use App\Listeners\Cms\NotifyStaffOfInquiry;
+use App\Listeners\Cms\NotifyStaffOfPendingModeration;
+use App\Listeners\Cms\PingSitemap;
+use App\Listeners\Cms\RouteContactInquiry;
 use App\Listeners\RecordFailedLogin;
 use App\Listeners\RecordLogout;
 use App\Listeners\RecordSuccessfulLogin;
@@ -46,6 +63,17 @@ final class EventListenerServiceProvider extends ServiceProvider
         Login::class => [RecordSuccessfulLogin::class],
         Failed::class => [RecordFailedLogin::class],
         Logout::class => [RecordLogout::class],
+
+        // phase-04 §10.1. LogInquiryRouting and LogApplicationStage write the only "routed" / "stage changed"
+        // activity entries (§11 tests 38, 44) — without this map both tests fail.
+        ContactInquirySubmitted::class => [RouteContactInquiry::class, NotifyStaffOfInquiry::class],
+        ContactInquiryRouted::class => [LogInquiryRouting::class],
+        JobApplicationReceived::class => [NotifyHrOfApplication::class],
+        JobApplicationStatusChanged::class => [LogApplicationStage::class],
+        TestimonialApproved::class => [FlushPublicContentCache::class],
+        StudentReviewApproved::class => [FlushPublicContentCache::class],
+        TestimonialSubmitted::class => [NotifyStaffOfPendingModeration::class],
+        BlogPostPublished::class => [NotifyAuthorOfPublication::class, FlushPublicContentCache::class, PingSitemap::class],
     ];
 
     public function register(): void

@@ -637,13 +637,42 @@ final class PermissionRegistry
                 // phase-03 §4.1. `delete` is refused by CtaBlockPolicy while usage_count > 0.
                 'abilities' => self::merge(self::CRUD, self::STATUS, self::LOGS),
             ],
+            // phase-04 §4 (new slug). Sort sits in the Website range: the contract's 410 collides with
+            // `collaborators` and PermissionRegistryTest::module_sort_orders_are_unique (§9 R-6).
+            'service_categories' => [
+                'name' => 'Service Categories',
+                'group' => ModuleGroup::Website,
+                'icon' => 'squares-2x2',
+                'is_core' => false,
+                'sort' => 838,
+                'abilities' => self::merge(self::CRUD, self::STATUS),
+            ],
             'services' => [
                 'name' => 'Services',
                 'group' => ModuleGroup::Website,
                 'icon' => 'wrench-screwdriver',
                 'is_core' => false,
                 'sort' => 840,
-                'abilities' => self::merge(self::CRUD, self::STATUS, self::FILES, self::RESTORE),
+                // phase-04 §4 pins CRUD_FULL + STATUS + FILES; export/print appended so existing rows keep their sort_order.
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::FILES, self::RESTORE, [Ability::Export, Ability::Print]),
+            ],
+            // phase-04 §4 (new slug).
+            'technologies' => [
+                'name' => 'Technologies',
+                'group' => ModuleGroup::Website,
+                'icon' => 'puzzle-piece',
+                'is_core' => false,
+                'sort' => 845,
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::FILES),
+            ],
+            // phase-04 §4 (new slug).
+            'portfolio_categories' => [
+                'name' => 'Portfolio Categories',
+                'group' => ModuleGroup::Website,
+                'icon' => 'rectangle-stack',
+                'is_core' => false,
+                'sort' => 848,
+                'abilities' => self::merge(self::CRUD, self::STATUS),
             ],
             'portfolio' => [
                 'name' => 'Portfolio',
@@ -651,7 +680,7 @@ final class PermissionRegistry
                 'icon' => 'photo',
                 'is_core' => false,
                 'sort' => 850,
-                'abilities' => self::merge(self::CRUD, self::STATUS, self::FILES, self::RESTORE),
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::FILES, self::RESTORE, [Ability::Export, Ability::Print]),
             ],
             'team' => [
                 'name' => 'Team',
@@ -659,7 +688,7 @@ final class PermissionRegistry
                 'icon' => 'user-group',
                 'is_core' => false,
                 'sort' => 860,
-                'abilities' => self::merge(self::CRUD, self::STATUS, self::FILES, self::RESTORE),
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::FILES, self::RESTORE, [Ability::Export, Ability::Print]),
             ],
             'testimonials' => [
                 'name' => 'Testimonials',
@@ -667,7 +696,8 @@ final class PermissionRegistry
                 'icon' => 'chat-bubble-left-right',
                 'is_core' => false,
                 'sort' => 870,
-                'abilities' => self::merge(self::CRUD, self::STATUS, self::APPROVE, self::RESTORE),
+                // phase-04 §4: + FILES (the author / student photo).
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::APPROVE, self::RESTORE, self::FILES),
             ],
             'student_reviews' => [
                 'name' => 'Student Reviews',
@@ -675,7 +705,8 @@ final class PermissionRegistry
                 'icon' => 'star',
                 'is_core' => false,
                 'sort' => 880,
-                'abilities' => self::merge(self::CRUD, self::STATUS, self::APPROVE, self::RESTORE),
+                // phase-04 §4: + FILES (the author / student photo).
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::APPROVE, self::RESTORE, self::FILES),
             ],
             'success_stories' => [
                 'name' => 'Success Stories',
@@ -710,13 +741,23 @@ final class PermissionRegistry
                 'sort' => 910,
                 'abilities' => self::merge(self::CRUD, self::STATUS, self::RESTORE),
             ],
+            // phase-04 §4 (new slug).
+            'blog_tags' => [
+                'name' => 'Blog Tags',
+                'group' => ModuleGroup::Website,
+                'icon' => 'tag',
+                'is_core' => false,
+                'sort' => 915,
+                'abilities' => self::merge(self::CRUD, self::STATUS),
+            ],
             'blog_posts' => [
                 'name' => 'Blog Posts',
                 'group' => ModuleGroup::Website,
                 'icon' => 'newspaper',
                 'is_core' => false,
                 'sort' => 920,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::APPROVE, self::ASSIGN, self::FILES, self::RESTORE),
+                // phase-04 §4: + REPORTS (only view_reports is new; export and print were already held).
+                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::APPROVE, self::ASSIGN, self::FILES, self::RESTORE, self::REPORTS),
             ],
             'jobs' => [
                 'name' => 'Jobs',
@@ -740,7 +781,8 @@ final class PermissionRegistry
                 'icon' => 'envelope',
                 'is_core' => false,
                 'sort' => 950,
-                'abilities' => self::merge(self::CRUD, self::STATUS, self::ASSIGN, [Ability::Export], self::RESTORE),
+                // phase-04 §4: + print, + view_logs (F-12.4 — the only key to the technical / PII columns).
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::ASSIGN, [Ability::Export], self::RESTORE, [Ability::Print], self::LOGS),
             ],
             'seo' => [
                 'name' => 'SEO',
