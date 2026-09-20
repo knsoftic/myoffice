@@ -182,6 +182,8 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D67 | **The clock columns `time_entries.started_at` / `ended_at` and `time_entry_segments.started_at` / `ended_at` are `DATETIME`, not the `TIMESTAMP` phase-06 §2.10-§2.11 names.** Every other Phase 6 stamp stays `TIMESTAMP`. | This server runs `explicit_defaults_for_timestamp = OFF`, where the first `TIMESTAMP NOT NULL` column in a table silently acquires `DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP` — verified on `my_office_test` before the migrations were written. On an append-only clock record that would rewrite `started_at` on any UPDATE and change `duration_seconds` underneath every SUM already taken, breaking INV-P5 silently. `DATETIME` carries no such rule, and with the session timezone pinned to `+00:00` (D61) the two types store the same UTC instant. The other stamps are all nullable, which never triggers the rule. |
 | D68 | **The three Phase 7 date guards use `CAST(date AS CHAR)`, not the `DATE_FORMAT(col, '%Y-%m-%d')` phase-07 §2.8 / §2.9 / §2.16 spell them with.** | MariaDB refuses `DATE_FORMAT()` inside a generated column outright — `1901 Function or expression 'date_format()' cannot be used in the GENERATED ALWAYS AS clause` — because it classes it as locale-dependent. Casting a DATE to CHAR is deterministic, is accepted, and produces the identical `YYYY-MM-DD` string; both forms were run side by side on this server before the change was made. Without a working guard, `uq_hol_guard`, `uq_att_day` and `uq_lrd_day` could not exist, and HR-1 and HR-8 would be service conventions rather than database facts. |
 | D69 | **A work shift's `start_time` / `end_time` are business wall clock; the window built from them is a UTC instant.** `ShiftWindow::fromShift()` builds the day in `Format::timezone()` and then calls `->utc()`, and `AttendanceService` files a punch under the business calendar date rather than the UTC one. | D61 stores every stamp UTC and displays it in `localization.timezone`, but `work_shifts` holds a **local** clock — "09:00" means nine in the morning in Karachi. The window was being built on a UTC clock and then compared against a punch taken with `now()`, so in Asia/Karachi every arrival was five hours late, every day was an early leave, and the register printed 14:02 for a 09:02 punch. Found by opening the attendance register in a browser after the `->format()` calls in the Blade views were replaced with `app_time()`; no unit probe had caught it, because every probe built its expectation the same wrong way. |
+| D70 | **A `create_*` migration guards only the CREATE; its CHECK constraints are ensured on every run.** `up()` calls `create()` when the table is absent and `constraints()` always, each CHECK behind a `checkExists()` test. | MariaDB DDL is not transactional. An index name overflowed mid-`CREATE TABLE`, the server kept the table, the migration was recorded as failed — and the re-run's `if (Schema::hasTable(...)) return;` saw a table and skipped every CHECK. The schema then *looked* complete and was not, which is the exact failure `RawSchema`'s verify-after-write exists to prevent. Found by the §2 object verification, not by the migration. |
+| D71 | **Constraint and index names on the long financial tables are explicit, and foreign keys go through `RawSchema::foreignKeyName()`** — Laravel's generated name where it fits, an abbreviated `fk_<abbrev>_<column>` where it does not. | MariaDB caps an identifier at 64 characters and Laravel composes `table_column_foreign`, which overflows on `collaborator_commission_entitlements` and `collaborator_commission_ledger_entries`. The map is explicit rather than hashed or truncated because the name has to be **stable**: `down()` must find the constraint `up()` created, and a name that shifts when a column is renamed leaves a key nobody can drop. |
 
 ---
 
@@ -399,6 +401,20 @@ registries, services, policies, routes and screens still to come**
 
 ### [ ] PHASE 9 — Referral codes, referral URLs, referral tracking
 ### [ ] PHASE 10 — Student referral commission engine (`StudentCommissionService`)
+
+Contract: [`docs/phases/phase-10-12.md`](docs/phases/phase-10-12.md) over
+[`docs/design/finance-commission-spine.md`](docs/design/finance-commission-spine.md) ·
+**schema and enums built 2026-09-20; the services and screens still to come**
+
+| | Item |
+|---|---|
+| [x] | Enums: the 27 of §3, string-backed with `label()` / `color()` / `options()`. `PaymentMethod`, `LedgerEntryType` and `CommissionCalculationType` are **reused, not re-created** (F-5.4, F-5.5). `CommissionRuleSource` has three cases and deliberately no `global_default` ([D-FS-9]): a commission paid because nobody set a rate is one nobody decided on |
+| [x] | `EnumContractTest` now **discovers** every enum instead of naming six — **785 assertions across 157 enums**. Broadening it found 10 enums claiming the colour token `zinc`, which `x-ui.badge` does not define, so those badges had been silently falling back to slate since they were written |
+| [x] | Schema: the 21-file atomic set / 15 tables, applied to `my_office_test` **and** `my_office`; `rollback --step=21` leaves **0 tables and 0 triggers** behind and re-migrate is clean ([D-IMP-1]: creates declare columns only, every FK arrives in files 18, 20 and 21) |
+| [x] | §2 object list verified against `information_schema` on both databases: **126/126** — 15 tables, 9 STORED generated columns, 32 CHECK constraints, 31 named unique indexes, 9 `BEFORE DELETE` triggers, `idx_cr_superseded_by` present and **not** unique (ND-12), no `deleted_at` on the twelve append-only tables, every money column `decimal(15,2)` and every rate `decimal(8,4)`, and **0** columns silently carrying `ON UPDATE CURRENT_TIMESTAMP` (D67) |
+| [x] | Every guard proved to bite on **58 assertions** in a rolled-back transaction: one wallet per collaborator and a negative available balance still legal after a clawback; one **active** referral per subject with superseded rows stacking freely and several losers pointing at one winner (ND-12); one open rule version per scope; a rule refused without the number it needs; one current entitlement per document; INV-12 refusing an over-release; `uq_cle_source` refusing a second commission for one receipt; the sign, reversal, debit-clean, allocation (INV-11) and undo (INV-10) ceilings; `uq_cp_txn` refusing one bank transaction twice; `uq_cpa_pair` refusing an entry back into the same payout **even after release**; `uq_sf_generation` refusing a doubly-generated charge while hand-entered ones stack; `net_received_amount` following a refund; and all four no-delete triggers |
+| [ ] | §4 PermissionRegistry, §5 SettingsRegistry, §2.3 the 15 models with their write guards |
+| [ ] | §6 `ReferralService`, `CommissionRuleService`, `CommissionBaseResolver`, `CommissionEntitlementService`, `LedgerWriter`, `PaymentService`, `StudentCommissionService`, `CommissionReversalService`, `CommissionApprovalService`; §7 routes, §8 screens, §10 jobs, §11 acceptance suite |
 ### [ ] PHASE 11 — Project referral commission engine (`ProjectCommissionService`)
 ### [ ] PHASE 12 — Collaborator wallet, commission ledger, payouts, statements
 ### [ ] PHASE 13 — Software-house finance: invoices, payments, expenses, income
@@ -421,6 +437,55 @@ registries, services, policies, routes and screens still to come**
 ---
 
 ## 6. Change Log
+
+### 2026-09-20 — Phase 10 schema: fifteen tables, and the guarantees they actually carry
+
+The commission spine's whole schema in one atomic set. What is worth saying about it is not the column
+count — it is which rules are **structural** rather than hopeful.
+
+**`uq_cle_source(source_type, source_id, collaborator_id, purpose)`, with all four columns NOT NULL.**
+The obvious-looking alternative — a guard over `(student_fee_payment_id, project_payment_id,
+collaborator_id, source_type)` — would let **every** project commission through, because they all share
+`student_fee_payment_id = NULL` and MariaDB unique indexes ignore NULLs. This index makes a second
+commission for the same receipt impossible even if somebody hand-crafts a different dedupe key.
+
+**Six generated guard columns exist for one reason**: MariaDB unique indexes ignore NULLs. A column
+that is `1` when a row is current and NULL otherwise turns "at most one active referral per subject",
+"one open rule version per scope", "one current entitlement per document" and "one default payout
+account" into unique indexes that superseded rows stack freely underneath. The alternative is a service
+that checks first and writes second, which is a race with a name.
+
+**`chk_cce_cap` is the over-release ceiling** (INV-12): even a future caller with a bug in the
+proportional arithmetic cannot push total commission past the promise, because the UPDATE fails. A rule
+enforced only in a service is a rule that holds until somebody writes a second service.
+
+**`idx_cr_superseded_by` is deliberately NOT unique** (ND-12). One winner legitimately supersedes
+several rows — the previously active referral plus one per losing candidate — and a unique index there
+would 1062 on the second of those perfectly legal writes and destroy the attribution evidence the table
+exists to keep.
+
+**`trg_cle_no_delete` is the one that matters most.** Every duplicate guarantee in the engine rests on a
+unique index, and a DELETE would **free the unique slot for a second commission on the same receipt**.
+Without the trigger, "a payment can never pay twice" is true only as long as nobody deletes a row.
+
+**Two defects, both found by verifying rather than by reading.**
+
+- **D70.** An index name overflowed 64 characters mid-`CREATE TABLE`. MariaDB DDL is not transactional,
+  so the server kept the table while the migration was recorded as failed — and the re-run's
+  `if (Schema::hasTable(...)) return;` saw a table and **skipped every CHECK constraint on it**. The
+  schema then looked complete and was not. The guard now covers the CREATE only; the constraints are
+  ensured on every run. The §2 object verification is what caught it; the migration reported success.
+- **D71.** Laravel's generated foreign-key name overflows on the two longest tables. Names are now
+  explicit and stable, because `down()` has to find what `up()` created.
+
+**`RawSchema` writes nothing it does not then prove.** Every CHECK, generated column, guard index and
+trigger is read back out of `information_schema` and throws if the server did not keep it — no
+try/catch, no silent skip (spine R-3). A constraint the server quietly ignored is worse than none,
+because every layer above it goes on trusting a promise that is not there.
+
+**Verified:** the §2 object list **126/126** on both databases; the guards **58/58** in a rolled-back
+transaction; `rollback --step=21` leaving no table and no trigger behind, and re-migrate clean.
+
 
 ### 2026-09-20 — Phase 9: the click, the carrier, and the ladder that decides
 
@@ -1312,6 +1377,10 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-20 | Phase 9 integration gate | `tests/Feature/Collaborator/ReferralCaptureTest` | PASS — **18 tests**; with Phase 8's gate, `tests/Feature/Collaborator` is **38 tests / 145 assertions** |
 | 2026-09-20 | Phase 8/9 public-route regression | `tests/Feature/Cms` + `{Modules,Views,Platform,SmokeTest}` | PASS — 16 manifest rows and 12 marketing contract rows updated for `capture_referral` with the reason recorded; one Phase 4 fixture corrected (it stored a `users.id` in `contact_inquiries.collaborator_id`, which the new foreign key exposed) |
 | 2026-09-20 | Full suite after phases 8 and 9 | `./vendor/bin/phpunit` in two slices | PASS — **1,615 tests / 66,198 assertions**: 1,213 / 41,704 in 4 m 49 s and 402 / 24,494 in 12 m 34 s |
+| 2026-09-20 | Phase 10 enum contract, broadened | `tests/Unit/Enums` | PASS — **785 tests / 4,892 assertions** across **157 enums**, discovered rather than listed. Found 10 enums using the undefined colour token `zinc`, all corrected to `slate` |
+| 2026-09-20 | Phase 10 §2 object list | `information_schema` counted in PHP, on `my_office_test` **and** `my_office` | PASS — **126/126** each: 15 tables, 9 STORED generated columns, 32 CHECKs the server kept, 31 named unique indexes, 9 `BEFORE DELETE` triggers, `idx_cr_superseded_by` present and NOT unique (ND-12), no `deleted_at` on the twelve append-only tables, every money column `decimal(15,2)`, every rate `decimal(8,4)`, and **0** columns carrying `ON UPDATE CURRENT_TIMESTAMP` (D67) |
+| 2026-09-20 | Phase 10 migration round trip | `migrate` → `rollback --step=21` → `migrate` on both databases | PASS — 0 tables and 0 triggers left behind; object list 126/126 again afterwards. 8 external and 3 deferred foreign keys reported as waiting for phases 13-17, as designed |
+| 2026-09-20 | Phase 10 schema guards | probe in a rolled-back transaction on `my_office` | PASS — **58/58**: one wallet per collaborator and a negative available balance still legal; one active referral per subject with several losers sharing one winner; one open rule per scope and a rule refused without its number; one current entitlement per document and INV-12 refusing an over-release; `uq_cle_source` and `uq_cle_dedupe`; the sign, reversal, debit-clean, INV-11 and INV-10 ceilings; `uq_cp_txn`; `uq_cpa_pair` holding even after release; `uq_sf_generation`; `net_received_amount` following a refund; and four no-delete triggers. Found 1 real defect (D70) |
 
 ---
 
