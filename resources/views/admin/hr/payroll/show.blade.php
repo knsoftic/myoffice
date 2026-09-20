@@ -84,10 +84,16 @@
                                 @endif
                             </td>
                             <td class="px-4 py-3 text-right">
-                                @if ($canPay && $item->status->isPayable())
-                                    <x-ui.button variant="ghost" size="sm"
-                                        x-on:click="$dispatch('open-modal', 'pay-{{ $item->id }}')">Pay</x-ui.button>
-                                @endif
+                                <div class="flex items-center justify-end gap-1">
+                                    @if ($showMoney)
+                                        <x-ui.button variant="ghost" size="sm"
+                                            :href="route('admin.payroll-runs.preview', ['run' => $run, 'employee' => $item->employee_id])">Explain</x-ui.button>
+                                    @endif
+                                    @if ($canPay && $item->status->isPayable())
+                                        <x-ui.button variant="ghost" size="sm"
+                                            x-on:click="$dispatch('open-modal', 'pay-{{ $item->id }}')">Pay</x-ui.button>
+                                    @endif
+                                </div>
                             </td>
                         </tr>
                     @endforeach
