@@ -174,7 +174,13 @@ class RoleSeeder extends Seeder
     private function roleDefinitions(): array
     {
         // Every staff role needs the dashboard and the global search box.
-        $staffBase = PermissionRegistry::permissionNamesFor(['dashboard', 'global_search']);
+        // phase-07 §4.4: everybody who works here has their own attendance, leave and slips, so the HR
+        // self-service window belongs beside the dashboard rather than in ten separate role definitions.
+        $staffBase = PermissionRegistry::permissionNamesFor([
+            'dashboard',
+            'global_search',
+            'employee_self_service',
+        ]);
 
         return [
             [
@@ -214,7 +220,26 @@ class RoleSeeder extends Seeder
                 'is_default' => false,
                 'permissions' => $this->merge(
                     $staffBase,
-                    PermissionRegistry::permissionNamesFor(['employees', 'departments', 'attendance', 'leaves', 'payroll']),
+                    PermissionRegistry::permissionNamesFor([
+                        'employees',
+                        'departments',
+                        'attendance',
+                        'leaves',
+                        'payroll',
+                        // phase-07 §4.4: HR owns every module this phase adds, including payroll.approve
+                        // (the lock) and every money ability.
+                        'designations',
+                        'employee_documents',
+                        'work_shifts',
+                        'holidays',
+                        'leave_types',
+                        'leave_balances',
+                        'salary_components',
+                        'salary_structures',
+                        'salary_slips',
+                        'employee_advances',
+                        'employee_self_service',
+                    ]),
                     // phase-04 §9.1 / §13 (H7): hiring sits with HR — every opening and every application, CVs included.
                     PermissionRegistry::permissionNamesFor(['jobs', 'job_applications']),
                     PermissionRegistry::permissionNamesFor('reports', self::REPORTING),
@@ -239,6 +264,14 @@ class RoleSeeder extends Seeder
                         'installments',
                         'collaborator_payouts',
                     ]),
+                    // phase-07 §4.4. Deliberately **not** payroll.approve: whoever locks a run is not
+                    // whoever pays it, and collapsing the two would let one person decide and disburse.
+                    PermissionRegistry::permissionNamesFor('payroll', $this->abilitiesExcept('payroll', [
+                        'approve', 'reject', 'create', 'edit', 'delete', 'restore',
+                    ])),
+                    PermissionRegistry::permissionNamesFor('salary_slips'),
+                    PermissionRegistry::permissionNamesFor('employee_advances', self::READ_MONEY),
+                    PermissionRegistry::permissionNamesFor('employees', self::READ_MONEY),
                     PermissionRegistry::permissionNamesFor('reports', self::FINANCIAL_REPORTING),
                 ),
             ],
@@ -469,6 +502,13 @@ class RoleSeeder extends Seeder
      *
      * @return array<int, string>
      */
+    /**
+     * Read a module, money included, and write nothing (phase-07 §4.4's Accountant shape).
+     *
+     * @var list<string>
+     */
+    private const READ_MONEY = ['view_any', 'view', 'view_financial'];
+
     private function deliveryTeamGrant(): array
     {
         return $this->merge(

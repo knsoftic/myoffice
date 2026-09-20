@@ -298,7 +298,7 @@ final class PermissionRegistry
                 'icon' => 'identification',
                 'is_core' => false,
                 'sort' => 210,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::FILES, self::MONEY, self::IMPORT, self::RESTORE),
+                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::ASSIGN, self::FILES, self::MONEY, self::IMPORT, self::RESTORE, self::REPORTS, self::LOGS),
             ],
             'departments' => [
                 'name' => 'Departments',
@@ -306,7 +306,7 @@ final class PermissionRegistry
                 'icon' => 'building-office-2',
                 'is_core' => false,
                 'sort' => 220,
-                'abilities' => self::merge(self::CRUD, self::RESTORE),
+                'abilities' => self::merge(self::CRUD, self::RESTORE, self::STATUS, self::ASSIGN),
             ],
             'attendance' => [
                 'name' => 'Attendance',
@@ -314,7 +314,7 @@ final class PermissionRegistry
                 'icon' => 'calendar-days',
                 'is_core' => false,
                 'sort' => 230,
-                'abilities' => self::merge(self::CRUD, self::STATUS, self::IMPORT, self::REPORTS, self::RESTORE),
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::IMPORT, self::REPORTS, self::RESTORE, self::APPROVE, self::LOGS),
             ],
             'leaves' => [
                 'name' => 'Leaves',
@@ -322,7 +322,7 @@ final class PermissionRegistry
                 'icon' => 'calendar',
                 'is_core' => false,
                 'sort' => 240,
-                'abilities' => self::merge(self::CRUD, self::APPROVE, self::STATUS, self::REPORTS, self::RESTORE),
+                'abilities' => self::merge(self::CRUD, self::APPROVE, self::STATUS, self::REPORTS, self::RESTORE, self::FILES, self::LOGS),
             ],
             'payroll' => [
                 'name' => 'Payroll',
@@ -330,7 +330,117 @@ final class PermissionRegistry
                 'icon' => 'banknotes',
                 'is_core' => false,
                 'sort' => 250,
-                'abilities' => self::merge(self::CRUD, self::APPROVE, self::STATUS, self::MONEY, self::REPORTS, self::RESTORE),
+                'abilities' => self::merge(self::CRUD, self::APPROVE, self::STATUS, self::MONEY, self::REPORTS, self::RESTORE, self::LOGS),
+            ],
+
+            // phase-07 §4.1 — the eleven slugs this phase adds. Every one is `is_core = false`, so a
+            // business that does not run payroll can switch it off and keep every row (D5).
+            'designations' => [
+                'name' => 'Designations',
+                'group' => ModuleGroup::Hr,
+                'icon' => 'identification',
+                'is_core' => false,
+                'sort' => 212,
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::RESTORE),
+            ],
+            'employee_documents' => [
+                'name' => 'Employee Documents',
+                'group' => ModuleGroup::Hr,
+                'icon' => 'document-text',
+                'is_core' => false,
+                'sort' => 214,
+                // CNICs, contracts and medical reports are the most sensitive rows in HR: `download` is
+                // the privacy gate and every download writes an activity row.
+                'abilities' => self::merge(self::READ, [Ability::Create, Ability::Delete], self::FILES, self::STATUS, self::LOGS),
+            ],
+            'work_shifts' => [
+                'name' => 'Work Shifts',
+                'group' => ModuleGroup::Hr,
+                'icon' => 'clock',
+                'is_core' => false,
+                'sort' => 232,
+                // A shift defines what "late" means. Editing one changes nobody's history (HR-2) and
+                // everybody's future, which is why it is permissioned apart from marking attendance.
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::ASSIGN),
+            ],
+            'holidays' => [
+                'name' => 'Holidays',
+                'group' => ModuleGroup::Hr,
+                'icon' => 'calendar-days',
+                'is_core' => false,
+                'sort' => 234,
+                'abilities' => self::merge(self::CRUD, self::IMPORT, [Ability::Export]),
+            ],
+            'leave_types' => [
+                'name' => 'Leave Types',
+                'group' => ModuleGroup::Hr,
+                'icon' => 'tag',
+                'is_core' => false,
+                'sort' => 242,
+                // Quotas and accrual rules are policy, not a leave clerk's business.
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::RESTORE),
+            ],
+            'leave_balances' => [
+                'name' => 'Leave Balances',
+                'group' => ModuleGroup::Hr,
+                'icon' => 'scale',
+                'is_core' => false,
+                'sort' => 244,
+                // **No edit, no delete**: minting or removing days is an append-only adjustment (HR-7),
+                // and the right to mint days is not the right to approve a leave.
+                'abilities' => self::merge(self::READ, [Ability::Create, Ability::Export], self::LOGS),
+            ],
+            'salary_components' => [
+                'name' => 'Salary Components',
+                'group' => ModuleGroup::Hr,
+                'icon' => 'adjustments-horizontal',
+                'is_core' => false,
+                'sort' => 246,
+                // A component definition shapes every future slip, so it is permissioned apart from one
+                // employee's salary.
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::RESTORE),
+            ],
+            'salary_structures' => [
+                'name' => 'Salary Structures',
+                'group' => ModuleGroup::Hr,
+                'icon' => 'banknotes',
+                'is_core' => false,
+                'sort' => 248,
+                // **Never edit, never delete** (HR-10): a raise is a new version, so there is no ability
+                // to grant that would let somebody rewrite one.
+                'abilities' => self::merge(self::READ, [Ability::Create], self::APPROVE, self::STATUS, self::MONEY, self::LOGS),
+            ],
+            'salary_slips' => [
+                'name' => 'Salary Slips',
+                'group' => ModuleGroup::Hr,
+                'icon' => 'document-currency-dollar',
+                'is_core' => false,
+                'sort' => 252,
+                // Lets an Accountant read and print slips with no right to generate, lock or pay a run.
+                'abilities' => self::merge(self::READ, [Ability::Print, Ability::Export], self::MONEY, self::LOGS),
+            ],
+            'employee_advances' => [
+                'name' => 'Employee Advances',
+                'group' => ModuleGroup::Hr,
+                'icon' => 'credit-card',
+                'is_core' => false,
+                'sort' => 254,
+                // **Never delete**: a cancellation is a status and a waiver is a row (HR-19).
+                'abilities' => self::merge(self::READ, [Ability::Create], self::APPROVE, self::STATUS, self::MONEY, self::LOGS),
+            ],
+            'employee_self_service' => [
+                'name' => 'My HR',
+                'group' => ModuleGroup::Hr,
+                'icon' => 'user-circle',
+                'is_core' => false,
+                'sort' => 256,
+                // The staff member's own window (§9): view = own attendance and leave, create = own punch,
+                // leave request or correction request, view_financial = own slip amounts.
+                'abilities' => self::merge(
+                    self::READ,
+                    [Ability::Create, Ability::Print, Ability::Upload, Ability::Download],
+                    self::MONEY,
+                ),
             ],
 
             /*
@@ -1067,10 +1177,20 @@ final class PermissionRegistry
         'tasks' => ['projects'],
         'time_tracking' => ['tasks'],
 
-        // HR — phase-07.
+        // HR — phase-07 §4.3. Disabling `employees` is blocked while any of these is on, and Phase 2's
+        // impact modal names them; no HR row is ever touched by a toggle (D5).
         'attendance' => ['employees'],
-        'leaves' => ['employees'],
-        'payroll' => ['employees'],
+        'leaves' => ['employees', 'leave_types'],
+        'leave_balances' => ['leaves', 'leave_types'],
+        'payroll' => ['employees', 'attendance', 'salary_structures'],
+        'salary_structures' => ['employees', 'salary_components'],
+        'salary_slips' => ['payroll'],
+        'employee_documents' => ['employees'],
+        'designations' => ['employees'],
+        'employee_advances' => ['employees'],
+        'employee_self_service' => ['employees'],
+        // work_shifts, holidays, salary_components and leave_types stand alone: they are configuration a
+        // business fills in before anybody is hired.
 
         // Finance — phase-13.
         'invoices' => ['clients'],

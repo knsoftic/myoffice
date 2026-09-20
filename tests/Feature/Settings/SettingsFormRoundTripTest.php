@@ -57,12 +57,13 @@ final class SettingsFormRoundTripTest extends TestCase
     }
 
     #[Test]
-    public function the_registry_declares_the_sixteen_groups_this_suite_walks(): void
+    public function the_registry_declares_the_seventeen_groups_this_suite_walks(): void
     {
         $this->assertSame(
             [
                 'company', 'branding', 'appearance', 'localization', 'contact', 'social', 'seo', 'mail',
-                'website', 'collaborator', 'projects', 'institute', 'finance', 'security', 'crm', 'maintenance',
+                'website', 'collaborator', 'projects', 'institute', 'finance', 'hr', 'security', 'crm',
+                'maintenance',
             ],
             array_keys(self::groupProvider()),
         );

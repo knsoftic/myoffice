@@ -331,6 +331,70 @@ final class Sidebar
                         'module' => 'payroll',
                         'permission' => 'payroll.view_any',
                     ],
+                    // phase-07 §8: the screens this phase adds. Salary slips sit apart from payroll so an
+                    // Accountant can read and print them without holding the right to lock a run.
+                    [
+                        'label' => 'Salary Slips',
+                        'icon' => 'document-currency-dollar',
+                        'route' => 'admin.salary-slips.index',
+                        'module' => 'salary_slips',
+                        'permission' => 'salary_slips.view_any',
+                    ],
+                    [
+                        'label' => 'Salary Structures',
+                        'icon' => 'banknotes',
+                        'route' => 'admin.salary-structures.index',
+                        'module' => 'salary_structures',
+                        'permission' => 'salary_structures.view_any',
+                    ],
+                    [
+                        'label' => 'Advances',
+                        'icon' => 'credit-card',
+                        'route' => 'admin.employee-advances.index',
+                        'module' => 'employee_advances',
+                        'permission' => 'employee_advances.view_any',
+                    ],
+                    [
+                        'label' => 'HR Setup',
+                        'icon' => 'adjustments-horizontal',
+                        'children' => [
+                            [
+                                'label' => 'Designations',
+                                'icon' => 'identification',
+                                'route' => 'admin.designations.index',
+                                'module' => 'designations',
+                                'permission' => 'designations.view_any',
+                            ],
+                            [
+                                'label' => 'Work Shifts',
+                                'icon' => 'clock',
+                                'route' => 'admin.work-shifts.index',
+                                'module' => 'work_shifts',
+                                'permission' => 'work_shifts.view_any',
+                            ],
+                            [
+                                'label' => 'Holidays',
+                                'icon' => 'calendar-days',
+                                'route' => 'admin.holidays.index',
+                                'module' => 'holidays',
+                                'permission' => 'holidays.view_any',
+                            ],
+                            [
+                                'label' => 'Leave Types',
+                                'icon' => 'tag',
+                                'route' => 'admin.leave-types.index',
+                                'module' => 'leave_types',
+                                'permission' => 'leave_types.view_any',
+                            ],
+                            [
+                                'label' => 'Salary Components',
+                                'icon' => 'adjustments-horizontal',
+                                'route' => 'admin.salary-components.index',
+                                'module' => 'salary_components',
+                                'permission' => 'salary_components.view_any',
+                            ],
+                        ],
+                    ],
                 ],
             ],
 

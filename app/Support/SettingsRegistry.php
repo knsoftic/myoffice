@@ -416,6 +416,15 @@ final class SettingsRegistry
                 'description' => 'Invoice numbering, tax, payment terms and expense approval.',
                 'sort' => 100,
             ],
+            // phase-07 §5 — one new group. `institute.attendance_grace_minutes` is the **student**
+            // grace period and is deliberately not reused here: a late employee and a late student are
+            // different business facts that happen to share a word.
+            'hr' => [
+                'label' => 'HR & Payroll',
+                'icon' => 'users',
+                'description' => 'Employee numbering, the working week, attendance tolerances, leave policy and how a salary is worked out.',
+                'sort' => 105,
+            ],
             'security' => [
                 'label' => 'Security',
                 'icon' => 'shield-check',
@@ -1390,6 +1399,7 @@ final class SettingsRegistry
             'finance' => self::financeFields(),
             'security' => self::securityFields(),
             'projects' => self::projectsFields(),
+            'hr' => self::hrFields(),
             'crm' => self::crmFields(),
             'maintenance' => self::maintenanceFields(),
         ];
@@ -3107,6 +3117,417 @@ final class SettingsRegistry
      *
      * @return array<string, array<string, mixed>>
      */
+    /**
+     * phase-07 §5 — the forty-four keys that govern HR numbering, attendance, leave policy and payroll.
+     *
+     * The five `*_next_number` counters are **readonly** (D62): only `DocumentNumberService` advances one,
+     * under a row lock inside the caller\'s transaction. A settings form posts every field, so an admin
+     * saving an unrelated key with a stale counter would re-issue a slip number that is already printed.
+     *
+     * `payroll_day_basis` and `lop_basis` are the two that decide what a day of pay is worth. They are
+     * snapshotted onto every payroll run, so changing them next year cannot change what last year\'s slip
+     * meant.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private static function hrFields(): array
+    {
+        $counter = static fn (string $label, int $sort): array => [
+            'label' => $label,
+            'type' => self::TYPE_NUMBER,
+            'rules' => ['nullable', 'integer', 'min:1'],
+            'default' => 1,
+            'help' => 'Advanced only by the numbering service, under a row lock, never by this form (D62).',
+            'readonly' => true,
+            'span' => 4,
+            'sort' => $sort,
+        ];
+
+        return [
+            'employee_code_prefix' => [
+                'label' => 'Employee ID prefix',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:12'],
+                'default' => 'EMP-',
+                'span' => 4,
+                'sort' => 10,
+            ],
+            'employee_code_next_number' => $counter('Next employee number', 20),
+            'leave_request_prefix' => [
+                'label' => 'Leave request prefix',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:12'],
+                'default' => 'LVR-',
+                'span' => 4,
+                'sort' => 30,
+            ],
+            'leave_request_next_number' => $counter('Next leave request number', 40),
+            'advance_number_prefix' => [
+                'label' => 'Advance number prefix',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:12'],
+                'default' => 'ADV-',
+                'span' => 4,
+                'sort' => 50,
+            ],
+            'advance_next_number' => $counter('Next advance number', 60),
+            'payroll_run_prefix' => [
+                'label' => 'Payroll run prefix',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:12'],
+                'default' => 'PR-',
+                'span' => 4,
+                'sort' => 70,
+            ],
+            'payroll_run_next_number' => $counter('Next payroll run number', 80),
+            'payslip_prefix' => [
+                'label' => 'Salary slip prefix',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:12'],
+                'default' => 'SLP-',
+                'span' => 4,
+                'sort' => 90,
+            ],
+            'payslip_next_number' => $counter('Next salary slip number', 100),
+
+            'weekend_days' => [
+                'label' => 'Weekly off days',
+                'type' => self::TYPE_MULTISELECT,
+                'rules' => ['nullable', 'array'],
+                'default' => ['sunday'],
+                'options' => [
+                    'monday' => 'Monday',
+                    'tuesday' => 'Tuesday',
+                    'wednesday' => 'Wednesday',
+                    'thursday' => 'Thursday',
+                    'friday' => 'Friday',
+                    'saturday' => 'Saturday',
+                    'sunday' => 'Sunday',
+                ],
+                'help' => 'The default. A shift, or one employee, may override it.',
+                'span' => 6,
+                'sort' => 110,
+            ],
+            'late_grace_minutes' => [
+                'label' => 'Late grace (minutes)',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:240'],
+                'default' => 15,
+                'help' => 'The default for a new shift; a shift keeps its own value once created.',
+                'span' => 3,
+                'sort' => 120,
+            ],
+            'early_leave_grace_minutes' => [
+                'label' => 'Early leave grace (minutes)',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:240'],
+                'default' => 10,
+                'span' => 3,
+                'sort' => 130,
+            ],
+            'full_day_min_minutes' => [
+                'label' => 'Minutes that make a full day',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:1440'],
+                'default' => 480,
+                'span' => 3,
+                'sort' => 140,
+            ],
+            'half_day_min_minutes' => [
+                'label' => 'Minutes that make a half day',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:1440'],
+                'default' => 240,
+                'span' => 3,
+                'sort' => 150,
+            ],
+            'short_day_as_half_day' => [
+                'label' => 'Treat a short day as a half day',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'When on, a day between the two thresholds pays half instead of full.',
+                'span' => 6,
+                'sort' => 160,
+            ],
+            'auto_absent_enabled' => [
+                'label' => 'Mark a working day with no punch absent',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'span' => 6,
+                'sort' => 170,
+            ],
+            'attendance_day_close_time' => [
+                'label' => 'Close the attendance day at',
+                'type' => self::TYPE_TIME,
+                'rules' => ['required', 'date_format:H:i'],
+                'default' => '23:50',
+                'span' => 4,
+                'sort' => 180,
+            ],
+            'self_check_in_enabled' => [
+                'label' => 'Let staff punch in themselves',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Turns the self-service punch off without touching anybody\'s permissions.',
+                'span' => 4,
+                'sort' => 190,
+            ],
+            'self_check_in_ip_whitelist' => [
+                'label' => 'Allowed punch-in addresses',
+                'type' => self::TYPE_TEXTAREA,
+                'rules' => ['nullable', 'string', 'max:2000'],
+                // null, not '': the store keeps no difference between an empty string and "not set", so a
+                // '' default would fail its own round-trip the first time anybody saved the group.
+                'default' => null,
+                'help' => 'One IP or CIDR per line. Empty means anywhere. A refused punch is logged with its address.',
+                'span' => 12,
+                'sort' => 200,
+            ],
+            'attendance_correction_window_days' => [
+                'label' => 'Staff may ask to correct the last (days)',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:365'],
+                'default' => 7,
+                'span' => 4,
+                'sort' => 210,
+            ],
+            'attendance_correction_requires_approval' => [
+                'label' => 'A correction request needs approval',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Off lets a holder of attendance.edit apply one directly — the correction row is still written either way (HR-6).',
+                'span' => 8,
+                'sort' => 220,
+            ],
+            'overtime_pay_enabled' => [
+                'label' => 'Pay overtime',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Overtime minutes are always measured; paying them is opt-in and still a manual component.',
+                'span' => 6,
+                'sort' => 230,
+            ],
+            'late_deduction_lates_per_day' => [
+                'label' => 'Lates that cost a day of pay',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:30'],
+                'default' => 0,
+                'help' => 'Zero switches late deductions off. Three means every third late costs one day.',
+                'span' => 6,
+                'sort' => 240,
+            ],
+            'document_expiry_reminder_days' => [
+                'label' => 'Warn about an expiring document (days ahead)',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:365'],
+                'default' => 30,
+                'span' => 4,
+                'sort' => 250,
+            ],
+
+            'leave_year_start_month' => [
+                'label' => 'Leave year starts in',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'integer', 'between:1,12'],
+                'default' => 1,
+                'options' => [self::class, 'monthOptions'],
+                'help' => 'The leave year need not be the calendar year.',
+                'span' => 4,
+                'sort' => 260,
+            ],
+            'leave_accrual_run_day' => [
+                'label' => 'Monthly accrual posts on day',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:28'],
+                'default' => 1,
+                'help' => 'Capped at 28 so every month has the day.',
+                'span' => 4,
+                'sort' => 270,
+            ],
+            'leave_carry_forward_enabled' => [
+                'label' => 'Allow carry-forward',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'A master switch above each leave type\'s own flag.',
+                'span' => 4,
+                'sort' => 280,
+            ],
+            'leave_negative_balance_allowed' => [
+                'label' => 'Allow a negative leave balance',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Off means an approval is refused with the exact shortfall named (HR-9).',
+                'span' => 6,
+                'sort' => 290,
+            ],
+            'leave_default_approval_levels' => [
+                'label' => 'Default approval levels',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'between:1,2'],
+                'default' => 1,
+                'span' => 6,
+                'sort' => 300,
+            ],
+
+            'payroll_day_basis' => [
+                'label' => 'A day of pay is',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string', 'in:calendar_days,working_days,fixed_30'],
+                'default' => 'calendar_days',
+                'options' => [
+                    'calendar_days' => 'Gross / days in the month',
+                    'working_days' => 'Gross / working days in the month',
+                    'fixed_30' => 'Gross / 30',
+                ],
+                'help' => 'Snapshotted onto every run, so changing it cannot change what a past slip meant.',
+                'span' => 6,
+                'sort' => 310,
+            ],
+            'lop_basis' => [
+                'label' => 'Loss of pay is deducted from',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string', 'in:basic,gross'],
+                'default' => 'gross',
+                'options' => ['basic' => 'Basic salary', 'gross' => 'Gross salary'],
+                'span' => 6,
+                'sort' => 320,
+            ],
+            'unpaid_leave_deduction_enabled' => [
+                'label' => 'Deduct unpaid leave',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Off tracks unpaid leave without ever deducting it.',
+                'span' => 6,
+                'sort' => 330,
+            ],
+            'payroll_net_rounding' => [
+                'label' => 'Round the net salary',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string', 'in:none,nearest_1,nearest_10'],
+                'default' => 'none',
+                'options' => [
+                    'none' => 'Not at all',
+                    'nearest_1' => 'To the nearest 1',
+                    'nearest_10' => 'To the nearest 10',
+                ],
+                'help' => 'Posted as a visible ROUNDING line, so the slip still adds up.',
+                'span' => 6,
+                'sort' => 340,
+            ],
+            'tax_mode' => [
+                'label' => 'Tax',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string', 'in:none,fixed_percentage,manual'],
+                'default' => 'manual',
+                'options' => [
+                    'none' => 'No tax line',
+                    'fixed_percentage' => 'A fixed percentage of taxable gross',
+                    'manual' => 'Entered per employee',
+                ],
+                'span' => 6,
+                'sort' => 350,
+            ],
+            'tax_default_rate' => [
+                'label' => 'Tax rate (%)',
+                'type' => self::TYPE_DECIMAL,
+                // decimal:0,4 — `numeric` alone would accept '1e3', which no decimal(8,4) column holds.
+                'rules' => ['nullable', 'numeric', 'decimal:0,4', 'min:0', 'max:100'],
+                'scale' => 4,
+                'default' => '0.0000',
+                'help' => 'Used only by the fixed-percentage mode.',
+                'span' => 6,
+                'sort' => 360,
+            ],
+
+            'advance_max_multiple_of_basic' => [
+                'label' => 'An advance may reach this multiple of basic',
+                'type' => self::TYPE_DECIMAL,
+                'rules' => ['required', 'numeric', 'decimal:0,4', 'min:0', 'max:12'],
+                'scale' => 4,
+                'default' => '1.0000',
+                'help' => 'Above it, the request needs an approval and a reason.',
+                'span' => 4,
+                'sort' => 370,
+            ],
+            'advance_recovery_default_installments' => [
+                'label' => 'Default recovery installments',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:36'],
+                'default' => 1,
+                'span' => 4,
+                'sort' => 380,
+            ],
+            'advance_recovery_cap_percent' => [
+                'label' => 'Recovery may take at most (% of net)',
+                'type' => self::TYPE_DECIMAL,
+                'rules' => ['required', 'numeric', 'decimal:0,4', 'min:0', 'max:100'],
+                'scale' => 4,
+                'default' => '50.0000',
+                'help' => 'Whatever is still owed, a slip never gives up more of its net than this.',
+                'span' => 4,
+                'sort' => 390,
+            ],
+
+            'payslip_show_attendance' => [
+                'label' => 'Print the attendance block on a slip',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'span' => 6,
+                'sort' => 400,
+            ],
+            'payslip_footer_note' => [
+                'label' => 'Slip footer note',
+                'type' => self::TYPE_TEXTAREA,
+                'rules' => ['nullable', 'string', 'max:500'],
+                'default' => null,
+                'span' => 12,
+                'sort' => 410,
+            ],
+            'employee_self_service_enabled' => [
+                'label' => 'Staff can use their own HR screens',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'A master switch above the module toggle and above anybody\'s permissions.',
+                'span' => 6,
+                'sort' => 420,
+            ],
+            'payroll_reminder_day' => [
+                'label' => 'Remind HR to run payroll on day',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:28'],
+                'default' => 25,
+                'span' => 6,
+                'sort' => 430,
+            ],
+        ];
+    }
+
+    /**
+     * 1-12 => January-December, for the leave-year selector.
+     *
+     * @return array<int, string>
+     */
+    public static function monthOptions(): array
+    {
+        $months = [];
+
+        foreach (range(1, 12) as $month) {
+            $months[$month] = date('F', mktime(0, 0, 0, $month, 1));
+        }
+
+        return $months;
+    }
+
     private static function projectsFields(): array
     {
         return [
