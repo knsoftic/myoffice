@@ -44,7 +44,7 @@ final class ModuleDependencyTest extends TestCase
     {
         $this->assertSame(['clients'], $this->module('projects')->depends_on);
         $this->assertEqualsCanonicalizing(['projects', 'invoices'], $this->modules->dependents('clients'));
-        $this->assertEqualsCanonicalizing(['project_milestones', 'tasks', 'payments'], $this->modules->dependents('projects'));
+        $this->assertEqualsCanonicalizing(['project_milestones', 'tasks', 'payments', 'project_payments'], $this->modules->dependents('projects'));
         $this->assertSame(['tasks'], $this->modules->dependencies('time_tracking'));
         $this->assertSame([], $this->modules->missingDependencies('projects'), 'Everything is enabled on a fresh install.');
     }
@@ -115,7 +115,7 @@ final class ModuleDependencyTest extends TestCase
     {
         $admin = $this->createSuperAdmin();
 
-        $this->assertCascadeGoesDeepestFirst('clients', ['time_tracking', 'tasks', 'payments', 'project_milestones', 'projects', 'invoices']);
+        $this->assertCascadeGoesDeepestFirst('clients', ['time_tracking', 'tasks', 'payment_reversals', 'payments', 'project_payments', 'project_milestones', 'projects', 'invoices']);
 
         $this->actingAs($admin)
             ->from('/admin/modules')
@@ -123,7 +123,7 @@ final class ModuleDependencyTest extends TestCase
             ->assertRedirect('/admin/modules')
             ->assertSessionHas('toast', fn (array $toast): bool => $toast['type'] === 'warning' && str_contains($toast['message'], 'no data was deleted'));
 
-        foreach (['clients', 'projects', 'invoices', 'tasks', 'time_tracking', 'project_milestones', 'payments'] as $slug) {
+        foreach (['clients', 'projects', 'invoices', 'tasks', 'time_tracking', 'project_milestones', 'payments', 'project_payments', 'payment_reversals'] as $slug) {
             $this->assertFalse((bool) $this->module($slug)->is_enabled, $slug.' must be off after the cascade.');
         }
 
@@ -146,7 +146,7 @@ final class ModuleDependencyTest extends TestCase
     #[Test]
     public function once_the_dependents_are_off_the_module_can_be_disabled_without_a_cascade(): void
     {
-        foreach (['time_tracking', 'tasks', 'payments', 'project_milestones', 'projects', 'invoices'] as $slug) {
+        foreach (['time_tracking', 'tasks', 'payment_reversals', 'payments', 'project_payments', 'project_milestones', 'projects', 'invoices'] as $slug) {
             $this->modules->toggle($this->module($slug), false, 'wind down');
         }
 

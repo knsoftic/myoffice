@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Support;
 
 use App\Enums\Cms\SitemapChangeFrequency;
+use App\Enums\FixedCommissionRelease;
 use App\Enums\ProgressBasis;
+use App\Enums\StudentFeeType;
 use App\Enums\ThemePreference;
 use App\Models\Branch;
 use App\Models\User;
@@ -2953,6 +2955,118 @@ final class SettingsRegistry
                 'span' => 6,
                 'sort' => 310,
             ],
+
+            /*
+            |------------------------------------------------------------------
+            | phase-10-12 §5 — the ten keys the commission engine reads.
+            |------------------------------------------------------------------
+            */
+
+            'commission_hold_days' => [
+                'label' => 'Hold commission for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'between:0,365'],
+                'default' => 0,
+                'suffix' => 'days',
+                'help' => 'Earned commission is approved but not payable until this many days after the payment. 0 makes it available at once.',
+                'span' => 4,
+                'sort' => 320,
+            ],
+            'commissionable_fee_types' => [
+                'label' => 'Fee types that earn commission',
+                'type' => self::TYPE_MULTISELECT,
+                'rules' => ['required', 'array', 'min:1'],
+                'item_rules' => [
+                    '*' => ['string', 'in:'.implode(',', array_column(StudentFeeType::cases(), 'value'))],
+                ],
+                // Exam and certificate fees are absent by default and have no setting that adds them:
+                // they are services the institute performs, not business somebody brought in.
+                'default' => ['course_fee', 'monthly_fee', 'installment'],
+                'options' => StudentFeeType::options(),
+                'span' => 12,
+                'sort' => 330,
+            ],
+            'student_commission_document' => [
+                'label' => 'Student commission is promised against',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string', 'in:admission,fee'],
+                'default' => 'admission',
+                'options' => [
+                    'admission' => 'The admission — one promise per enrolment',
+                    'fee' => 'Each fee charge separately',
+                ],
+                'help' => 'Decides the grain of the entitlement: one cap for the whole enrolment, or one per charge.',
+                'span' => 6,
+                'sort' => 340,
+            ],
+            'fixed_commission_release' => [
+                'label' => 'A fixed commission is released',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string', 'in:prorated,on_first_payment,per_payment'],
+                'default' => 'prorated',
+                'options' => FixedCommissionRelease::options(),
+                'help' => 'A percentage settles itself; a fixed amount does not, so somebody has to say what a part-payment releases.',
+                'span' => 6,
+                'sort' => 350,
+            ],
+            'commission_on_overpayment' => [
+                'label' => 'Pay commission on overpayment',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Off means a partner earned the fee, not the rounding a student happened to pay over it.',
+                'span' => 6,
+                'sort' => 360,
+            ],
+            'commission_min_entry_amount' => [
+                'label' => 'Smallest commission worth recording',
+                'type' => self::TYPE_DECIMAL,
+                'rules' => ['required', 'numeric', 'decimal:0,2', 'min:0'],
+                'default' => '0.00',
+                'help' => 'A commission below this is skipped with a reason rather than written as dust.',
+                'span' => 6,
+                'sort' => 370,
+            ],
+            'clawback_on_paid_commission' => [
+                'label' => 'When a refund undoes commission already paid out',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string', 'in:offset_future,write_off'],
+                'default' => 'offset_future',
+                'options' => [
+                    'offset_future' => 'Carry the debt and take it from future earnings',
+                    'write_off' => 'Write it off — the business absorbs it',
+                ],
+                'help' => 'The partner has already been paid, so there is nothing to take back: either they owe it or the business does not ask.',
+                'span' => 6,
+                'sort' => 380,
+            ],
+            'payout_single_inflight' => [
+                'label' => 'One payout request at a time',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Off lets a partner stack requests, which makes "what is still reserved" much harder to read.',
+                'span' => 6,
+                'sort' => 390,
+            ],
+            'payout_auto_approve_below' => [
+                'label' => 'Approve payouts below',
+                'type' => self::TYPE_DECIMAL,
+                'rules' => ['required', 'numeric', 'decimal:0,2', 'min:0'],
+                'default' => '0.00',
+                'help' => 'A request under this amount skips the approval step. 0 means every payout is approved by hand.',
+                'span' => 6,
+                'sort' => 400,
+            ],
+            'statement_show_technical_rows' => [
+                'label' => 'Show technical rows on a statement',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Adjustments and write-offs are hidden by default: a partner reads a statement, not a ledger.',
+                'span' => 6,
+                'sort' => 410,
+            ],
         ];
     }
 
@@ -3056,6 +3170,39 @@ final class SettingsRegistry
                 'span' => 4,
                 'sort' => 100,
             ],
+
+            // phase-10-12 §5. The fee-charge document series, and the counter behind the receipt prefix
+            // that already exists above. Both counters are readonly (D62): only DocumentNumberService
+            // advances one, under a row lock, and a settings form that posted a stale value would
+            // re-issue a number already printed on somebody's receipt.
+            'fee_record_prefix' => [
+                'label' => 'Fee charge prefix',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:16', 'regex:/^[A-Za-z0-9\-\/]*$/'],
+                'default' => 'FS-',
+                'span' => 4,
+                'sort' => 110,
+            ],
+            'fee_record_next_number' => [
+                'label' => 'Next fee charge number',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1'],
+                'default' => 1,
+                'help' => 'Advanced only by the numbering service, under a row lock, never by this form (D62).',
+                'readonly' => true,
+                'span' => 4,
+                'sort' => 120,
+            ],
+            'fee_receipt_next_number' => [
+                'label' => 'Next fee receipt number',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1'],
+                'default' => 1,
+                'help' => 'Advanced only by the numbering service, under a row lock, never by this form (D62).',
+                'readonly' => true,
+                'span' => 4,
+                'sort' => 130,
+            ],
         ];
     }
 
@@ -3151,6 +3298,113 @@ final class SettingsRegistry
                 'default' => true,
                 'span' => 6,
                 'sort' => 90,
+            ],
+
+            /*
+            |------------------------------------------------------------------
+            | phase-10-12 §5 — three document series and five money rules.
+            |------------------------------------------------------------------
+            */
+
+            'project_payment_prefix' => [
+                'label' => 'Project payment prefix',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:16', 'regex:/^[A-Za-z0-9\-\/]*$/'],
+                'default' => 'PP-',
+                'span' => 4,
+                'sort' => 100,
+            ],
+            'project_payment_next_number' => [
+                'label' => 'Next project payment number',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1'],
+                'default' => 1,
+                'help' => 'Advanced only by the numbering service, under a row lock, never by this form (D62).',
+                'readonly' => true,
+                'span' => 4,
+                'sort' => 110,
+            ],
+            'payment_reversal_prefix' => [
+                'label' => 'Reversal prefix',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:16', 'regex:/^[A-Za-z0-9\-\/]*$/'],
+                'default' => 'RV-',
+                'span' => 4,
+                'sort' => 120,
+            ],
+            'payment_reversal_next_number' => [
+                'label' => 'Next reversal number',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1'],
+                'default' => 1,
+                'help' => 'Advanced only by the numbering service, under a row lock, never by this form (D62).',
+                'readonly' => true,
+                'span' => 4,
+                'sort' => 130,
+            ],
+            'collaborator_payout_prefix' => [
+                'label' => 'Payout voucher prefix',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:16', 'regex:/^[A-Za-z0-9\-\/]*$/'],
+                'default' => 'PO-',
+                'span' => 4,
+                'sort' => 140,
+            ],
+            'collaborator_payout_next_number' => [
+                'label' => 'Next payout voucher number',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1'],
+                'default' => 1,
+                'help' => 'Advanced only by the numbering service, under a row lock, never by this form (D62).',
+                'readonly' => true,
+                'span' => 4,
+                'sort' => 150,
+            ],
+            'backdate_limit_days' => [
+                'label' => 'How far a payment may be back-dated',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'between:0,365'],
+                'default' => 30,
+                'suffix' => 'days',
+                'help' => 'The value date selects the commission rule and the referral, so a receipt dated last year would earn at last year\'s rate. Never in the future, whatever this is set to.',
+                'span' => 6,
+                'sort' => 160,
+            ],
+            'refund_approval_required' => [
+                'label' => 'Refunds need approval',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Commission is not clawed back until the reversal is approved — a refund somebody entered and one somebody authorised are different facts.',
+                'span' => 6,
+                'sort' => 170,
+            ],
+            'refund_approval_threshold' => [
+                'label' => 'Refunds above this always need approval',
+                'type' => self::TYPE_DECIMAL,
+                'rules' => ['required', 'numeric', 'decimal:0,2', 'min:0'],
+                'default' => '0.00',
+                'help' => 'Applies even when the switch above is off. 0 means the switch alone decides.',
+                'span' => 6,
+                'sort' => 180,
+            ],
+            'payout_reference_required' => [
+                'label' => 'A payout needs a transaction reference',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Marking a payout paid without one leaves "did it actually go out" unanswerable.',
+                'span' => 6,
+                'sort' => 190,
+            ],
+            'wallet_reconcile_enabled' => [
+                'label' => 'Prove every wallet nightly',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Re-derives each balance from the ledger and records the proof. Switching it off does not make the balances wrong — it stops anybody finding out.',
+                'span' => 6,
+                'sort' => 200,
             ],
         ];
     }

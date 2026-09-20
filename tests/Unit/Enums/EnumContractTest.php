@@ -201,7 +201,7 @@ final class EnumContractTest extends TestCase
             'view_any', 'view', 'create', 'edit', 'delete', 'restore', 'approve', 'reject',
             'assign', 'print', 'export', 'import', 'upload', 'download', 'change_status',
             'view_financial', 'view_reports', 'view_logs',
-            'edit_mail',
+            'edit_mail', 'link_invoice',
         ], Ability::values());
     }
 

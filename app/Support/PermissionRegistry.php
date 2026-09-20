@@ -465,6 +465,42 @@ final class PermissionRegistry
                 'sort' => 320,
                 'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::APPROVE, self::MONEY, self::REPORTS, self::RESTORE),
             ],
+            // phase-10-12 §4.1. **No `edit` and no `delete`, for ever** (INV-8, INV-5): a received payment
+            // is never editable, and voiding it is `change_status`. `link_invoice` is the single narrow,
+            // non-preset addition D43 needs — it permits the invoice-link field move and nothing else,
+            // and it belongs to no preset, specifically not to MONEY.
+            'project_payments' => [
+                'name' => 'Project Payments',
+                'group' => ModuleGroup::Finance,
+                'icon' => 'banknotes',
+                'is_core' => false,
+                'sort' => 325,
+                'abilities' => self::merge(
+                    self::READ,
+                    [Ability::Create, Ability::Print, Ability::Export, Ability::LinkInvoice],
+                    self::STATUS, self::MONEY, self::LOGS,
+                ),
+            ],
+            // phase-10-12 §4.1. A reversal is created and approved; it is never edited or deleted,
+            // because it is the evidence that money went back.
+            'payment_reversals' => [
+                'name' => 'Payment Reversals',
+                'group' => ModuleGroup::Finance,
+                'icon' => 'arrow-uturn-left',
+                'is_core' => false,
+                'sort' => 335,
+                'abilities' => self::merge(self::READ, [Ability::Create], self::APPROVE, self::MONEY, self::REPORTS, self::LOGS),
+            ],
+            // phase-10-12 §4.1. `change_status` **is** "run a reconciliation / repair the cache" — no new
+            // Ability case is invented for it, because a repair is a state change like any other.
+            'wallet_reconciliation' => [
+                'name' => 'Wallet Reconciliation',
+                'group' => ModuleGroup::Finance,
+                'icon' => 'scale',
+                'is_core' => false,
+                'sort' => 345,
+                'abilities' => self::merge(self::READ, self::STATUS, self::MONEY, self::REPORTS, self::LOGS),
+            ],
             'expenses' => [
                 'name' => 'Expenses',
                 'group' => ModuleGroup::Finance,
@@ -508,23 +544,30 @@ final class PermissionRegistry
                 // (D65). `delete` is soft only — `forceDelete` is refused outright by the policy (INV-C5).
                 'abilities' => self::merge(self::CRUD_FULL, self::APPROVE, self::STATUS, self::ASSIGN, self::FILES, self::MONEY, self::REPORTS, self::RESTORE, self::LOGS),
             ],
+            // phase-10-12 §4.2 adds APPROVE and LOGS. `edit` and `delete` were registered in Phase 1
+            // and stay — taking an ability away revokes a permission somebody has already granted (D65)
+            // — but **no code path uses them**: INV-17 makes a rule version immutable at the model, so a
+            // rate change is a new version and nothing in the system offers an edit form.
             'collaborator_commission_settings' => [
                 'name' => 'Collaborator Commission Settings',
                 'group' => ModuleGroup::Collaborator,
                 'icon' => 'adjustments-horizontal',
                 'is_core' => false,
                 'sort' => 420,
-                'abilities' => self::merge(self::CRUD, self::MONEY, self::RESTORE),
+                'abilities' => self::merge(self::CRUD, self::APPROVE, self::MONEY, self::LOGS, self::RESTORE),
             ],
             // Financial history is immutable: read, approve and report only — corrections are
             // reversing entries created by the commission engine, never edits or deletes.
+            // phase-10-12 §4.2 adds `create` — the manual adjustment and write-off path — and LOGS.
+            // Still never `edit` and never `delete`: a wrong commission is corrected by a reversing
+            // entry that references it (CLAUDE.md rule 3).
             'collaborator_commissions' => [
                 'name' => 'Collaborator Commissions',
                 'group' => ModuleGroup::Collaborator,
                 'icon' => 'calculator',
                 'is_core' => false,
                 'sort' => 430,
-                'abilities' => self::merge(self::READ, self::APPROVE, self::STATUS, self::MONEY, self::REPORTS),
+                'abilities' => self::merge(self::READ, [Ability::Create], self::APPROVE, self::STATUS, self::MONEY, self::REPORTS, self::LOGS),
             ],
             'collaborator_wallets' => [
                 'name' => 'Collaborator Wallets',
@@ -540,7 +583,9 @@ final class PermissionRegistry
                 'icon' => 'banknotes',
                 'is_core' => false,
                 'sort' => 450,
-                'abilities' => self::merge(self::CRUD, self::APPROVE, self::STATUS, self::MONEY, self::FILES, self::REPORTS, self::RESTORE),
+                // phase-10-12 §4.2 adds LOGS. `delete` is absent and stays absent: §120.9 requires
+                // payout history to survive, and cancelling is a status that releases the allocations.
+                'abilities' => self::merge(self::CRUD, self::APPROVE, self::STATUS, self::MONEY, self::FILES, self::REPORTS, self::LOGS, self::RESTORE),
             ],
             // phase-08-09 §4.2. `create` is the manual link a receptionist makes at admission; `edit`
             // is the change-attribution right (§37), which supersedes and never mutates (INV-R4). There
@@ -697,6 +742,20 @@ final class PermissionRegistry
                 'is_core' => false,
                 'sort' => 640,
                 'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::APPROVE, self::MONEY, self::REPORTS, self::RESTORE),
+            ],
+            // phase-10-12 §4.1. The receipt itself: created, printed and voided, never edited or
+            // deleted (INV-8, INV-5).
+            'student_fee_payments' => [
+                'name' => 'Fee Receipts',
+                'group' => ModuleGroup::Institute,
+                'icon' => 'receipt-percent',
+                'is_core' => false,
+                'sort' => 645,
+                'abilities' => self::merge(
+                    self::READ,
+                    [Ability::Create, Ability::Print, Ability::Export],
+                    self::STATUS, self::MONEY, self::LOGS,
+                ),
             ],
             'installments' => [
                 'name' => 'Installments',
@@ -1076,6 +1135,9 @@ final class PermissionRegistry
                     'leads',
                     'activity_log',
                     'notifications',
+                    // phase-10-12 §4.3: the two the spine adds.
+                    'wallet',
+                    'payouts',
                     // Registering where one's own money should land is not the same right as asking for
                     // it: the spine gates `collaborator.payout-accounts.*` with `payout_request`, which
                     // the Collaborator role deliberately does not hold, so without this a collaborator
@@ -1252,6 +1314,12 @@ final class PermissionRegistry
         // at a collaborator, and at no other module's rows. A payout account is a destination — the
         // payout points at it, not the other way round — so it is not a dependant of `collaborator_payouts`.
         'collaborator_payout_accounts' => ['collaborators'],
+        // phase-10-12 §4.1. A reconciliation is a proof about a wallet, so it is meaningless without
+        // one; a receipt belongs to a fee charge and a project payment to a project.
+        'wallet_reconciliation' => ['collaborator_wallets'],
+        'student_fee_payments' => ['student_fees'],
+        'project_payments' => ['projects'],
+        'payment_reversals' => ['project_payments'],
         'collaborator_referral_visits' => ['collaborators'],
 
         // Institute — phase-14 … phase-21.

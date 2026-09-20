@@ -53,6 +53,19 @@ enum Ability: string
     */
     case EditMail = 'edit_mail';
 
+    /**
+     * phase-10-12 §4.1 / D43, and **this ability permits exactly one mutation**: moving
+     * `project_payments.invoice_id` from NULL to a value and back, through `InvoiceService` alone,
+     * while the payment is not voided, with a mandatory reason and zero commission effect.
+     *
+     * It belongs to **no preset** — and specifically not to `MONEY`, so holding it reveals no amount by
+     * itself. It is written on `project_payments` and on no other slug. A narrow ability must never be
+     * widened into a general `edit`: a registered `edit` on a money module is exactly what a later role
+     * edit or seeder would quietly reuse for a real edit, while a single-purpose one cannot be reused
+     * because no other code path checks it.
+     */
+    case LinkInvoice = 'link_invoice';
+
     public function label(): string
     {
         return match ($this) {
@@ -75,6 +88,7 @@ enum Ability: string
             self::ViewReports => 'View Reports',
             self::ViewLogs => 'View Logs',
             self::EditMail => 'Edit Mail',
+            self::LinkInvoice => 'Link to an Invoice',
         };
     }
 
@@ -97,7 +111,10 @@ enum Ability: string
             self::Edit,
             self::EditMail,
             self::Assign,
-            self::ChangeStatus => 'amber',
+            self::ChangeStatus,
+            // Amber with the other write abilities, not emerald with `view_financial`: it changes
+            // something, and it deliberately reveals no amount.
+            self::LinkInvoice => 'amber',
 
             self::Delete,
             self::Reject => 'rose',

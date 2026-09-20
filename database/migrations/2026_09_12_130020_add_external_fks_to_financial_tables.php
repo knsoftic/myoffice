@@ -155,7 +155,7 @@ return new class extends Migration
         foreach (array_reverse(self::KEYS) as [$table, $column]) {
             $name = RawSchema::foreignKeyName($table, $column);
 
-            if (Schema::hasTable($table) && $this->exists($name)) {
+            if ($this->hasTable($table) && $this->exists($name)) {
                 DB::statement(sprintf('ALTER TABLE `%s` DROP FOREIGN KEY `%s`', $table, $name));
             }
         }
@@ -165,7 +165,7 @@ return new class extends Migration
     {
         $name = RawSchema::foreignKeyName($table, $column);
 
-        if (! Schema::hasTable($table) || ! Schema::hasColumn($table, $column)) {
+        if (! $this->hasTable($table) || ! $this->hasColumn($table, $column)) {
             return false;
         }
 
@@ -173,7 +173,7 @@ return new class extends Migration
             return true;
         }
 
-        if (! Schema::hasTable($references)) {
+        if (! $this->hasTable($references)) {
             return false;
         }
 
@@ -186,14 +186,71 @@ return new class extends Migration
             $onDelete === 'null' ? 'SET NULL' : 'RESTRICT',
         ));
 
+        $this->remember($name);
+
         return true;
+    }
+
+    /**
+     * Existing tables, columns and constraint names, read **once**.
+     *
+     * The straightforward version asks `Schema::hasTable()`, `Schema::hasColumn()` and an
+     * `information_schema` existence query per key. At seventy-odd keys that is two hundred metadata
+     * round trips, and it made a full `migrate` nineteen seconds slower — which every test class that
+     * refreshes the database then pays again. Three queries answer the same questions.
+     *
+     * @var array{tables: array<string, true>, columns: array<string, true>, constraints: array<string, true>}|null
+     */
+    private ?array $catalogue = null;
+
+    private function catalogue(): array
+    {
+        if ($this->catalogue !== null) {
+            return $this->catalogue;
+        }
+
+        $schema = DB::getDatabaseName();
+
+        $tables = DB::table('information_schema.TABLES')
+            ->where('TABLE_SCHEMA', $schema)->pluck('TABLE_NAME')->all();
+
+        $columns = DB::table('information_schema.COLUMNS')
+            ->where('TABLE_SCHEMA', $schema)
+            ->selectRaw('CONCAT(TABLE_NAME, ".", COLUMN_NAME) as k')
+            ->pluck('k')->all();
+
+        $constraints = DB::table('information_schema.TABLE_CONSTRAINTS')
+            ->where('CONSTRAINT_SCHEMA', $schema)->pluck('CONSTRAINT_NAME')->all();
+
+        return $this->catalogue = [
+            'tables' => array_fill_keys($tables, true),
+            'columns' => array_fill_keys($columns, true),
+            'constraints' => array_fill_keys($constraints, true),
+        ];
+    }
+
+    private function hasTable(string $table): bool
+    {
+        return isset($this->catalogue()['tables'][$table]);
+    }
+
+    private function hasColumn(string $table, string $column): bool
+    {
+        return isset($this->catalogue()['columns'][$table.'.'.$column]);
     }
 
     private function exists(string $name): bool
     {
-        return DB::table('information_schema.TABLE_CONSTRAINTS')
-            ->where('CONSTRAINT_SCHEMA', DB::getDatabaseName())
-            ->where('CONSTRAINT_NAME', $name)
-            ->exists();
+        return isset($this->catalogue()['constraints'][$name]);
+    }
+
+    /**
+     * Remember a key this run just created, so a later lookup in the same run sees it without another
+     * round trip.
+     */
+    private function remember(string $name): void
+    {
+        $this->catalogue();
+        $this->catalogue['constraints'][$name] = true;
     }
 };

@@ -415,7 +415,9 @@ Contract: [`docs/phases/phase-10-12.md`](docs/phases/phase-10-12.md) over
 | [x] | Every guard proved to bite on **58 assertions** in a rolled-back transaction: one wallet per collaborator and a negative available balance still legal after a clawback; one **active** referral per subject with superseded rows stacking freely and several losers pointing at one winner (ND-12); one open rule version per scope; a rule refused without the number it needs; one current entitlement per document; INV-12 refusing an over-release; `uq_cle_source` refusing a second commission for one receipt; the sign, reversal, debit-clean, allocation (INV-11) and undo (INV-10) ceilings; `uq_cp_txn` refusing one bank transaction twice; `uq_cpa_pair` refusing an entry back into the same payout **even after release**; `uq_sf_generation` refusing a doubly-generated charge while hand-entered ones stack; `net_received_amount` following a refund; and all four no-delete triggers |
 | [x] | §2.3 the 15 models, verified against the live schema: **201 assertions over 141 relations** — no cast on a column that does not exist, nothing fillable that is not a column, no generated column reachable through mass assignment, and every relation resolving to a real table |
 | [x] | The write guards, proved on **52 assertions**: seven models refusing an insert outside their owning service and naming it; `allowDirectWrites()` letting a factory through, closing again, and closing **even when the callback throws**; INV-8 refusing a receipt's amount and value date; INV-4 refusing a commission's amount, rate and source; INV-17 refusing a rate change; three no-delete refusals; the entitlement capping a release and reporting `null` rather than a figure when uncapped; the referral window including and excluding by date and by `commission_eligible`; the wallet's R2 identity holding and failing; and an allocation returning to available on a cancellation but not on a reversal |
-| [ ] | §4 PermissionRegistry, §5 SettingsRegistry |
+| [x] | §4 PermissionRegistry: 4 new money modules (`student_fee_payments`, `project_payments`, `payment_reversals`, `wallet_reconciliation`), `Ability::LinkInvoice` (D43's single narrow permission — no preset, on one slug, held by the **Accountant** alone), `create`/`APPROVE`/`LOGS` added to the commission slugs, and `collaborator_portal.wallet` / `.payouts` — **105 modules / 1,037 permissions**. Every money module has **no `edit` and no `delete`, for ever** (INV-8, INV-5) |
+| [x] | §5 SettingsRegistry: the 24 keys across the existing `collaborator`, `institute` and `finance` groups, no new group. Three more `*_next_number` counters, all `readonly` (D62) |
+| [ ] | §6 the engine's services and §7-§11 its screens, jobs and acceptance suite |
 | [ ] | §6 `ReferralService`, `CommissionRuleService`, `CommissionBaseResolver`, `CommissionEntitlementService`, `LedgerWriter`, `PaymentService`, `StudentCommissionService`, `CommissionReversalService`, `CommissionApprovalService`; §7 routes, §8 screens, §10 jobs, §11 acceptance suite |
 ### [ ] PHASE 11 — Project referral commission engine (`ProjectCommissionService`)
 ### [ ] PHASE 12 — Collaborator wallet, commission ledger, payouts, statements
@@ -439,6 +441,44 @@ Contract: [`docs/phases/phase-10-12.md`](docs/phases/phase-10-12.md) over
 ---
 
 ## 6. Change Log
+
+### 2026-09-20 — Phase 10 registries, and a permission that had been going to the wrong role
+
+Four money modules, twenty-four settings, and one narrow ability.
+
+**`project_payments.link_invoice` permits exactly one mutation** (D43): `invoice_id` moving NULL → value
+→ NULL through `InvoiceService`, with a mandatory reason, audited, and with zero commission effect. It
+belongs to **no preset** — specifically not to `MONEY`, so holding it reveals no amount — it is written
+on one slug, and the Accountant is the only seeded role that gets it. The point of a single-purpose
+ability is that it cannot be reused: a registered `edit` on a money module is exactly what a later role
+edit or seeder would quietly repurpose for a real edit, while nothing else checks `link_invoice`.
+
+**None of the four money modules has `edit` or `delete`, and none ever will** (INV-8, INV-5). Voiding a
+receipt is `change_status`; a reversal is created and approved, never amended.
+
+**A defect the Phase 8 commit shipped, found here.** The collaborator payout-account grants I added then
+landed in the **Digital Marketer** block, not the Accountant's — both roles' permission lists end with
+the same `website_media` line, and the anchor matched the wrong one. A marketing role has been holding
+`collaborator_payout_accounts.*` since that commit. It was visible in the convergence output at the time
+(`+ grant Digital Marketer | collaborator_payout_accounts.delete`) and I read past it. Both grant blocks
+are now in the Accountant, and the stale rows were removed from the dev database explicitly — seeders
+converge additively (D65) and would never have revoked them.
+
+**Two other things the seeders caught that a reading would not.** `Ability::label()` and `::color()` are
+`match` expressions with no default, so the new case was an `UnhandledMatchError` the first time
+`PermissionSeeder` ran — and `EnumContractTest` pins the exact ability list, whose own docblock already
+said `link_invoice` "joins the same tail in Phase 10".
+
+**A migration that was quietly costing every test run.** `add_external_fks_to_financial_tables` asked
+`Schema::hasTable()`, `Schema::hasColumn()` and an `information_schema` existence query **per key** —
+about two hundred metadata round trips, which made it the slowest migration in the project at 19
+seconds. Every test class that refreshes the database paid that again. Three queries answer the same
+questions, and a full `migrate` went from 74 seconds to 54.
+
+**Verified:** 105 modules / 1,037 permissions / 24 new settings seeded and read back; `link_invoice` and
+the payout-account permissions held by exactly Accountant, Admin and Super Admin; and the Settings, Rbac
+and Modules suites green at 613 tests.
+
 
 ### 2026-09-20 — Phase 10 models: three guarantees, stated once
 
@@ -1427,6 +1467,9 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-20 | Phase 10 schema guards | probe in a rolled-back transaction on `my_office` | PASS — **58/58**: one wallet per collaborator and a negative available balance still legal; one active referral per subject with several losers sharing one winner; one open rule per scope and a rule refused without its number; one current entitlement per document and INV-12 refusing an over-release; `uq_cle_source` and `uq_cle_dedupe`; the sign, reversal, debit-clean, INV-11 and INV-10 ceilings; `uq_cp_txn`; `uq_cpa_pair` holding even after release; `uq_sf_generation`; `net_received_amount` following a refund; and four no-delete triggers. Found 1 real defect (D70) |
 | 2026-09-20 | Phase 10 models against the live schema | reflection walk over all 15 models | PASS — **201/201** across **141 relations**: no stray cast, no stray fillable, no generated column mass-assignable, every relation resolving to a real table. Found 1 fatal (`isClean()` shadowing Eloquent's) and 1 latent break (`replicate()` on the six tables with generated columns) |
 | 2026-09-20 | Phase 10 model write guards | probe in a rolled-back transaction | PASS — **52/52**: seven insert refusals naming their service, `allowDirectWrites()` opening and closing (including after a throw), INV-8 on a receipt's amount and date, INV-4 on a commission's amount, rate and source, INV-17 on a rate change, three no-delete refusals, the entitlement's cap and its null-when-uncapped remaining, the referral date window in three directions, the wallet identity and freeze, and an allocation returning to available on a cancellation but not on a reversal |
+| 2026-09-20 | Phase 10 §4 / §5 registries | seeders on `my_office_test` and `my_office`, then rows read back | PASS — **105 modules / 1,037 permissions / 24 new settings**; `project_payments.link_invoice` and `collaborator_payout_accounts.*` held by exactly Accountant, Admin and Super Admin. Found 1 real defect shipped by the Phase 8 commit (both grant blocks had landed in Digital Marketer) and 2 caught by the seeder (`Ability::label()` / `::color()` missing the new case) |
+| 2026-09-20 | Phase 10 registry regression | `tests/Feature/{Settings,Rbac,Modules}` | PASS — **613 tests**: Settings 356 / 3,097 assertions, Rbac 163 / 11,598, Modules 94 / 713. `ModuleDependencyTest` updated for the two new edges (`project_payments` off `projects`, `payment_reversals` off that) |
+| 2026-09-20 | Migration speed | `migrate` timed on an empty database, before and after batching the FK metadata lookups | PASS — **74 s → 54 s**; `add_external_fks_to_financial_tables` from 19 s to under 1 s, `add_internal_fks` from 7 s to 2 s. The object list still verifies 126/126 and the 21-file round trip is still clean |
 
 ---
 

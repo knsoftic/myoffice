@@ -273,6 +273,22 @@ class RoleSeeder extends Seeder
                     PermissionRegistry::permissionNamesFor('employee_advances', self::READ_MONEY),
                     PermissionRegistry::permissionNamesFor('employees', self::READ_MONEY),
                     PermissionRegistry::permissionNamesFor('reports', self::FINANCIAL_REPORTING),
+                    PermissionRegistry::permissionNamesFor('website_media', [Ability::ViewAny, Ability::View, Ability::Upload]),
+                    // phase-08-09 §4.3: whoever pays a partner registers and verifies where the money
+                    // goes. No ability on this module reveals the encrypted details — only the last four
+                    // digits are ever rendered (INV-C6).
+                    PermissionRegistry::permissionNamesFor('collaborator_payout_accounts'),
+                    // phase-10-12 §4.1: the four money modules the spine adds. `project_payments`
+                    // carries `link_invoice`, and the Accountant is the **only** seeded role that
+                    // receives it — it is the role that already holds `invoices.edit` and records
+                    // project receipts, and the route demands both together (D43). Widening it later is
+                    // an explicit, audited role edit, never a preset change.
+                    PermissionRegistry::permissionNamesFor([
+                        'student_fee_payments',
+                        'project_payments',
+                        'payment_reversals',
+                        'wallet_reconciliation',
+                    ]),
                 ),
             ],
             [
@@ -363,10 +379,6 @@ class RoleSeeder extends Seeder
                     // seo.edit, no publish.
                     PermissionRegistry::permissionNamesFor(['website_cta_blocks', 'faqs']),
                     PermissionRegistry::permissionNamesFor('website_media', [Ability::ViewAny, Ability::View, Ability::Upload]),
-                    // phase-08-09 §4.3: whoever pays a partner registers and verifies where the money
-                    // goes. No ability on this module reveals the encrypted details — only the last four
-                    // digits are ever rendered (INV-C6).
-                    PermissionRegistry::permissionNamesFor('collaborator_payout_accounts'),
                 ),
             ],
             [
@@ -410,6 +422,12 @@ class RoleSeeder extends Seeder
                     // that manual pick outranks every captured code (INV-R3). No `view_financial`.
                     PermissionRegistry::permissionNamesFor('collaborators', self::READ),
                     PermissionRegistry::permissionNamesFor('collaborator_referrals', [Ability::Create]),
+                    // phase-10-12 §4.1: the front desk takes fee money and prints the receipt. It does
+                    // **not** get `change_status` — voiding a receipt is an accounting decision — and
+                    // there is no `edit` on the module at all, for anybody (INV-8).
+                    PermissionRegistry::permissionNamesFor('student_fee_payments', [
+                        Ability::ViewAny, Ability::View, Ability::Create, Ability::Print,
+                    ]),
                 ),
             ],
             [
