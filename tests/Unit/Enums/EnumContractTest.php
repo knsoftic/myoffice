@@ -7,9 +7,7 @@ namespace Tests\Unit\Enums;
 use App\Enums\Ability;
 use App\Enums\LoginStatus;
 use App\Enums\ModuleGroup;
-use App\Enums\PanelType;
 use App\Enums\ThemePreference;
-use App\Enums\UserStatus;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -26,14 +24,18 @@ use ReflectionEnum;
 final class EnumContractTest extends TestCase
 {
     /**
-     * Colour tokens the design system defines (phase-01 §2 names emerald / amber / rose / slate;
-     * the brand scale and the remaining Tailwind hues used by the badges complete the list).
+     * Colour tokens the design system defines — **the exact palette of `x-ui.badge`**, in its order.
+     *
+     * The two lists have to be the same list. A token the badge does not know falls back to `slate`
+     * without complaining, so an enum claiming `zinc` rendered as slate for as long as nobody looked;
+     * broadening this test to every enum is what found ten of them.
      *
      * @var list<string>
      */
     private const COLOUR_TOKENS = [
-        'slate', 'brand', 'indigo', 'violet', 'sky', 'cyan', 'teal', 'emerald',
-        'amber', 'orange', 'rose', 'red', 'green', 'blue', 'purple', 'pink',
+        'slate', 'gray', 'brand', 'indigo', 'violet', 'purple', 'fuchsia', 'pink',
+        'rose', 'red', 'orange', 'amber', 'yellow', 'lime', 'green', 'emerald',
+        'teal', 'cyan', 'sky', 'blue',
     ];
 
     /**
@@ -41,14 +43,24 @@ final class EnumContractTest extends TestCase
      */
     public static function enumProvider(): array
     {
-        return [
-            'UserStatus' => [UserStatus::class],
-            'ThemePreference' => [ThemePreference::class],
-            'PanelType' => [PanelType::class],
-            'ModuleGroup' => [ModuleGroup::class],
-            'Ability' => [Ability::class],
-            'LoginStatus' => [LoginStatus::class],
-        ];
+        // Discovered rather than listed. Phases 6, 7, 8 and 10 each added a dozen or more enums, and a
+        // hand-maintained list is a gate that quietly stops covering the thing it was written for — the
+        // six Phase 1 enums below were still the whole of it while sixty others had shipped.
+        $enums = [];
+
+        foreach ((array) glob(__DIR__.'/../../../app/Enums/*.php') as $file) {
+            $class = 'App\\Enums\\'.basename((string) $file, '.php');
+
+            if (! enum_exists($class)) {
+                continue;
+            }
+
+            $enums[basename((string) $file, '.php')] = [$class];
+        }
+
+        ksort($enums);
+
+        return $enums;
     }
 
     /**

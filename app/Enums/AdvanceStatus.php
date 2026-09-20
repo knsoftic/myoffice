@@ -49,7 +49,7 @@ enum AdvanceStatus: string
             self::Disbursed => 'violet',
             self::Recovering => 'indigo',
             self::Settled => 'emerald',
-            self::WrittenOff => 'zinc',
+            self::WrittenOff => 'slate',
             self::Cancelled => 'slate',
         };
     }

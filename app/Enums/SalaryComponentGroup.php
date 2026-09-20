@@ -75,7 +75,7 @@ enum SalaryComponentGroup: string
             self::UnpaidLeave => 'amber',
             self::LateDeduction => 'yellow',
             self::Statutory => 'pink',
-            self::OtherDeduction => 'zinc',
+            self::OtherDeduction => 'slate',
         };
     }
 

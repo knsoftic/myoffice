@@ -74,12 +74,12 @@ enum ReferralCandidateChannel: string
     /**
      * The value stored in `collaborator_referrals.referral_source` (spine §2.8).
      */
-    public function referralSource(): string
+    public function referralSource(): ReferralSource
     {
         return match ($this) {
-            self::StaffSelection => 'manual_selection',
-            self::TypedCode => 'admission_form',
-            default => 'referral_link',
+            self::StaffSelection => ReferralSource::ManualSelection,
+            self::TypedCode => ReferralSource::AdmissionForm,
+            default => ReferralSource::ReferralLink,
         };
     }
 

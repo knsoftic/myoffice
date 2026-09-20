@@ -56,7 +56,7 @@ enum PaymentMethod: string
             self::Jazzcash => 'amber',
             self::OnlineGateway => 'cyan',
             self::Adjustment => 'slate',
-            self::Other => 'zinc',
+            self::Other => 'slate',
         };
     }
 

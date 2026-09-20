@@ -40,7 +40,7 @@ enum SalaryStructureStatus: string
             self::Scheduled => 'sky',
             self::Active => 'emerald',
             self::Superseded => 'slate',
-            self::Expired => 'zinc',
+            self::Expired => 'slate',
             self::Cancelled => 'rose',
         };
     }

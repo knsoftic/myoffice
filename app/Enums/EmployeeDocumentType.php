@@ -65,7 +65,7 @@ enum EmployeeDocumentType: string
             self::Resume => 'slate',
             self::PoliceVerification => 'rose',
             self::Medical => 'pink',
-            self::Other => 'zinc',
+            self::Other => 'slate',
         };
     }
 

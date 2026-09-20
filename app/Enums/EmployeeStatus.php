@@ -43,7 +43,7 @@ enum EmployeeStatus: string
             self::Probation => 'sky',
             self::Suspended => 'amber',
             self::Inactive => 'slate',
-            self::Resigned => 'zinc',
+            self::Resigned => 'slate',
             self::Terminated => 'rose',
         };
     }

@@ -49,7 +49,7 @@ enum TaskStatus: string
             self::InReview => 'violet',
             self::Blocked => 'rose',
             self::Completed => 'emerald',
-            self::Cancelled => 'zinc',
+            self::Cancelled => 'slate',
         };
     }
 

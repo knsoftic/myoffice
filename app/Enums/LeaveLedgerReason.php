@@ -59,14 +59,14 @@ enum LeaveLedgerReason: string
             self::MonthlyAccrual => 'sky',
             self::JoiningProration => 'cyan',
             self::CarryForwardIn => 'teal',
-            self::CarryForwardExpiry => 'zinc',
+            self::CarryForwardExpiry => 'slate',
             self::Reservation => 'amber',
             self::ReservationRelease => 'lime',
             self::LeaveConsumed => 'violet',
             self::LeaveCancelled => 'slate',
             self::ManualAdjustment => 'orange',
             self::Encashment => 'indigo',
-            self::YearEndLapse => 'zinc',
+            self::YearEndLapse => 'slate',
             self::ExitSettlement => 'rose',
         };
     }

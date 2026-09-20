@@ -48,7 +48,7 @@ enum MilestoneStatus: string
             self::InProgress => 'sky',
             self::Completed => 'emerald',
             self::OnHold => 'orange',
-            self::Cancelled => 'zinc',
+            self::Cancelled => 'slate',
         };
     }
 

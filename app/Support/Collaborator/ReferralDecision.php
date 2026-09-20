@@ -6,6 +6,7 @@ namespace App\Support\Collaborator;
 
 use App\Enums\ReferralCandidateChannel;
 use App\Enums\ReferralConversionSubject;
+use App\Enums\ReferralSource;
 use App\Models\Collaborator\Collaborator;
 use App\Models\Collaborator\CollaboratorReferralVisit;
 use Illuminate\Support\Carbon;
@@ -26,7 +27,7 @@ final readonly class ReferralDecision
     public function __construct(
         public ?Collaborator $winner,
         public ?ReferralCandidateChannel $channel,
-        public ?string $source,
+        public ?ReferralSource $source,
         public ?CollaboratorReferralVisit $visit,
         public array $losers,
         public bool $overrideReasonRequired,
@@ -65,7 +66,7 @@ final readonly class ReferralDecision
                 'collaborator_id' => $this->winnerId(),
                 'code' => $this->winner->referral_code,
                 'channel' => $this->channel?->value,
-                'source' => $this->source,
+                'source' => $this->source?->value,
                 'visit_id' => $this->visit?->getKey(),
             ], static fn (mixed $value): bool => $value !== null),
             'losers' => array_map(

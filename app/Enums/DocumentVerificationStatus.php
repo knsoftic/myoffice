@@ -34,7 +34,7 @@ enum DocumentVerificationStatus: string
             self::Pending => 'amber',
             self::Verified => 'emerald',
             self::Rejected => 'rose',
-            self::Expired => 'zinc',
+            self::Expired => 'slate',
         };
     }
 
