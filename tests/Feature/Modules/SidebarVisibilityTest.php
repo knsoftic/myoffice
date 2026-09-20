@@ -165,6 +165,13 @@ final class SidebarVisibilityTest extends TestCase
                 // phase-05 §7: the CRM entries, now that leads and clients have routes.
                 'Leads',
                 'Clients',
+                // phase-06 §7: delivery, now that projects, the board, tasks and time have routes.
+                // `Projects` is a parent: it carries children rather than a route of its own.
+                'Projects',
+                'All Projects',
+                'Task board',
+                'Tasks',
+                'Time Tracking',
                 // phase-03 §7-§8: the nine Website CMS entries whose routes now exist.
                 'Website Overview',
                 'Sections',
@@ -193,7 +200,7 @@ final class SidebarVisibilityTest extends TestCase
                 'Contact Inquiries',
             ],
             $labels,
-            'Only the screens whose phase has actually shipped its routes may appear — Phase 1, Phase 2\'s Settings, Phase 3\'s Website CMS and Phase 4\'s marketing modules.'
+            'Only the screens whose phase has actually shipped its routes may appear — Phase 1, Phase 2\'s Settings, Phase 3\'s Website CMS, Phase 4\'s marketing modules, Phase 5\'s CRM and Phase 6\'s delivery screens.'
         );
     }
 
@@ -202,18 +209,38 @@ final class SidebarVisibilityTest extends TestCase
     {
         $superAdmin = $this->createSuperAdmin();
 
-        foreach (Sidebar::forUser($superAdmin) as $group) {
-            foreach ($group['items'] as $item) {
-                $this->assertIsString($item['url'], $item['label'].' has no URL.');
+        // A parent entry carries children instead of a route of its own, so the walk descends rather than
+        // demanding a URL from every node. phase-06's Projects group is the first nested entry shipped.
+        $leaves = [];
 
-                $response = $this->actingAs($superAdmin)->get($item['url']);
+        $collect = function (array $items) use (&$collect, &$leaves): void {
+            foreach ($items as $item) {
+                if (! empty($item['children'])) {
+                    $collect($item['children']);
 
-                $this->assertSame(
-                    200,
-                    $response->getStatusCode(),
-                    sprintf('The sidebar offers %s (%s) but it answers %d.', $item['label'], $item['url'], $response->getStatusCode())
-                );
+                    continue;
+                }
+
+                $leaves[] = $item;
             }
+        };
+
+        foreach (Sidebar::forUser($superAdmin) as $group) {
+            $collect($group['items'] ?? []);
+        }
+
+        $this->assertNotEmpty($leaves, 'A Super Admin sees no sidebar links at all.');
+
+        foreach ($leaves as $item) {
+            $this->assertIsString($item['url'], $item['label'].' has no URL.');
+
+            $response = $this->actingAs($superAdmin)->get($item['url']);
+
+            $this->assertSame(
+                200,
+                $response->getStatusCode(),
+                sprintf('The sidebar offers %s (%s) but it answers %d.', $item['label'], $item['url'], $response->getStatusCode())
+            );
         }
     }
 

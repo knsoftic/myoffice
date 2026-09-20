@@ -313,10 +313,17 @@ screens still to come**
 | [x] | Models: 11, with `Blameable` / `LogsActivityWithContext` / `SoftDeletes`, enum casts, the §2.12 relation map, and the six-alias morph map of §2.9 |
 | [x] | `GuardsServiceOwnedColumns` — INV-P1 / INV-P8 / INV-P13 as model hooks: the five value columns, the progress columns and the attribution columns each name their one owning service, and the service brackets its own write with `unlock()`. **26 model-level assertions** green, including `ImmutableRevisionException` on a revision update or delete and the append-only segment rules of §2.11 |
 | [x] | Phase 5's hand-off now resolves: `Client::projects()` and `LeadConversion::project()` reach `App\Models\Project\Project` instead of throwing |
-| [ ] | §4 PermissionRegistry additions, §5 the `projects` settings group (17 keys), sidebar entries |
-| [ ] | §6 services (`ProjectService`, `ProjectValueService`, `ProjectReferralService`, `MilestoneService`, `TaskService`, `TimerService`, `TimeRollupService`, `TaskCacheService`, `ProjectProgressService`, `AttachmentService`, `ProjectNumberService`) |
-| [ ] | §7 routes (admin, collaborator, and the read-only client contributions), §8 screens, §10 events / notifications / jobs / scheduler |
-| [ ] | §11 acceptance tests P6-01 … P6-55 |
+| [x] | §4 PermissionRegistry: the new `task_comments` slug and the missing abilities on `projects`, `project_milestones`, `tasks` and `time_tracking` — **88 modules / 879 permissions**. Nothing was removed: taking an ability away would revoke a granted permission (D65) |
+| [x] | §5 SettingsRegistry: the `projects` group (sort 86) with its 17 keys — **16 groups / 209 keys**; `project_code_next_number` readonly (D62). `RoleSeeder` converges: 20 grants added, none revoked |
+| [x] | §6 services (10): `ProjectNumberService` (a thin delegate, D27), `ProjectService`, `ProjectValueService`, `ProjectProgressService`, `MilestoneService`, `TaskService`, `TaskCacheService`, `TimeRollupService`, `TimerService`, `TimeEntryService`; 38 events; `Money::weightedAverage()` / `clamp()` added additively for §6.3's 4-decimal averages |
+| [x] | §6.3 progress algorithm, all four levels — proved on 16 cases including the two the contract argues about (`in_review` with 1 of 10 ticks stays 75; `in_progress` with 9 of 10 is 90) and INV-P9 (cancelling the unfinished subtask lifts the parent to 100, not 50) |
+| [x] | §6.4 timer and §6.5 fractional Kanban ordering; §7 routes (48) with 9 policies; **money is withheld from the SELECT, not blanked in the view** (§9) |
+| [x] | §8 admin screens (13 Blade files): projects index / create / edit / show / value / team, milestones index + show, tasks index / create / show / board, time tracking |
+| [x] | Verified in a browser against the running app — the projects list, the project page (derived progress reads the 43 % §6.3 predicts), the Kanban board, and a timer started and stopped through the UI with **0.00 stored hours while it ran** (INV-P5 on screen) |
+| [x] | `tests/Feature/Project/ProjectDeliveryTest.php` — 13 tests / 41 assertions, green first run |
+| [ ] | §7.6 collaborator panel, §7.7 the read-only client contributions, §8.10-§8.12 their screens and the dashboard widgets |
+| [ ] | §6.1 `ProjectReferralService`, `TaskChecklistService`, `TaskCommentService`, `AttachmentService`, `TimesheetService`; §10 notifications, queued jobs and the scheduler |
+| [ ] | §11 acceptance tests P6-01 … P6-55 (the delivery test above is the integration gate, not the acceptance run) |
 | [ ] | Phase 6's four manifest files (`tests/Support/*-manifest.php`) and their manifest test. The Phase 4 manifest test walks **its own** table list, so the new tables are not covered by anything today — P6-53 asks for the §2.14 object list to be asserted in CI |
 ### [ ] PHASE 7 — Employees, departments, attendance, leave, payroll
 ### [ ] PHASE 8 — Collaborator management (profiles, panel shell, commission settings)
@@ -347,6 +354,39 @@ screens still to come**
 ---
 
 ## 6. Change Log
+
+### 2026-09-20 — Phase 6: registries, services and the admin delivery screens
+
+The delivery side is usable end to end. Built directly in the session — no workflow, no background
+agents, at the user's instruction.
+
+- **Registries grew without losing anything.** The new `task_comments` slug plus the abilities §4.2 asks
+  for on four existing slugs (88 modules / 879 permissions), and the `projects` settings group with its
+  17 keys (16 groups / 209 keys). Extras Phase 1 had already seeded were **kept**: removing an ability
+  from the registry would revoke a permission somebody holds.
+- **Ten services, 38 events, nine policies, 48 routes, 13 screens.**
+- **`Money` gained `weightedAverage()` and `clamp()`,** additively. §6.3 averages at 4 decimals and
+  `div()` answers at money scale, so without them the arithmetic would have had to leave the class.
+- **The §6.3 progress algorithm was proved before anything was built on it** — 16 cases, including the
+  two the contract deliberately argues about and INV-P9's cancelled-row exclusion.
+- **Three real bugs the service probe caught**, each fixed at the cause: a STORED generated column is
+  absent from the model after its own INSERT, so a revision came back with an empty `delta_amount`;
+  `DATETIME` stores whole seconds while `now()` carries microseconds, so a start and a pause inside one
+  second looked ordered in PHP and identical to `chk_tes_window`; and Carbon 3 returns a float from
+  `diffInSeconds()`.
+- **One design fix.** `update()` used to drop `project_value` silently, because the data object never
+  carried it — a 200 with no change, which is the quiet no-op that hides a bug for months. It now refuses
+  and names the service that owns the column.
+- **The browser check earned its place.** It caught what no unit probe could: Laravel 12's base
+  controller has no `authorize()`, so every screen 500'd on the first request. It also showed the Phase 1
+  sidebar placeholders pointing at route names this phase did not use.
+- **Two sidebar tests went red for the right reason** and one of them was hiding a gap: the URL walk only
+  ever looked at top-level items, and Phase 6 shipped the first **nested** entry. Fixing it to descend
+  took that test from 46 assertions to 102.
+- **Suite 1,543 tests / 61,359 assertions green.**
+
+Still to come in Phase 6: the collaborator and client panel contributions, the remaining five services,
+§10's notifications / jobs / scheduler, and the P6-01 … P6-55 acceptance suite.
 
 ### 2026-09-19 — Phase 6 foundation: enums, schema, models
 
@@ -835,6 +875,11 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-19 | Phase 6 database guards | probe through Eloquent and raw DML in a rolled-back transaction | PASS — **29/29**: generated columns unwritable, all six `projects` CHECKs, the append-only trigger, both `uq_pm_*`, `chk_tasks_depth` both ways, `uq_te_running`, `uq_tes_open`, open segment = 0 s and 1500 s on close |
 | 2026-09-19 | Phase 6 model invariants | probe through Eloquent in a rolled-back transaction | PASS — **26/26**: INV-P1 / INV-P8 / INV-P13 each name their owning service and re-lock after `unlock()`, `ImmutableRevisionException` on update and delete, INV-P10 / INV-P12, the append-only segment rules |
 | 2026-09-19 | Phase 6 foundation full suite | `php artisan test` (run by me) | PASS — **1,529 tests / 60,437 assertions**, 938 s; no regressions from the new models resolving Phase 5's later-phase relations |
+| 2026-09-19 | Phase 6 §6.3 progress algorithm | scripted probe in a rolled-back transaction | PASS — 16/16 across all four levels, including the two `max()` cases and INV-P9 |
+| 2026-09-20 | Phase 6 service layer | scripted probe in a rolled-back transaction | PASS — **51/51** end to end: numbering, value revisions, transitions, assignment, Kanban ordering, the timer guards, manual time and the day cap. Found 3 real bugs, all fixed |
+| 2026-09-20 | Phase 6 admin UI | browser session against `php artisan serve` as the Project Manager demo login | PASS — projects list (empty and populated), project page (derived progress 43 %, matching the §6.3 arithmetic), Kanban board, and a timer started and stopped through the UI showing 0.00 stored hours while running. Caught the missing `AuthorizesRequests` |
+| 2026-09-20 | Phase 6 delivery tests | `php artisan test tests/Feature/Project/ProjectDeliveryTest.php` | PASS — 13 tests / 41 assertions, green on the first run |
+| 2026-09-20 | Phase 6 full suite | `php artisan test` (run by me) | PASS — **1,543 tests / 61,359 assertions**, 1,008 s |
 
 ---
 
