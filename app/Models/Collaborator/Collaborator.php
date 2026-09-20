@@ -126,6 +126,25 @@ class Collaborator extends Model
                 );
             }
         });
+
+        // INV-C5, at the model rather than only in the policy. `Gate::before` allows a Super Admin
+        // everything and never reaches `CollaboratorPolicy::forceDelete()`, so a policy alone would be a
+        // guarantee with an exception in it — and the one person able to make that mistake is the one
+        // whose mistakes nothing else catches. The RESTRICT foreign keys from the ledger, the payouts
+        // and the attributions are the last line; this is the one that says why.
+        static::deleting(static function (Collaborator $collaborator): void {
+            if (! $collaborator->isForceDeleting()) {
+                return;
+            }
+
+            throw new LogicException(sprintf(
+                'Collaborator %s is never destroyed. Commission entries, payouts and attributions all '
+                .'point back at this row, and deleting it would make those unreadable. Deactivate them '
+                .'instead — the commission engine already treats an inactive partner as earning nothing '
+                .'(phase-08-09 INV-C5).',
+                (string) $collaborator->collaborator_code,
+            ));
+        });
     }
 
     /**
@@ -141,6 +160,17 @@ class Collaborator extends Model
     protected function activityModule(): ?string
     {
         return 'collaborators';
+    }
+
+    /**
+     * Every activity row about a collaborator is stamped with their id, so §60's feed is a filtered view
+     * over the one audit store rather than a second table (D13, §2.5).
+     */
+    protected function activityCollaboratorId(): ?int
+    {
+        $id = $this->getKey();
+
+        return $id === null ? null : (int) $id;
     }
 
     /**

@@ -508,6 +508,16 @@ final class Sidebar
                         'module' => 'collaborators',
                         'permission' => 'collaborators.view_any',
                     ],
+                    // phase-08-09 §7.1. Its own entry rather than a tab on the list, because an
+                    // application waiting for a decision is work somebody has to notice, and a queue
+                    // nobody can see from the sidebar is a queue that grows.
+                    [
+                        'label' => 'Applications',
+                        'icon' => 'inbox-arrow-down',
+                        'route' => 'admin.collaborators.pending',
+                        'module' => 'collaborators',
+                        'permission' => 'collaborators.approve',
+                    ],
                     [
                         'label' => 'Commissions',
                         'icon' => 'calculator',
@@ -542,6 +552,15 @@ final class Sidebar
                         'route' => 'admin.collaborator-referrals.index',
                         'module' => 'collaborator_referrals',
                         'permission' => 'collaborator_referrals.view_any',
+                    ],
+                    // phase-08-09 §7.3. Separate from Referrals because these rows carry IP addresses
+                    // and user agents, which a role that may link a referral has no business reading.
+                    [
+                        'label' => 'Referral Visits',
+                        'icon' => 'cursor-arrow-rays',
+                        'route' => 'admin.referral-visits.index',
+                        'module' => 'collaborator_referral_visits',
+                        'permission' => 'collaborator_referral_visits.view_any',
                     ],
                 ],
             ],

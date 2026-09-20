@@ -40,6 +40,7 @@ use App\Http\Controllers\Admin\Cms\TeamMemberController;
 use App\Http\Controllers\Admin\Cms\TechnologyController;
 use App\Http\Controllers\Admin\Cms\TestimonialController;
 use App\Http\Controllers\Admin\Cms\WebsiteOverviewController;
+use App\Http\Controllers\Admin\Collaborator\CollaboratorController;
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\Hr\AttendanceController;
 use App\Http\Controllers\Admin\Hr\AttendanceCorrectionController;
@@ -81,6 +82,7 @@ use App\Http\Controllers\Admin\TaskChecklistController;
 use App\Http\Controllers\Admin\TaskController;
 use App\Http\Controllers\Admin\TimeTrackingController;
 use App\Http\Controllers\Admin\UserController;
+use App\Models\Collaborator\Collaborator;
 use App\Models\Hr\Attendance;
 use App\Models\Hr\AttendanceCorrection;
 use App\Models\Hr\Employee;
@@ -1232,5 +1234,44 @@ Route::prefix('admin')
             Route::put('salary-components/{component}', [SalaryComponentController::class, 'update'])->whereNumber('component')->middleware('can:update,component')->name('salary-components.update');
             Route::post('salary-components/{component}/toggle', [SalaryComponentController::class, 'toggle'])->whereNumber('component')->middleware('can:changeStatus,component')->name('salary-components.toggle');
             Route::delete('salary-components/{component}', [SalaryComponentController::class, 'destroy'])->whereNumber('component')->middleware('can:delete,component')->name('salary-components.destroy');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Collaborators — phase-08-09 §7.1
+        |----------------------------------------------------------------------
+        |
+        | Order matters: `pending`, `options` and `export` are literal segments
+        | and must be declared before `{collaborator}`, or a request for
+        | /admin/collaborators/pending would bind "pending" as a model key.
+        | `whereNumber` on the binding makes that a 404 rather than a 500, but
+        | the ordering is what makes the literal routes reachable at all.
+        |
+        */
+        Route::middleware('module:collaborators')->group(static function (): void {
+            Route::get('collaborators', [CollaboratorController::class, 'index'])->middleware('can:viewAny,'.Collaborator::class)->name('collaborators.index');
+            Route::get('collaborators/create', [CollaboratorController::class, 'create'])->middleware('can:collaborators.create')->name('collaborators.create');
+            Route::post('collaborators', [CollaboratorController::class, 'store'])->middleware('can:collaborators.create')->name('collaborators.store');
+            Route::get('collaborators/pending', [CollaboratorController::class, 'pending'])->middleware('can:collaborators.approve')->name('collaborators.pending');
+            // The §9 picker: five columns, admin panel only, throttled because it is the one collaborator
+            // endpoint a non-admin role can reach and a name list is worth rate limiting.
+            Route::get('collaborators/options', [CollaboratorController::class, 'options'])->middleware(['can:collaborator_referrals.create', 'throttle:60,1'])->name('collaborators.options');
+            Route::get('collaborators/export/{format}', [CollaboratorController::class, 'export'])->middleware('can:collaborators.export')->name('collaborators.export');
+
+            Route::get('collaborators/{collaborator}', [CollaboratorController::class, 'show'])->whereNumber('collaborator')->middleware('can:view,collaborator')->name('collaborators.show');
+            Route::get('collaborators/{collaborator}/edit', [CollaboratorController::class, 'edit'])->whereNumber('collaborator')->middleware('can:update,collaborator')->name('collaborators.edit');
+            Route::put('collaborators/{collaborator}', [CollaboratorController::class, 'update'])->whereNumber('collaborator')->middleware('can:update,collaborator')->name('collaborators.update');
+            Route::delete('collaborators/{collaborator}', [CollaboratorController::class, 'destroy'])->whereNumber('collaborator')->middleware('can:delete,collaborator')->name('collaborators.destroy');
+            Route::post('collaborators/{collaborator}/restore', [CollaboratorController::class, 'restore'])->whereNumber('collaborator')->withTrashed()->middleware('can:restore,collaborator')->name('collaborators.restore');
+
+            Route::post('collaborators/{collaborator}/approve', [CollaboratorController::class, 'approve'])->whereNumber('collaborator')->middleware('can:approve,collaborator')->name('collaborators.approve');
+            Route::post('collaborators/{collaborator}/reject', [CollaboratorController::class, 'reject'])->whereNumber('collaborator')->middleware('can:reject,collaborator')->name('collaborators.reject');
+            Route::post('collaborators/{collaborator}/status', [CollaboratorController::class, 'status'])->whereNumber('collaborator')->middleware('can:changeStatus,collaborator')->name('collaborators.status');
+            Route::post('collaborators/{collaborator}/user', [CollaboratorController::class, 'storeUser'])->whereNumber('collaborator')->middleware(['can:update,collaborator', 'can:users.create'])->name('collaborators.user.store');
+            // Throttled: a referral code is the public lookup key, and an unthrottled change endpoint is
+            // a way to probe which codes are free one request at a time.
+            Route::post('collaborators/{collaborator}/referral-code', [CollaboratorController::class, 'referralCode'])->whereNumber('collaborator')->middleware(['can:update,collaborator', 'throttle:10,1'])->name('collaborators.referral-code');
+            Route::get('collaborators/{collaborator}/referral-links', [CollaboratorController::class, 'referralLinks'])->whereNumber('collaborator')->middleware('can:view,collaborator')->name('collaborators.referral-links');
+            Route::get('collaborators/{collaborator}/activity', [CollaboratorController::class, 'activity'])->whereNumber('collaborator')->middleware('can:viewLogs,collaborator')->name('collaborators.activity');
         });
     });

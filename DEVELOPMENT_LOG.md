@@ -379,7 +379,14 @@ registries, services, policies, routes and screens still to come**
 | [x] | §6 proved on **77 assertions** in a rolled-back transaction: the four normalisation cases, the four format refusals, the counter, pending-by-default, an approver creating an active record, a vanity code normalised and then refused to a second taker, the code freezing the moment a visit names it, both URL shapes, all five transition edges, a suspension ending the live session and locking the login, reinstatement, a rejection with no reason refused, and the allowlist dropping a key that was never meant to travel |
 | [ ] | §6.2 `CollaboratorPayoutAccountService` and §6.6 `CollaboratorPortalMetricsService` — both write or read **spine** tables that ship with Phase 10. Deferred to that release rather than written untested against a table that does not exist (§1.4 [D-P8-1]) |
 | [ ] | §6.3-§6.5 the Phase 9 referral resolver, tracking service and link service |
-| [ ] | §7 routes, §8 screens (admin CRUD, approval queue, the tabbed profile, payout accounts, the collaborator panel shell and dashboard), §9 isolation, §10 events and jobs, §11 acceptance suite |
+| [x] | §7.1 routes: 18 admin routes — the list, the approval queue, create / edit / soft delete / restore, approve / reject / status, login provisioning, the throttled referral-code change, the referral-links screen, the activity trail, the throttled picker and the CSV export |
+| [x] | §9 `CollaboratorPolicy`: missing ability → 403; holding it but not reaching the row → **404** (`denyAsNotFound`); `delete` additionally refused while commission or a payout is in flight; `forceDelete` refused outright — **and repeated as a model `deleting` hook**, because `Gate::before` allows a Super Admin everything and never reaches the policy at all |
+| [x] | §8 screens: 7 Blade views — the filtered list, the applications queue with its stale-application flag, the record with its code-lock state, the shared create / edit form, the referral-links screen with a live preview, and the audit trail |
+| [x] | §2.5 / §13: `tapActivity()` stamps `activity_log.collaborator_id` for any model that claims a collaborator, so §60's feed is a filtered view over the one audit store (D13) and not a second table |
+| [x] | Checked in a browser against the dev database with three partners seeded in — an approved agency with a login and a captured visit, a freelancer waiting for a decision, and a suspended sales partner. The edit form was submitted through the UI and the skill set replaced correctly |
+| [x] | Integration gate `tests/Feature/Collaborator/CollaboratorManagementTest.php` — **20 tests / 77 assertions**: every screen's permission, module gating denying a Super Admin, 404-not-403, the picker's five columns and its refusal to offer a suspended or removed partner, create → approve → login, a rejection needing a reason and inventing no fifth status, INV-C4 across all four statuses, a suspension ending the live session, the closed transition table, INV-C2's lock, a taken code refused without naming its holder, the query string kept, the soft delete, and the activity allowlist |
+| [ ] | §7.2–§7.5 the payout-account screens, the commission-rule screen and the collaborator panel — all read or write **spine** tables that ship with Phase 10 |
+| [ ] | §10 events, notifications and jobs, §11's named acceptance cases FT-C01 … FT-C29 |
 
 > **Release note** — note: the financial spine's migration set (spine §1.3, 15 tables) is applied in the same release, immediately after Phase 8's own migrations; the spine-dependent screens stay hidden behind their module switches until then, and `collaborators:backfill-wallets` + `collaborators:seed-initial-rules` run once afterwards (phase-08-09 §1.4 [D-P8-1]).
 
@@ -407,6 +414,46 @@ registries, services, policies, routes and screens still to come**
 ---
 
 ## 6. Change Log
+
+### 2026-09-20 — Phase 8: the admin screens, and a guarantee that had an exception in it
+
+Eighteen routes, one policy, seven screens, and a browser check that found two things a test would not
+have.
+
+**The policy was not enough for `forceDelete`.** INV-C5 says a collaborator record is never destroyed,
+and `CollaboratorPolicy::forceDelete()` duly refuses it — but `Gate::before` allows a Super Admin
+everything and **never reaches the policy**. So the one account that could make that mistake was
+precisely the one the guarantee did not cover. The refusal is now a model `deleting` hook as well, and
+the test asserts both halves: the policy refuses whoever it is consulted for, and the model refuses the
+Super Admin. The RESTRICT foreign keys from the ledger, the payouts and the attributions are still the
+last line; the hook is the one that says *why*.
+
+**`activity_log.collaborator_id` was never being filled.** The column shipped with the migrations, and
+`CollaboratorActivityService::record()` stamps it — but a profile edit or a status change goes through
+spatie, which knows nothing about it, so the admin activity screen read "0 entries" for a partner whose
+record had been approved, edited and suspended. `tapActivity()` now asks the model
+`activityCollaboratorId()`, and `Collaborator` answers with its own id. Found by opening the screen.
+
+**Two feeds, not one.** `feed()` is the **partner's** view and is limited to §60's eleven events with
+the property allowlist applied. `auditTrail()` is the **admin's** view behind `collaborators.view_logs`
+and is deliberately *not* limited — an auditor asking "what happened to this partner" must not be shown
+a filtered subset without being told.
+
+**The live link preview was building its own base URL.** The two real referral links come from
+`CollaboratorCodeService`, which prefers `seo.canonical_base_url`; the Alpine preview box built one from
+`config('app.url')`. On this installation those differ, so the preview showed `http://localhost:8000`
+for a link that is actually `https://myoffice.test`. `baseUrl()` is now public and both sides ask it.
+
+**The picker is narrow by construction.** `admin.collaborators.options` selects five columns as a
+literal list that nothing in the request can widen, orders active partners first, and never offers a
+suspended or a removed one — a suspension exists precisely to stop new business flowing to somebody.
+The test asserts the exact key list and that the email and phone of a matching partner are absent from
+the body.
+
+**Verified:** 20 tests / 77 assertions in the new gate; 313 tests across the Modules, Views, Audit, Rbac
+and Panels suites; and the screens opened in a browser with three partners seeded into the dev database
+— including submitting the edit form through the UI and watching the skill set replace rather than grow.
+
 
 ### 2026-09-20 — Phase 8: the registries, the role grants, and the first four services
 
@@ -1186,6 +1233,9 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-20 | Phase 8 seed convergence (D65) | backup, then Module / Permission / Role / Setting seeders on `my_office`, before/after snapshot compared in PHP | PASS — run 1: **+2 modules, +16 settings, +37 grants, 0 values changed, 0 modules toggled, 0 grants revoked**; run 2: **0 / 0 / 0** |
 | 2026-09-20 | Phase 8 §6 services | probe in a rolled-back transaction | PASS — **77/77**: the four normalisation cases and four format refusals, the `%04d` counter never repeating, pending-by-default, an approver creating an active record directly, a vanity code normalised then refused to a second taker **without naming the holder**, INV-C2 freezing the code the moment a visit references it, a campaign query string kept rather than overwritten, all five §6.2.2 transition edges, a suspension locking the login and ending the live session, reinstatement needing no reason, a rejection landing on `inactive` with a mandatory reason, and the activity allowlist dropping a key at write time while `reason` stays in its own column |
 | 2026-09-20 | Phase 8 registry regression | `tests/Feature/{Rbac,Settings,Modules,Audit,Account}` | PASS — **700 tests / 15,346 assertions** |
+| 2026-09-20 | Phase 8 integration gate | `tests/Feature/Collaborator` | PASS — **20 tests / 77 assertions**: every screen's permission, module gating denying a Super Admin, 404-not-403 for a row out of reach, the picker's exact five columns with no contact detail in the body, create → approve → login with `must_change_password`, a rejection needing a reason, INV-C4 across all four statuses **and no `commission_eligible` column**, a suspension ending the live session, the closed §6.2.2 table, INV-C2's lock, a taken code refused without naming its holder, and the activity allowlist |
+| 2026-09-20 | Phase 8 collaborator screens, in a browser | three partners seeded into `my_office`, every screen opened, the edit form submitted through the UI | PASS — the list, the queue, the record, the two forms, the referral links and the audit trail; the skill set replaced rather than grew, the duplicate collapsed, and the picker returned five fields over `fetch`. Found 3 real defects (`forceDelete` unreachable for a Super Admin, `collaborator_id` never stamped by the spatie path, the preview URL built from a different base), all fixed |
+| 2026-09-20 | Phase 8 screen regression | `tests/Feature/{Modules,Views,Audit,Rbac,Panels}` | PASS — **313 tests**; `SidebarVisibilityTest` extended with the two new labels, the other five collaborator entries still hidden behind gate 2 |
 
 ---
 

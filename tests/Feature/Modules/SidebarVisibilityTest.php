@@ -190,6 +190,11 @@ final class SidebarVisibilityTest extends TestCase
                 'Holidays',
                 'Leave Types',
                 'Salary Components',
+                // phase-08-09 §7.1: the two collaborator entries whose routes now exist. The other four
+                // in that group — Commissions, Commission Settings, Wallets, Payouts — and `Referral
+                // Visits` stay hidden behind gate 2 until the phase that registers their routes.
+                'Collaborators',
+                'Applications',
                 // phase-03 §7-§8: the nine Website CMS entries whose routes now exist.
                 'Website Overview',
                 'Sections',

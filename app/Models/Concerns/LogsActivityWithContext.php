@@ -78,6 +78,26 @@ trait LogsActivityWithContext
         if ($this->activityReason !== null && $this->activityReason !== '') {
             $activity->setAttribute('reason', mb_substr($this->activityReason, 0, 500));
         }
+
+        // phase-08-09 §2.5 / §13. §60 wants "this collaborator's activity log", and D13 contracts one
+        // audit store — so the filter has to be an indexed column on the row rather than a second table.
+        // The causer cannot serve: the rows a partner most wants to see (commission created, payout
+        // paid) are written by the engine with a **null** causer. A model that belongs to a collaborator
+        // says so here, and everything else leaves the column null.
+        $collaboratorId = $this->activityCollaboratorId();
+
+        if ($collaboratorId !== null) {
+            $activity->setAttribute('collaborator_id', $collaboratorId);
+        }
+    }
+
+    /**
+     * Which collaborator is this row about? Null for everything that is about nobody in particular,
+     * which is almost every model in the system.
+     */
+    protected function activityCollaboratorId(): ?int
+    {
+        return null;
     }
 
     /**

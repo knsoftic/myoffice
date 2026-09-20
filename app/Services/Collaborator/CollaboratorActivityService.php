@@ -68,7 +68,28 @@ final class CollaboratorActivityService
     }
 
     /**
-     * §60's eleven events for one collaborator, newest first.
+     * **The admin side**: every row about this collaborator, whatever the event.
+     *
+     * Deliberately not limited to §60's eleven. This is the audit trail behind `collaborators.view_logs`
+     * — a profile edit, a status change with its reason, a referral code moved — and an auditor asking
+     * "what happened to this partner" must not be shown a filtered subset without being told.
+     * {@see feed()} is the partner's own view, and that one *is* the eleven.
+     */
+    public function auditTrail(Collaborator $collaborator, ?DateRange $range = null, int $perPage = 30): LengthAwarePaginator
+    {
+        return Activity::query()
+            ->with('causer:id,name')
+            ->where('collaborator_id', $collaborator->getKey())
+            ->when($range !== null, static fn (Builder $query): Builder => $query
+                ->whereBetween('created_at', [$range->start(), $range->end()]))
+            ->latest('created_at')
+            ->latest('id')
+            ->paginate($perPage)
+            ->withQueryString();
+    }
+
+    /**
+     * **The partner's own side**: §60's eleven events for one collaborator, newest first.
      *
      * Driven by `INDEX (collaborator_id, created_at)`: the feed is always "this partner, newest first",
      * and without the composite index it would be a filesort over the whole audit table.

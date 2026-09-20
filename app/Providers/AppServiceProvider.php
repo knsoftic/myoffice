@@ -43,6 +43,7 @@ use App\Models\Cms\Technology;
 use App\Models\Cms\Testimonial;
 use App\Models\Cms\WebsiteSection;
 use App\Models\Cms\WebsiteSectionItem;
+use App\Models\Collaborator\Collaborator;
 use App\Models\Crm\Client;
 use App\Models\Crm\ClientContact;
 use App\Models\Crm\ClientDocument;
@@ -106,6 +107,7 @@ use App\Policies\Cms\TechnologyPolicy;
 use App\Policies\Cms\TestimonialPolicy;
 use App\Policies\Cms\WebsiteSectionItemPolicy;
 use App\Policies\Cms\WebsiteSectionPolicy;
+use App\Policies\Collaborator\CollaboratorPolicy;
 use App\Policies\Crm\ClientContactPolicy;
 use App\Policies\Crm\ClientDocumentPolicy;
 use App\Policies\Crm\ClientPolicy;
@@ -266,6 +268,11 @@ class AppServiceProvider extends ServiceProvider
         EmployeeAdvance::class => EmployeeAdvancePolicy::class,
         PayrollRun::class => PayrollRunPolicy::class,
         PayrollRunItem::class => PayrollRunItemPolicy::class,
+
+        // phase-08-09 §9. There is no per-row visibility question on the admin side — a collaborator is
+        // visible to anybody who may see the module — so the narrowing that matters is the partner's own
+        // record in their own panel, and `forceDelete` is refused outright for everybody (INV-C5).
+        Collaborator::class => CollaboratorPolicy::class,
     ];
 
     /**

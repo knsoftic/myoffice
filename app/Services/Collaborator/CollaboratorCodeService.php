@@ -181,7 +181,7 @@ final class CollaboratorCodeService
      */
     public function referralUrl(Collaborator $collaborator, ?string $path = null): string
     {
-        $base = rtrim((string) (setting('seo.canonical_base_url') ?: config('app.url')), '/');
+        $base = $this->baseUrl();
         $path = $path ?? (string) setting('collaborator.referral_landing_path', '/admission');
         $param = (string) setting('collaborator.referral_query_param', 'ref');
 
@@ -195,6 +195,16 @@ final class CollaboratorCodeService
         $separator = str_contains($path, '?') ? '&' : '?';
 
         return $base.'/'.ltrim($path, '/').$separator.rawurlencode($param).'='.rawurlencode($collaborator->referral_code).$fragment;
+    }
+
+    /**
+     * The site these links point at: the canonical base URL a business configured, falling back to the
+     * app URL. Public, because a screen that previews a link live has to build it from the **same** base
+     * the real link uses — one that guessed `config('app.url')` would show a host the link never has.
+     */
+    public function baseUrl(): string
+    {
+        return rtrim((string) (setting('seo.canonical_base_url') ?: config('app.url')), '/');
     }
 
     /**
