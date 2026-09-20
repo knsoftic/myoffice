@@ -470,8 +470,13 @@ final class SchemaTest extends TestCase
             }
         }
 
+        // `DB::statement()` / `DB::unprepared()` count too: a migration whose up() writes raw SQL —
+        // generated columns, CHECK constraints, triggers — reverses itself the same way, and phase-07's
+        // step-18 migration is the first in the project to do so. Without them the check would demand a
+        // schema-builder call that cannot express what was created in the first place.
         return preg_match(
-            '/Schema::(?!has)|->drop|dropIfExists|->(?:update|insert|upsert|statement)\s*\(/i',
+            '/Schema::(?!has)|->drop|dropIfExists|->(?:update|insert|upsert|statement)\s*\('
+            .'|DB::(?:statement|unprepared)\s*\(/i',
             implode(' ', $reached)
         ) === 1;
     }
