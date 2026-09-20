@@ -154,3 +154,28 @@ Schedule::command('projects:auto-stop-timers')->everyFiveMinutes()->withoutOverl
 Schedule::command('projects:verify-constraints')->dailyAt('02:10')->withoutOverlapping();
 Schedule::command('attachments:prune-deleted')->dailyAt('02:40')->withoutOverlapping();
 Schedule::command('projects:recalculate-progress')->dailyAt('01:00')->withoutOverlapping();
+
+/*
+|--------------------------------------------------------------------------
+| The commission engine (phase-10-12 §10.4, spine §10.4)
+|--------------------------------------------------------------------------
+| The commands live in app/Console/Commands/Collaborator and are auto-discovered.
+|
+| commissions:sweep is the recovery path, and it exists because the queue is not a guarantee: a worker
+| SIGKILLed between the commit and the stamp leaves a receipt at `queued` with money already in the
+| drawer and no commission against it, and nothing else in the system would notice. It **never touches
+| a `skipped` row** ([D-IMP-4]) — a skip is a decision the engine recorded with a reason, and undoing
+| one is `commissions:evaluate`, which is permissioned, audited, and deliberately not scheduled.
+|
+| financial:verify-constraints does the least and matters most. Every invariant here is enforced twice,
+| once by a service and once by an index, a CHECK, a generated column or a trigger. The second one is
+| what holds when somebody writes SQL by hand or restores a dump from a differently configured server —
+| and its failure mode is silent, because a dropped index does not raise anything, it simply stops
+| refusing. The first symptom would be a duplicate commission six weeks later.
+|
+| Times are in app.schedule_timezone, which falls back to app.timezone = UTC (D61).
+*/
+Schedule::command('commissions:sweep')->everyTenMinutes()->withoutOverlapping(10);
+Schedule::command('commission-rules:activate')->dailyAt('00:05')->withoutOverlapping();
+Schedule::command('commissions:release-held')->dailyAt('00:10')->withoutOverlapping();
+Schedule::command('financial:verify-constraints', ['--quiet-when-ok'])->dailyAt('02:00')->withoutOverlapping();

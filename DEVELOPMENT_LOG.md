@@ -184,6 +184,10 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D69 | **A work shift's `start_time` / `end_time` are business wall clock; the window built from them is a UTC instant.** `ShiftWindow::fromShift()` builds the day in `Format::timezone()` and then calls `->utc()`, and `AttendanceService` files a punch under the business calendar date rather than the UTC one. | D61 stores every stamp UTC and displays it in `localization.timezone`, but `work_shifts` holds a **local** clock — "09:00" means nine in the morning in Karachi. The window was being built on a UTC clock and then compared against a punch taken with `now()`, so in Asia/Karachi every arrival was five hours late, every day was an early leave, and the register printed 14:02 for a 09:02 punch. Found by opening the attendance register in a browser after the `->format()` calls in the Blade views were replaced with `app_time()`; no unit probe had caught it, because every probe built its expectation the same wrong way. |
 | D70 | **A `create_*` migration guards only the CREATE; its CHECK constraints are ensured on every run.** `up()` calls `create()` when the table is absent and `constraints()` always, each CHECK behind a `checkExists()` test. | MariaDB DDL is not transactional. An index name overflowed mid-`CREATE TABLE`, the server kept the table, the migration was recorded as failed — and the re-run's `if (Schema::hasTable(...)) return;` saw a table and skipped every CHECK. The schema then *looked* complete and was not, which is the exact failure `RawSchema`'s verify-after-write exists to prevent. Found by the §2 object verification, not by the migration. |
 | D71 | **Constraint and index names on the long financial tables are explicit, and foreign keys go through `RawSchema::foreignKeyName()`** — Laravel's generated name where it fits, an abbreviated `fk_<abbrev>_<column>` where it does not. | MariaDB caps an identifier at 64 characters and Laravel composes `table_column_foreign`, which overflows on `collaborator_commission_entitlements` and `collaborator_commission_ledger_entries`. The map is explicit rather than hashed or truncated because the name has to be **stable**: `down()` must find the constraint `up()` created, and a name that shifts when a column is renamed leaves a key nobody can drop. |
+| D72 | **`CollaboratorWalletService` is built in two instalments, in one class.** Phase 10 ships `lockFor()` and `applyDelta()`; Phase 12 adds `derive()`, `recalculate()`, `freeze()`, `assertConsistent()` and `payoutsPaidTotal()` to the same file. | phase-10-12 §1.3 assigns the class to Phase 12, while §6.1's wiring has `LedgerWriter` — a Phase 10 class — applying the wallet delta **inside the ledger insert's own transaction**. It has to: a committed entry whose cache write lands separately is a window in which `wallet != SUM(ledger)`, which is the one thing INV-26 and the reconciler exist to make impossible. Two classes with similar names would be the other way to resolve it, and that is the mistake the "reused, must not be re-created" rule exists to prevent. |
+| D73 | **A narrow ability is not the only way a guard can be too narrow: `uq_cle_reversal_pair` forbade the case the reversal algorithm is built around.** It shipped as `(payment_reversal_id, reverses_entry_id)`; migration 22 adds `purpose`. | Spine §2.19 says two paragraphs after the index definition that one reversal legitimately posts **two** debits against one original — a `reversal` for the unpaid part and a `clawback` for the part already paid out. That is §6.6's headline row, "refund after the commission was paid out". With the narrow index the second debit is a 1062 inside the reversal transaction, the whole refund rolls back, and a refunded receipt keeps its commission. The two statements in the design document contradicted each other; the behaviour was right and the index was wrong. |
+| D74 | **`uq_cle_source` carries a generated `source_guard`** — `1` for every purpose with a causing row, NULL for `manual_adjustment` and `write_off` — so the manual purposes leave the index (migration 23). | The four-column guard is NOT NULL by design ([D-FS-8]) and is what makes a second commission for one receipt impossible. A manual adjustment has no causing row, so `source_id` falls back to the collaborator and the tuple is identical for every adjustment that partner will ever receive: the first succeeds, the second is a 1062 that surfaces as a failed goodwill credit somebody has to explain. Spine §2.19 already says several are legitimate — it gives them a fresh `manual:{ulid}` key each time. The guard column is this schema's own idiom (`current_guard`, `open_guard`, `active_guard`, `default_guard`), and it exempts exactly those two purposes while every receipt and reversal keeps the guarantee unchanged. |
+| D75 | **G3 asks `ReceivedPaymentStatus::earnsCommission()`, not `countsAsReceived()`.** The new method adds `refunded` to the two the old one allows. | The two questions differ by exactly one case and the difference is load-bearing. "Is this money the business has?" excludes a fully refunded receipt, correctly. "Does this receipt reach the commission engine?" includes it, because the receipt earns and its reversal posts the offsetting debit — which is what makes the order of the two jobs irrelevant. Sharing one method would mean a refund that overtook its own earning silently cancelled it, and the partner's statement would then show neither side of a transaction that really happened. |
 
 ---
 
@@ -404,7 +408,7 @@ registries, services, policies, routes and screens still to come**
 
 Contract: [`docs/phases/phase-10-12.md`](docs/phases/phase-10-12.md) over
 [`docs/design/finance-commission-spine.md`](docs/design/finance-commission-spine.md) ·
-**schema and enums built 2026-09-20; the services and screens still to come**
+**schema, enums, services and the commission screens built 2026-09-20; the commands and the acceptance suite still to come**
 
 | | Item |
 |---|---|
@@ -417,8 +421,12 @@ Contract: [`docs/phases/phase-10-12.md`](docs/phases/phase-10-12.md) over
 | [x] | The write guards, proved on **52 assertions**: seven models refusing an insert outside their owning service and naming it; `allowDirectWrites()` letting a factory through, closing again, and closing **even when the callback throws**; INV-8 refusing a receipt's amount and value date; INV-4 refusing a commission's amount, rate and source; INV-17 refusing a rate change; three no-delete refusals; the entitlement capping a release and reporting `null` rather than a figure when uncapped; the referral window including and excluding by date and by `commission_eligible`; the wallet's R2 identity holding and failing; and an allocation returning to available on a cancellation but not on a reversal |
 | [x] | §4 PermissionRegistry: 4 new money modules (`student_fee_payments`, `project_payments`, `payment_reversals`, `wallet_reconciliation`), `Ability::LinkInvoice` (D43's single narrow permission — no preset, on one slug, held by the **Accountant** alone), `create`/`APPROVE`/`LOGS` added to the commission slugs, and `collaborator_portal.wallet` / `.payouts` — **105 modules / 1,037 permissions**. Every money module has **no `edit` and no `delete`, for ever** (INV-8, INV-5) |
 | [x] | §5 SettingsRegistry: the 24 keys across the existing `collaborator`, `institute` and `finance` groups, no new group. Three more `*_next_number` counters, all `readonly` (D62) |
-| [ ] | §6 the engine's services and §7-§11 its screens, jobs and acceptance suite |
-| [ ] | §6 `ReferralService`, `CommissionRuleService`, `CommissionBaseResolver`, `CommissionEntitlementService`, `LedgerWriter`, `PaymentService`, `StudentCommissionService`, `CommissionReversalService`, `CommissionApprovalService`; §7 routes, §8 screens, §10 jobs, §11 acceptance suite |
+| [x] | §6 services: `ReferralService`, `CommissionRuleService`, `CommissionBaseResolver`, `CommissionEntitlementService`, `CommissionCalculator`, `LedgerWriter`, `CollaboratorWalletService` (the `applyDelta()` half — D72), `StudentCommissionService`, `CommissionApprovalService`, `CommissionReversalService`, `Finance\PaymentService` (student side), the shared `RunsCommissionGuards`, 15 DTOs, 6 events, 2 listeners and 2 jobs |
+| [x] | §7 routes: the 14 `admin.commissions.*` / `admin.commission-rules.*` / `admin.commission-skips.*` routes. **No `edit` and no `destroy` on the ledger** — the module declares neither, and `create` exists for the manual adjustment alone |
+| [x] | §8 screens: the commission ledger with its pending-approval queue and bulk bar (explicit ids, page-only select-all, skip-and-report), the entry detail with the Calculation / Related / History tabs rendering the `rule_snapshot` trace, the skip report grouped by reason with an audited "evaluate selected", and the rule timeline with the immutable-version wizard and its live comparison preview |
+| [ ] | §7.1 the student-fee payment routes, §8.1 the record-payment wizard and §8.2 the payments register — Phase 18 owns the fee screens; these are the four routes that belong to Phase 10 |
+| [ ] | §10.4 the `commissions:sweep` / `commissions:release-held` / `commissions:evaluate` / `finance:verify-constraints` commands and the scheduler entries |
+| [ ] | §11 the acceptance suite (FT-01 … FT-55) — the three probes are the integration gate, not the acceptance run |
 ### [ ] PHASE 11 — Project referral commission engine (`ProjectCommissionService`)
 ### [ ] PHASE 12 — Collaborator wallet, commission ledger, payouts, statements
 ### [ ] PHASE 13 — Software-house finance: invoices, payments, expenses, income
@@ -441,6 +449,64 @@ Contract: [`docs/phases/phase-10-12.md`](docs/phases/phase-10-12.md) over
 ---
 
 ## 6. Change Log
+
+### 2026-09-20 — Phase 10 §6: the engine, and two unique indexes that forbade legitimate money
+
+Eleven services and the trait that holds the guard sequence, so that a student commission is computed
+in exactly one place. `RunsCommissionGuards` runs G0-G11 and C1-C8 verbatim; `StudentCommissionService`
+supplies the four things that are actually about students; Phase 11's project engine will supply four
+more. `CommissionCalculator` is the arithmetic as a **pure function**, which is what lets the
+record-payment wizard's preview and the posted entry be the same number by construction rather than by
+two implementations agreeing.
+
+`PaymentService` is the only writer of the payment tables, and it does no commission work at all: the
+engine is reached through an event dispatched after commit, so a cashier never waits on it, a
+rolled-back receipt never earns anybody anything, and a queue outage degrades to "commission pending"
+rather than to a failed receipt for money already in the drawer.
+
+**Two unique indexes forbade cases the design requires.** Both were in the migration set this session
+shipped, and both would have failed as money rather than as errors:
+
+* `uq_cle_reversal_pair(payment_reversal_id, reverses_entry_id)` made §6.6's headline row impossible.
+  A refund of a commission that was partly paid out posts **two** debits against one original — a
+  `reversal` for the unpaid part and a `clawback` for the rest — and spine §2.19 says so two
+  paragraphs below the index that forbade it. The second debit was a 1062 inside the reversal
+  transaction, so the whole refund rolled back and the receipt kept its commission. Migration 22 adds
+  `purpose` (D73).
+* `uq_cle_source` allowed each partner exactly **one** manual adjustment, for ever. Its four columns
+  are NOT NULL by design, and a manual adjustment has no causing row, so `source_id` falls back to the
+  collaborator and the tuple never varies. Migration 23 adds the generated `source_guard`, NULL on the
+  two manual purposes, which drops them out of the index while every receipt and reversal keeps the
+  guarantee unchanged (D74).
+
+**Four more defects the probes caught, each of them money.** A superseded referral had
+`commission_eligible` cleared, so a receipt back-dated into the previous partner's own window earned
+nothing — the re-attribution INV-18 forbids. Resolution filtered revoked rows out of the query, so a
+revoked attribution fell through to the predecessor whose window overlaps the changeover day; the
+resolver now sees every row covering the date, takes the newest decision, and *then* asks whether it
+earns, because "nobody" is a decision. Branching on `entitlement_amount === null` turned every partner
+with a `max_commission_amount` into a prorated one — a cap on the `paid` base is a ceiling, not a
+promise, and "10 % of each receipt up to 1,500" was quietly becoming "1,500 spread across the charge".
+And four columns cast `array` were handed pre-encoded JSON, so `rule_snapshot` — the permanent record
+of what a past entry meant (§6.1.9) — stored a document containing a document and read back as a
+string.
+
+**G3 asks a different question from the one that already existed** (D75). `countsAsReceived()` excludes
+a fully refunded receipt, correctly: the business does not have that money. But a refunded receipt
+still **earns**, and its reversal posts the offset — which is precisely what makes the order of the two
+jobs irrelevant. `earnsCommission()` is the second question, and the two differ by exactly one case.
+
+`CollaboratorWalletService` ships half a class (D72): `LedgerWriter` must move the cache inside the
+ledger's own transaction, and Phase 12 adds the reporting half to the same file rather than a second
+class with a similar name.
+
+**Verified end to end on a real commit path**, not in a rolled-back transaction: receipt -> event ->
+listener -> job -> engine -> ledger -> wallet, with `QUEUE_CONNECTION=sync` so the probe exercises the
+production code path. Every worked example in spine §6.1.7 passes, including the fixed 2,000 prorated
+over three receipts of 10,000 as 666.67 + 666.66 + 666.67 = **2,000.00 exactly**, and three partial
+refunds undoing 333.30 + 333.30 + 333.40 = **1,000.00 exactly**. After every scenario, each wallet
+equals the sum of its ledger and the §6.5.2 closed identity holds.
+
 
 ### 2026-09-20 — Phase 10 registries, and a permission that had been going to the wrong role
 
@@ -1470,6 +1536,10 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-20 | Phase 10 §4 / §5 registries | seeders on `my_office_test` and `my_office`, then rows read back | PASS — **105 modules / 1,037 permissions / 24 new settings**; `project_payments.link_invoice` and `collaborator_payout_accounts.*` held by exactly Accountant, Admin and Super Admin. Found 1 real defect shipped by the Phase 8 commit (both grant blocks had landed in Digital Marketer) and 2 caught by the seeder (`Ability::label()` / `::color()` missing the new case) |
 | 2026-09-20 | Phase 10 registry regression | `tests/Feature/{Settings,Rbac,Modules}` | PASS — **613 tests**: Settings 356 / 3,097 assertions, Rbac 163 / 11,598, Modules 94 / 713. `ModuleDependencyTest` updated for the two new edges (`project_payments` off `projects`, `payment_reversals` off that) |
 | 2026-09-20 | Migration speed | `migrate` timed on an empty database, before and after batching the FK metadata lookups | PASS — **74 s → 54 s**; `add_external_fks_to_financial_tables` from 19 s to under 1 s, `add_internal_fks` from 7 s to 2 s. The object list still verifies 126/126 and the 21-file round trip is still clean |
+| 2026-09-20 | Phase 10 §6 referral and rule services | probe in a rolled-back transaction | PASS — **71 checks**. Found 3 real defects: a superseded referral was made commission-ineligible (a back-dated receipt into its own window earned nothing), resolution could not see a revoked row blocking an older overlapping window, and a cancelled scheduled rule held the one open-ended slot so its predecessor could not reopen |
+| 2026-09-20 | Phase 10 §6 the commission engine | probe in a rolled-back transaction, every worked example of spine §6.1.7 | PASS — **66 checks**. 10% of 10,000 = 1,000.00; three receipts earn three times; fixed 2,000 prorated over 3 x 10,000 = 666.67 + 666.66 + 666.67 summing to **2,000.00 exactly**; 35,000 on a 25,000 net charge earns on 25,000; 10% of 3,333.33 = 333.33. Found 3 defects: branch selection treated a cap as a promise, four `array`-cast columns were double-encoded, and G3 was asking `countsAsReceived()` |
+| 2026-09-20 | Phase 10 §6 end to end | probe on a **committed** path with `QUEUE_CONNECTION=sync` — receipt to event to listener to job to ledger to wallet | PASS — **83 checks**: idempotent submits, the duplicate-fingerprint warning and its override, backdate limits, preview equals receipt to the paisa, approval (single, idempotent, bulk, capped at 500, skip-and-report), full and partial refunds (333.30 + 333.30 + 333.40 = 1,000.00), void, approval-gated refunds, rejection rolling the money back, manual adjustments and write-offs. Found 2 unique indexes that forbade legitimate rows (D73, D74) |
+| 2026-09-20 | Phase 10 §6 regression | `tests/Unit` + 12 Feature directories | PASS — **1,399 tests / 33,288 assertions** |
 
 ---
 

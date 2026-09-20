@@ -525,7 +525,10 @@ final class ReferralService
     private function businessDate(?CarbonInterface $date): Carbon
     {
         if ($date !== null) {
-            return Carbon::instance($date->toDateTime())->startOfDay();
+            // The **date part**, re-pinned to the business timezone. A caller handing in `now()` means
+            // today, and comparing a UTC-midnight Carbon against a Karachi-midnight one makes today
+            // look like tomorrow (D69).
+            return Carbon::parse(Carbon::instance($date->toDateTime())->toDateString(), Format::timezone())->startOfDay();
         }
 
         return Carbon::now(Format::timezone())->startOfDay();

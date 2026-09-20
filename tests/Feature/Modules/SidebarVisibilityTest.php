@@ -195,6 +195,11 @@ final class SidebarVisibilityTest extends TestCase
                 // Visits` stay hidden behind gate 2 until the phase that registers their routes.
                 'Collaborators',
                 'Applications',
+                // phase-10-12 §7.4 / §8.8. Phase 8 declared a "Commissions" entry against the route
+                // name `admin.collaborator-commissions.index`, which never existed — gate 2 hid it for
+                // two phases. It now points at the route the contract actually names.
+                'Commissions',
+                'Commission Skips',
                 'Referral Visits',
                 // phase-03 §7-§8: the nine Website CMS entries whose routes now exist.
                 'Website Overview',

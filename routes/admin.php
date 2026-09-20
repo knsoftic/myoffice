@@ -41,6 +41,8 @@ use App\Http\Controllers\Admin\Cms\TechnologyController;
 use App\Http\Controllers\Admin\Cms\TestimonialController;
 use App\Http\Controllers\Admin\Cms\WebsiteOverviewController;
 use App\Http\Controllers\Admin\Collaborator\CollaboratorController;
+use App\Http\Controllers\Admin\Collaborator\CommissionController;
+use App\Http\Controllers\Admin\Collaborator\CommissionRuleController;
 use App\Http\Controllers\Admin\Collaborator\ReferralVisitController;
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\Hr\AttendanceController;
@@ -1291,5 +1293,60 @@ Route::prefix('admin')
             Route::get('referral-visits/report', [ReferralVisitController::class, 'report'])->middleware('can:collaborator_referral_visits.view_reports')->name('referral-visits.report');
             Route::get('referral-visits/export/{format}', [ReferralVisitController::class, 'export'])->middleware('can:collaborator_referral_visits.view_reports')->name('referral-visits.export');
             Route::get('referral-visits/{visit}', [ReferralVisitController::class, 'show'])->whereNumber('visit')->middleware('can:collaborator_referral_visits.view')->name('referral-visits.show');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Commission ledger — phase-10-12 §7.4
+        |----------------------------------------------------------------------
+        |
+        | **No `edit` and no `destroy`, ever.** A wrong commission is corrected by
+        | a reversing entry that references it (CLAUDE.md rule 3) — the model
+        | refuses both writes, and a route that offered them would be a promise
+        | the ledger cannot keep.
+        |
+        | `create` exists on this module for one path only: `adjustments`, the
+        | manual adjustment and write-off. It is still an append.
+        |
+        | The literal segments are declared before `{entry}`, or a request for
+        | /admin/commissions/bulk-approve would bind "bulk-approve" as a key.
+        |
+        */
+        Route::middleware('module:collaborator_commissions')->group(static function (): void {
+            Route::get('commissions', [CommissionController::class, 'index'])->middleware('can:collaborator_commissions.view_any')->name('commissions.index');
+            Route::get('commissions/export/{format}', [CommissionController::class, 'export'])->middleware('can:collaborator_commissions.export')->name('commissions.export');
+            // Throttled: a bulk action is one request that moves up to 500 money rows.
+            Route::post('commissions/bulk-approve', [CommissionController::class, 'bulkApprove'])->middleware(['can:collaborator_commissions.approve', 'throttle:10,1'])->name('commissions.bulk-approve');
+            Route::post('commissions/bulk-reject', [CommissionController::class, 'bulkReject'])->middleware(['can:collaborator_commissions.reject', 'throttle:10,1'])->name('commissions.bulk-reject');
+            Route::post('commissions/adjustments', [CommissionController::class, 'storeAdjustment'])->middleware('can:collaborator_commissions.create')->name('commissions.adjustments.store');
+            // The audited re-evaluation of §6.6 row 1. `approve` rather than `create`: it undoes a
+            // decision somebody made, which is the heavier of the two rights.
+            Route::post('commissions/evaluate', [CommissionController::class, 'evaluate'])->middleware(['can:collaborator_commissions.approve', 'throttle:5,1'])->name('commissions.evaluate');
+            Route::get('commissions/{entry}', [CommissionController::class, 'show'])->whereNumber('entry')->middleware('can:collaborator_commissions.view')->name('commissions.show');
+            Route::post('commissions/{entry}/approve', [CommissionController::class, 'approve'])->whereNumber('entry')->middleware('can:collaborator_commissions.approve')->name('commissions.approve');
+            // One route, two transitions: pending/approved is a rejection, available is a
+            // cancellation. The service picks the one the ledger allows.
+            Route::post('commissions/{entry}/reject', [CommissionController::class, 'reject'])->whereNumber('entry')->middleware('can:collaborator_commissions.reject')->name('commissions.reject');
+
+            // §8.8. `view_reports` rather than `view_any`: a skip report is about the *absence* of
+            // money and reads across every partner at once.
+            Route::get('commission-skips', [CommissionController::class, 'skips'])->middleware('can:collaborator_commissions.view_reports')->name('commission-skips.index');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Commission rule versions — phase-10-12 §7.3
+        |----------------------------------------------------------------------
+        |
+        | There is no `update` and no `destroy`. A rate change is a new version
+        | (INV-17); `close` only ever moves `effective_to` from NULL to a date.
+        |
+        */
+        Route::middleware('module:collaborator_commission_settings')->group(static function (): void {
+            Route::get('collaborators/{collaborator}/commission-rules', [CommissionRuleController::class, 'index'])->whereNumber('collaborator')->middleware('can:collaborator_commission_settings.view')->name('commission-rules.index');
+            // Read-only, and declared before the store so the literal wins.
+            Route::get('collaborators/{collaborator}/commission-rules/preview', [CommissionRuleController::class, 'preview'])->whereNumber('collaborator')->middleware(['can:collaborator_commission_settings.create', 'throttle:60,1'])->name('commission-rules.preview');
+            Route::post('collaborators/{collaborator}/commission-rules', [CommissionRuleController::class, 'store'])->whereNumber('collaborator')->middleware('can:collaborator_commission_settings.create')->name('commission-rules.store');
+            Route::post('commission-rules/{rule}/close', [CommissionRuleController::class, 'close'])->whereNumber('rule')->middleware('can:collaborator_commission_settings.create')->name('commission-rules.close');
         });
     });

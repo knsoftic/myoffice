@@ -704,7 +704,7 @@ rate applied, and the exact bcmath trace.
 | Key | Reason it exists |
 |---|---|
 | `UNIQUE uq_cle_dedupe(dedupe_key)` | the canonical duplicate guard - the INSERT **is** the test, so concurrency, HTTP retries and replayed queue jobs all collapse onto one row |
-| `UNIQUE uq_cle_source(source_type, source_id, collaborator_id, purpose)` | the semantic restatement of §52, with all four columns NOT NULL so MariaDB actually enforces it. A nullable-column guard such as `(fee_payment_id, project_payment_id, collaborator_id, source_type)` would let **every** project commission through, because they all share `fee_payment_id = NULL` and unique indexes ignore NULLs. This index makes a second commission for the same receipt impossible even if somebody hand-crafts a different `dedupe_key` |
+| `UNIQUE uq_cle_source(source_type, source_id, collaborator_id, purpose, source_guard)` | the semantic restatement of §52, with the first four columns NOT NULL so MariaDB actually enforces it. A nullable-column guard such as `(fee_payment_id, project_payment_id, collaborator_id, source_type)` would let **every** project commission through, because they all share `fee_payment_id = NULL` and unique indexes ignore NULLs. This index makes a second commission for the same receipt impossible even if somebody hand-crafts a different `dedupe_key`. `source_guard` is generated — `1` for every purpose that has a causing row, **NULL for `manual_adjustment` and `write_off`** — so those two drop out of the index entirely. They have no source transaction to be unique about (§2.19 gives them a fresh `manual:{ulid}` key each time), and without the guard `source_id` falls back to the collaborator and a partner could receive exactly one adjustment, for ever. Added by migration `2026_09_12_130023` |
 | `UNIQUE uq_cle_reversal_pair(payment_reversal_id, reverses_entry_id, purpose)` | one reversal row can undo a given original exactly once **per purpose**. `purpose` is in the key because a single reversal legitimately posts two debits against one original when part of the commission has already been paid out — a `reversal` for the unpaid part and a `clawback` for the rest (§6.6, §2.19). The two-column form shipped first and made that case a 1062; corrected by migration `2026_09_12_130022` |
 | `INDEX (collaborator_wallet_id, status)` | the wallet derivation query |
 | `INDEX (collaborator_id, status, transaction_date)` | approval queue, ageing, point-in-time movement |
@@ -1083,7 +1083,7 @@ mobile retry therefore produce **one** receipt, so the commission question never
 ```sql
 ALTER TABLE collaborator_commission_ledger_entries
   ADD UNIQUE KEY uq_cle_dedupe (dedupe_key),
-  ADD UNIQUE KEY uq_cle_source (source_type, source_id, collaborator_id, purpose),
+  ADD UNIQUE KEY uq_cle_source (source_type, source_id, collaborator_id, purpose, source_guard),
   ADD UNIQUE KEY uq_cle_reversal_pair (payment_reversal_id, reverses_entry_id, purpose);
 ```
 
@@ -1097,11 +1097,20 @@ ALTER TABLE collaborator_commission_ledger_entries
 | clawback (a reversal of money already paid out) | the same key plus the suffix `:clawback`, so one reversal row may legitimately produce one `reversal` debit **and** one `clawback` debit for the same original - `uq_cle_source` already separates them by `purpose` |
 | manual adjustment / write-off | `manual:{ulid}` |
 
-All four columns of `uq_cle_source` are NOT NULL. This matters: MariaDB unique indexes ignore NULLs, so
+The first four columns of `uq_cle_source` are NOT NULL. This matters: MariaDB unique indexes ignore NULLs, so
 the literal §52 column list `(fee_payment_id, project_payment_id, collaborator_id, commission_source_type)`
 with nullable payment columns would permit unlimited duplicate **project** commissions, because they all
 share `fee_payment_id = NULL`. The typed nullable FK columns exist alongside for joins and referential
 integrity - never as the guard. **[D-FS-8]**
+
+The fifth column, `source_guard`, turns that same NULL behaviour into the exemption the manual purposes
+need. It is generated: `1` for every purpose that has a causing row, **NULL for `manual_adjustment` and
+`write_off`**. A manual adjustment has no source transaction — which is exactly why its key above is a
+fresh `manual:{ulid}` rather than a composite — so `source_id` falls back to the collaborator and the
+four-column tuple would be identical for every adjustment that partner ever receives. The first one
+would succeed and the second would be a 1062, surfacing as a failed goodwill credit somebody has to
+explain rather than as a duplicate anything. With the guard NULL, those rows leave the index and every
+receipt and reversal keeps precisely the guarantee it had.
 
 **Layer 2 - the entitlement cap.** `chk_cce_cap` (`released_amount <= entitlement_amount`) plus
 `uq_cce_current(document_key, collaborator_id, current_guard)`. Even if a future developer invents a

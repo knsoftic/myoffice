@@ -11,12 +11,10 @@ use App\DataObjects\Collaborator\LedgerEntryDraft;
 use App\DataObjects\Collaborator\RuleResolution;
 use App\Enums\CollaboratorStatus;
 use App\Enums\CommissionBase;
-use App\Enums\CommissionCalculationType;
 use App\Enums\CommissionScope;
 use App\Enums\CommissionSkipReason;
 use App\Enums\CommissionSourceType;
 use App\Enums\CommissionStatus;
-use App\Enums\FixedCommissionRelease;
 use App\Enums\LedgerEntryPurpose;
 use App\Enums\LedgerEntryType;
 use App\Models\Collaborator\Collaborator;
@@ -294,123 +292,40 @@ trait RunsCommissionGuards
             settings: $settings,
         ));
 
-        // ---- C4: what of this payment is commissionable ---------------------------------------
-        $paymentAmount = Money::of((string) $payment->amount);
-        $remaining = $document->remainingCollectible((string) $entitlement->collected_amount);
+        // ---- C4 to C7: the arithmetic, computed by the pure calculator ------------------------
+        //
+        // The same object the record-payment wizard's preview calls before a cashier commits, so the
+        // figure on the screen and the figure on the receipt cannot disagree.
+        $calculation = $this->engine()->calculator->calculate(
+            rule: $rule,
+            document: $document,
+            settings: $settings,
+            paymentAmount: (string) $payment->amount,
+            collectedBefore: (string) $entitlement->collected_amount,
+            releasedBefore: (string) $entitlement->released_amount,
+            promise: $entitlement->entitlement_amount === null ? null : (string) $entitlement->entitlement_amount,
+        );
 
-        $baseAmount = $settings->commissionOnOverpayment
-            ? $paymentAmount
-            : Money::min($paymentAmount, $remaining);
-
-        if (Money::isZero($baseAmount)) {
-            return Money::isPositive($paymentAmount)
-                ? CommissionOutcome::skipped(
-                    CommissionSkipReason::OverpaymentOnly,
-                    sprintf('The %s on this document was already collected in full, so this %s is an '
-                        .'overpayment and earns nothing.',
-                        Money::format($document->collectibleAmount), Money::format($paymentAmount)),
-                    'C4',
-                )
-                : CommissionOutcome::skipped(
-                    CommissionSkipReason::BaseZero,
-                    'The receipt is for nothing, so there is nothing to earn on.',
-                    'C4',
-                );
-        }
-
-        // ---- C5: the release, one of four branches --------------------------------------------
-        $releasedBefore = (string) $entitlement->released_amount;
-        $promise = $entitlement->entitlement_amount === null ? null : (string) $entitlement->entitlement_amount;
-
-        $branch = $this->branchFor($entitlement, $rule);
-        $trace = [];
-
-        if ($branch === 'A' || $branch === 'B') {
-            // Per-receipt methods. Each commissionable receipt earns on its own; a cap, if there is
-            // one, is applied by the clamp below rather than by changing the arithmetic.
-            $release = $branch === 'B'
-                ? Money::of((string) $rule->fixedAmount)
-                : Money::percentage($baseAmount, (string) $rule->rate);
-        } elseif ($branch === 'D') {
-            // D: the whole promise on the first payment that reaches here.
-            $release = Money::sub((string) $promise, $releasedBefore);
-        } else {
-            // C: the cumulative target. The only method that sums to the promise **exactly**, with the
-            // final receipt absorbing the rounding residual, and the only one that cannot be inflated
-            // by splitting a fee into twelve installments ([D-FS-10]).
-            if (Money::isZero($document->collectibleAmount)) {
-                return CommissionOutcome::skipped(
-                    CommissionSkipReason::NoCollectibleDenominator,
-                    'The document has nothing collectible against it, so a proportional release has '
-                    .'nothing to be a proportion of.',
-                    'C5',
-                );
-            }
-
-            $collectedAfter = Money::add((string) $entitlement->collected_amount, $baseAmount);
-
-            // `prorate()` rather than `mul()` then `div()`: the two-step form quantises the product to
-            // the paisa before dividing, and a share computed in two roundings drifts from one computed
-            // in one. This is the method whose whole promise is that the slices sum to the promise
-            // exactly, so it uses the single-rounding multiply-then-divide the money class publishes.
-            $target = Money::prorate((string) $promise, $collectedAfter, $document->collectibleAmount);
-            $release = Money::sub($target, $releasedBefore);
-
-            $trace['collected_after'] = $collectedAfter;
-            $trace['target'] = $target;
-        }
-
-        // Always: clamp to what is left of the promise, and never below zero.
-        if ($promise !== null) {
-            $release = Money::min($release, Money::sub($promise, $releasedBefore));
-        }
-
-        $release = Money::max(Money::ZERO, $release);
-
-        if (Money::isZero($release) && $promise !== null
-            && Money::compare($releasedBefore, $promise) >= 0) {
+        if ($calculation->skip !== null) {
+            // A late skip (C4-C7) deliberately leaves the entitlement **open with every cache
+            // unchanged**: `collected_amount` is not advanced, so a receipt that rounded to zero or
+            // fell below the minimum does not consume the promise and a later receipt can still earn
+            // (spine §6.6 row 20). An open entitlement with no releases is a promise, not a commission.
             return CommissionOutcome::skipped(
-                CommissionSkipReason::EntitlementCapReached,
-                sprintf('The %s promised on this document has already been released in full.',
-                    Money::format($promise)),
-                'C5',
-            );
-        }
-
-        // ---- C6 / C7 ---------------------------------------------------------------------------
-        if (Money::isZero($release)) {
-            return CommissionOutcome::skipped(
-                CommissionSkipReason::RoundsToZero,
-                sprintf('%s of %s rounds to nothing at the paisa.',
-                    $this->rateSentence($rule), Money::format($baseAmount)),
-                'C6',
-            );
-        }
-
-        if (Money::compare($release, $settings->minEntryAmount) < 0) {
-            return CommissionOutcome::skipped(
-                CommissionSkipReason::BelowMinimumCommission,
-                sprintf('%s is below the %s minimum the business sets for a ledger entry.',
-                    Money::format($release), Money::format($settings->minEntryAmount)),
-                'C7',
+                $calculation->skip,
+                (string) $calculation->detail,
+                (string) $calculation->step,
             );
         }
 
         // ---- C8 ---------------------------------------------------------------------------------
         return $this->post(
             $payment, $settings, $referral, $collaborator, $rule, $document, $entitlement,
-            $baseAmount, $release, $releasedBefore, $promise,
-            array_merge($trace, [
-                'branch' => $branch,
-                'document_base_amount' => $document->documentBaseAmount,
-                'collectible_amount' => $document->collectibleAmount,
-                'collected_before' => (string) $entitlement->collected_amount,
-                'base_amount' => $baseAmount,
-                'entitlement_amount' => $promise,
-                'released_before' => $releasedBefore,
-                'release' => $release,
-                'base_fallback' => $rule->baseFallback,
-            ]),
+            $calculation->baseAmount,
+            $calculation->release,
+            (string) $entitlement->released_amount,
+            $entitlement->entitlement_amount === null ? null : (string) $entitlement->entitlement_amount,
+            $calculation->trace,
         );
     }
 
@@ -486,25 +401,6 @@ trait RunsCommissionGuards
     | Helpers
     |--------------------------------------------------------------------------
     */
-
-    /**
-     * Which of spine §6.1.7's four branches applies. Named rather than inferred at each use, because
-     * the branch is written into the trace and a screen shows it.
-     */
-    private function branchFor(CollaboratorCommissionEntitlement $entitlement, RuleResolution $rule): string
-    {
-        // **The method decides the branch, not whether a cap exists.** A `paid`-base percentage with a
-        // `max_commission_amount` has an `entitlement_amount`, but that figure is a ceiling rather than
-        // a promise: the rule still says "10 % of each receipt", and the cap is applied by the clamp
-        // after the branch has done its work. Branching on `entitlement_amount === null` alone would
-        // turn every capped partner into a prorated one and change what they earn on every receipt but
-        // the last.
-        if ($this->engine()->entitlements->isPerPaymentMethod($rule->calculationType, $rule->base, $rule->release)) {
-            return $rule->calculationType === CommissionCalculationType::Fixed ? 'B' : 'A';
-        }
-
-        return $rule->release === FixedCommissionRelease::OnFirstPayment ? 'D' : 'C';
-    }
 
     /**
      * Spine §6.1.8, from the **snapshotted** mode and hold days — never from today's settings, which is
@@ -609,13 +505,6 @@ trait RunsCommissionGuards
     private function valueDate(Model $payment): Carbon
     {
         return Carbon::parse($payment->paid_on->toDateString(), Format::timezone())->startOfDay();
-    }
-
-    private function rateSentence(RuleResolution $rule): string
-    {
-        return $rule->calculationType === CommissionCalculationType::Fixed
-            ? Money::format((string) $rule->fixedAmount)
-            : rtrim(rtrim((string) $rule->rate, '0'), '.').'%';
     }
 
     private function describe(?Collaborator $collaborator): string

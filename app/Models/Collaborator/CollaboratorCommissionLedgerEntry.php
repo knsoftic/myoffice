@@ -124,13 +124,15 @@ class CollaboratorCommissionLedgerEntry extends Model
     }
 
     /**
-     * The only column anything ever sums: `amount` with the direction from `entry_type` applied.
+     * `signed_amount` is the only column anything ever sums: `amount` with the direction from
+     * `entry_type` applied. `source_guard` is what keeps `uq_cle_source` off manual adjustments, which
+     * have no causing row to be unique about (migration `2026_09_12_130023`).
      *
      * @return list<string>
      */
     public function generatedColumns(): array
     {
-        return ['signed_amount'];
+        return ['signed_amount', 'source_guard'];
     }
 
     public function moduleSlug(): string

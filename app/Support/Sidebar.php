@@ -521,16 +521,19 @@ final class Sidebar
                     [
                         'label' => 'Commissions',
                         'icon' => 'calculator',
-                        'route' => 'admin.collaborator-commissions.index',
+                        'route' => 'admin.commissions.index',
                         'module' => 'collaborator_commissions',
                         'permission' => 'collaborator_commissions.view_any',
                     ],
+                    // phase-10-12 §8.8. Its own entry rather than a tab: a receipt that earned
+                    // nothing is invisible everywhere else, and the whole point of the screen is to
+                    // find a misconfigured partner before they complain.
                     [
-                        'label' => 'Commission Settings',
-                        'icon' => 'adjustments-horizontal',
-                        'route' => 'admin.collaborator-commission-settings.index',
-                        'module' => 'collaborator_commission_settings',
-                        'permission' => 'collaborator_commission_settings.view_any',
+                        'label' => 'Commission Skips',
+                        'icon' => 'exclamation-triangle',
+                        'route' => 'admin.commission-skips.index',
+                        'module' => 'collaborator_commissions',
+                        'permission' => 'collaborator_commissions.view_reports',
                     ],
                     [
                         'label' => 'Wallets',

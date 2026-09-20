@@ -450,6 +450,8 @@ final class CommissionRuleService
 
     private function businessDate(CarbonInterface $date): Carbon
     {
-        return Carbon::instance($date->toDateTime())->startOfDay();
+        // The date part, re-pinned to the business timezone — see D69: a UTC-midnight Carbon compared
+        // against a Karachi-midnight one is five hours out, and a rule window is a calendar window.
+        return Carbon::parse(Carbon::instance($date->toDateTime())->toDateString(), Format::timezone())->startOfDay();
     }
 }

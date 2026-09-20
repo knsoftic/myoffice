@@ -7,11 +7,11 @@ namespace App\Services\Collaborator;
 use Illuminate\Database\DatabaseManager;
 
 /**
- * The seven collaborators a commission calculation needs, as one injected value
+ * The eight collaborators a commission calculation needs, as one injected value
  * (phase-10-12 §6.1, §6.2).
  *
  * `StudentCommissionService` and `ProjectCommissionService` run the **same** sequence through
- * `RunsCommissionGuards`, and a trait cannot declare constructor dependencies. Listing all seven in
+ * `RunsCommissionGuards`, and a trait cannot declare constructor dependencies. Listing all eight in
  * both services would mean two constructors to keep in step, and the day they drift is the day the two
  * sides of the business quietly stop resolving rules the same way. One value, named once.
  *
@@ -26,6 +26,7 @@ final readonly class CommissionEngineContext
         public CommissionRuleService $rules,
         public CommissionBaseResolver $bases,
         public CommissionEntitlementService $entitlements,
+        public CommissionCalculator $calculator,
         public LedgerWriter $ledger,
         public CollaboratorActivityService $activity,
     ) {}

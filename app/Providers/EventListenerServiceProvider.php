@@ -20,6 +20,9 @@ use App\Events\Crm\LeadConverted;
 use App\Events\Crm\LeadCreated;
 use App\Events\Crm\LeadFollowUpMissed;
 use App\Events\Crm\LeadImportCompleted;
+use App\Events\Finance\PaymentReversalApproved;
+use App\Events\Finance\PaymentReversalRecorded;
+use App\Events\Finance\StudentFeePaymentRecorded;
 use App\Listeners\Cms\FlushPublicContentCache;
 use App\Listeners\Cms\LogApplicationStage;
 use App\Listeners\Cms\LogInquiryRouting;
@@ -29,6 +32,8 @@ use App\Listeners\Cms\NotifyStaffOfInquiry;
 use App\Listeners\Cms\NotifyStaffOfPendingModeration;
 use App\Listeners\Cms\PingSitemap;
 use App\Listeners\Cms\RouteContactInquiry;
+use App\Listeners\Collaborator\QueueCommissionReversal;
+use App\Listeners\Collaborator\QueueStudentFeeCommission;
 use App\Listeners\Crm\NotifyAssigneeOfMissedFollowUp;
 use App\Listeners\Crm\NotifyClientOfSharedDocument;
 use App\Listeners\Crm\NotifyImporterOfCompletion;
@@ -99,6 +104,16 @@ final class EventListenerServiceProvider extends ServiceProvider
         LeadConverted::class => [NotifyOfLeadConversion::class],
         LeadImportCompleted::class => [NotifyImporterOfCompletion::class],
         ClientDocumentSharedWithClient::class => [NotifyClientOfSharedDocument::class],
+
+        // phase-10-12 §6.1 / §10.1. The whole link between money arriving and the commission engine,
+        // and it is deliberately one line: the listener dispatches a job and nothing else, so a
+        // cashier never waits on the engine and a rolled-back receipt never earns anybody anything
+        // (INV-20).
+        StudentFeePaymentRecorded::class => [QueueStudentFeeCommission::class],
+        // Both reversal events reach one listener, which fires the job only for a reversal that is
+        // actually authorised — so a refund awaiting approval undoes nothing yet.
+        PaymentReversalRecorded::class => [QueueCommissionReversal::class],
+        PaymentReversalApproved::class => [QueueCommissionReversal::class],
     ];
 
     public function register(): void

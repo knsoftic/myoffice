@@ -132,7 +132,7 @@ not exist yet (spine [D-FS-1]).
 | 08 | `create_collaborator_commission_settings_table` | §2.9 + `uq_ccs_start`, `uq_ccs_version`, all four CHECKs |
 | 09 | `create_collaborator_commission_entitlements_table` | §2.10 + `chk_cce_one_doc`, `chk_cce_nonneg` |
 | 10 | `create_collaborator_wallets_table` | §2.12 + `uq_cw_collaborator`, `chk_cw_paid_nonneg` |
-| 11 | `create_collaborator_commission_ledger_entries_table` | §2.11 + `uq_cle_dedupe`, `uq_cle_source`, `uq_cle_reversal_pair`, every INDEX, every CHECK of the §2.11 key table. **File 22 widens `uq_cle_reversal_pair` to include `purpose`**: as first written it forbade §6.6's "refund after the commission was paid out", where one reversal posts a `reversal` debit *and* a `clawback` debit against the same original |
+| 11 | `create_collaborator_commission_ledger_entries_table` | §2.11 + `uq_cle_dedupe`, `uq_cle_source`, `uq_cle_reversal_pair`, every INDEX, every CHECK of the §2.11 key table. **File 22 widens `uq_cle_reversal_pair` to include `purpose`**: as first written it forbade §6.6's "refund after the commission was paid out", where one reversal posts a `reversal` debit *and* a `clawback` debit against the same original. **File 23 adds the generated `source_guard` to `uq_cle_source`** (`1`, or NULL on `manual_adjustment` / `write_off`): a manual adjustment has no causing row, so `source_id` falls back to the collaborator and the four-column tuple allowed each partner exactly one adjustment for ever |
 | 12 | `create_collaborator_payout_accounts_table` | §2.15 |
 | 13 | `create_collaborator_payouts_table` | §2.13 + `uq_cp_number`, `uq_cp_idem`, `uq_cp_txn`, `chk_cp_amount` |
 | 14 | `create_collaborator_payout_allocations_table` | §2.14 + `uq_cpa_pair`, `chk_cpa_amount` |
