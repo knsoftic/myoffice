@@ -484,8 +484,17 @@ final class PermissionRegistryTest extends TestCase
     }
 
     /**
-     * Financial history is immutable (CLAUDE.md rule 3), so the commission ledger and the wallets
-     * are never editable or deletable — corrections are reversing entries.
+     * Financial history is immutable (CLAUDE.md rule 3), so the commission ledger and the wallets are
+     * never editable or deletable — a correction is a reversing entry that references the original.
+     *
+     * **`collaborator_commissions.create` is deliberately allowed** from Phase 10 (phase-10-12 §4.2,
+     * spine §6.2): it is the manual adjustment and write-off path, a human act that **appends** an
+     * audited `manual_adjustment` or `write_off` row through `LedgerWriter` — which is precisely what
+     * rule 3 prescribes, not an exception to it. What must never exist is `edit` or `delete`, and the
+     * model's own guards refuse both whatever a role holds.
+     *
+     * `collaborator_wallets` keeps all three refusals: a wallet is derived from the ledger and is
+     * rebuilt, never authored.
      */
     #[Test]
     public function the_immutable_financial_modules_declare_no_write_abilities(): void
@@ -495,7 +504,63 @@ final class PermissionRegistryTest extends TestCase
 
             $this->assertNotContains(Ability::Edit->value, $abilities, $slug.' must not be editable.');
             $this->assertNotContains(Ability::Delete->value, $abilities, $slug.' must not be deletable.');
-            $this->assertNotContains(Ability::Create->value, $abilities, $slug.' is written by the engine only.');
         }
+
+        $this->assertNotContains(
+            Ability::Create->value,
+            PermissionRegistry::abilityValuesFor('collaborator_wallets'),
+            'A wallet is derived from the ledger. Nobody authors one.'
+        );
+    }
+
+    /**
+     * The four money modules phase-10-12 §4.1 adds carry no `edit` and no `delete`, **for ever**
+     * (INV-8, INV-5). A received payment is never editable: voiding it is `change_status`, and the
+     * void leaves the original visible.
+     *
+     * `collaborator_commission_settings` is deliberately **not** in this list even though a rule version
+     * is equally immutable. It declared `edit` and `delete` in Phase 1, and seeders converge additively
+     * (D65) — taking an ability away here would revoke a permission somebody has already been granted.
+     * They are frozen and unused instead: INV-17 refuses the write at the model, and no route, service
+     * or screen offers an edit form. That is a guarantee the registry cannot make and the model can.
+     */
+    #[Test]
+    public function the_money_modules_never_declare_edit_or_delete(): void
+    {
+        foreach (['student_fee_payments', 'project_payments', 'payment_reversals', 'wallet_reconciliation'] as $slug) {
+            $abilities = PermissionRegistry::abilityValuesFor($slug);
+
+            $this->assertNotContains(Ability::Delete->value, $abilities, $slug.' must never be deletable.');
+            $this->assertNotContains(
+                Ability::Edit->value,
+                $abilities,
+                $slug.' must never be editable — the correct act is a void and a fresh row.'
+            );
+        }
+    }
+
+    /**
+     * D43's narrow ability, pinned where it can be seen: on one slug, in no preset, and never widened.
+     */
+    #[Test]
+    public function link_invoice_is_declared_on_project_payments_and_nowhere_else(): void
+    {
+        $holders = [];
+
+        foreach (array_keys(PermissionRegistry::modules()) as $slug) {
+            if (in_array(Ability::LinkInvoice->value, PermissionRegistry::abilityValuesFor($slug), true)) {
+                $holders[] = $slug;
+            }
+        }
+
+        $this->assertSame(['project_payments'], $holders,
+            'link_invoice permits exactly one field move on one table (D43). A second slug declaring it '
+            .'would be a second thing it permits.');
+
+        $this->assertNotContains(
+            Ability::ViewFinancial->value,
+            [Ability::LinkInvoice->value],
+            'It is not a money ability: holding it reveals no amount by itself.'
+        );
     }
 }
