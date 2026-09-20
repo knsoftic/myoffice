@@ -6,9 +6,12 @@ namespace App\Models\Collaborator;
 
 use App\Enums\CollaborationType;
 use App\Enums\CollaboratorStatus;
+use App\Enums\ReferralStatus;
 use App\Models\Cms\Service;
 use App\Models\Concerns\Blameable;
 use App\Models\Concerns\LogsActivityWithContext;
+use App\Models\Crm\Client;
+use App\Models\Crm\Lead;
 use App\Models\Project\Project;
 use App\Models\Project\Task;
 use App\Models\User;
@@ -18,6 +21,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 use LogicException;
@@ -319,5 +323,96 @@ class Collaborator extends Model
     public function assignedTasks(): HasMany
     {
         return $this->hasMany(Task::class, 'assigned_collaborator_id');
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | The commission spine (phase-10-12 §2.3)
+    |--------------------------------------------------------------------------
+    |
+    | Every edge below RESTRICTs back to this row, which is what INV-C5 rests on:
+    | a partner with financial history is never destroyed, because the ledger,
+    | the payouts and the attributions would all stop being explainable.
+    |
+    */
+
+    /**
+     * The cache of everything this partner has earned. One per collaborator, created by the observer in
+     * the same transaction as the record itself (INV-C3) — never lazily by a payment path.
+     */
+    public function wallet(): HasOne
+    {
+        return $this->hasOne(CollaboratorWallet::class, 'collaborator_id');
+    }
+
+    public function commissionRules(): HasMany
+    {
+        return $this->hasMany(CollaboratorCommissionSetting::class, 'collaborator_id');
+    }
+
+    public function entitlements(): HasMany
+    {
+        return $this->hasMany(CollaboratorCommissionEntitlement::class, 'collaborator_id');
+    }
+
+    /**
+     * The spine itself. **Nothing outside `CollaboratorWalletService` and `CollaboratorStatementService`
+     * may sum this** (INV-26): a balance computed in a report is a second definition of what somebody
+     * is owed, and two definitions eventually disagree.
+     */
+    public function ledgerEntries(): HasMany
+    {
+        return $this->hasMany(CollaboratorCommissionLedgerEntry::class, 'collaborator_id');
+    }
+
+    public function referrals(): HasMany
+    {
+        return $this->hasMany(CollaboratorReferral::class, 'collaborator_id');
+    }
+
+    public function payouts(): HasMany
+    {
+        return $this->hasMany(CollaboratorPayout::class, 'collaborator_id');
+    }
+
+    public function payoutAccounts(): HasMany
+    {
+        return $this->hasMany(CollaboratorPayoutAccount::class, 'collaborator_id');
+    }
+
+    public function payoutAllocations(): HasMany
+    {
+        return $this->hasMany(CollaboratorPayoutAllocation::class, 'collaborator_id');
+    }
+
+    public function reconciliations(): HasMany
+    {
+        return $this->hasMany(CollaboratorWalletReconciliation::class, 'collaborator_id');
+    }
+
+    /**
+     * The projects this partner **referred**, through the attribution rows — different from
+     * {@see assignedProjects()}, which is the projects they work on. Only `active` rows count, because
+     * a superseded attribution credits nobody.
+     */
+    public function referredProjects(): BelongsToMany
+    {
+        return $this->belongsToMany(Project::class, 'collaborator_referrals', 'collaborator_id', 'project_id')
+            ->wherePivot('status', ReferralStatus::Active->value)
+            ->withPivot(['referral_code', 'referral_date', 'effective_from', 'effective_to', 'commission_eligible']);
+    }
+
+    public function referredClients(): BelongsToMany
+    {
+        return $this->belongsToMany(Client::class, 'collaborator_referrals', 'collaborator_id', 'client_id')
+            ->wherePivot('status', ReferralStatus::Active->value)
+            ->withPivot(['referral_code', 'referral_date', 'effective_from', 'effective_to', 'commission_eligible']);
+    }
+
+    public function referredLeads(): BelongsToMany
+    {
+        return $this->belongsToMany(Lead::class, 'collaborator_referrals', 'collaborator_id', 'lead_id')
+            ->wherePivot('status', ReferralStatus::Active->value)
+            ->withPivot(['referral_code', 'referral_date', 'effective_from', 'effective_to', 'commission_eligible']);
     }
 }

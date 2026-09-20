@@ -413,7 +413,9 @@ Contract: [`docs/phases/phase-10-12.md`](docs/phases/phase-10-12.md) over
 | [x] | Schema: the 21-file atomic set / 15 tables, applied to `my_office_test` **and** `my_office`; `rollback --step=21` leaves **0 tables and 0 triggers** behind and re-migrate is clean ([D-IMP-1]: creates declare columns only, every FK arrives in files 18, 20 and 21) |
 | [x] | §2 object list verified against `information_schema` on both databases: **126/126** — 15 tables, 9 STORED generated columns, 32 CHECK constraints, 31 named unique indexes, 9 `BEFORE DELETE` triggers, `idx_cr_superseded_by` present and **not** unique (ND-12), no `deleted_at` on the twelve append-only tables, every money column `decimal(15,2)` and every rate `decimal(8,4)`, and **0** columns silently carrying `ON UPDATE CURRENT_TIMESTAMP` (D67) |
 | [x] | Every guard proved to bite on **58 assertions** in a rolled-back transaction: one wallet per collaborator and a negative available balance still legal after a clawback; one **active** referral per subject with superseded rows stacking freely and several losers pointing at one winner (ND-12); one open rule version per scope; a rule refused without the number it needs; one current entitlement per document; INV-12 refusing an over-release; `uq_cle_source` refusing a second commission for one receipt; the sign, reversal, debit-clean, allocation (INV-11) and undo (INV-10) ceilings; `uq_cp_txn` refusing one bank transaction twice; `uq_cpa_pair` refusing an entry back into the same payout **even after release**; `uq_sf_generation` refusing a doubly-generated charge while hand-entered ones stack; `net_received_amount` following a refund; and all four no-delete triggers |
-| [ ] | §4 PermissionRegistry, §5 SettingsRegistry, §2.3 the 15 models with their write guards |
+| [x] | §2.3 the 15 models, verified against the live schema: **201 assertions over 141 relations** — no cast on a column that does not exist, nothing fillable that is not a column, no generated column reachable through mass assignment, and every relation resolving to a real table |
+| [x] | The write guards, proved on **52 assertions**: seven models refusing an insert outside their owning service and naming it; `allowDirectWrites()` letting a factory through, closing again, and closing **even when the callback throws**; INV-8 refusing a receipt's amount and value date; INV-4 refusing a commission's amount, rate and source; INV-17 refusing a rate change; three no-delete refusals; the entitlement capping a release and reporting `null` rather than a figure when uncapped; the referral window including and excluding by date and by `commission_eligible`; the wallet's R2 identity holding and failing; and an allocation returning to available on a cancellation but not on a reversal |
+| [ ] | §4 PermissionRegistry, §5 SettingsRegistry |
 | [ ] | §6 `ReferralService`, `CommissionRuleService`, `CommissionBaseResolver`, `CommissionEntitlementService`, `LedgerWriter`, `PaymentService`, `StudentCommissionService`, `CommissionReversalService`, `CommissionApprovalService`; §7 routes, §8 screens, §10 jobs, §11 acceptance suite |
 ### [ ] PHASE 11 — Project referral commission engine (`ProjectCommissionService`)
 ### [ ] PHASE 12 — Collaborator wallet, commission ledger, payouts, statements
@@ -437,6 +439,48 @@ Contract: [`docs/phases/phase-10-12.md`](docs/phases/phase-10-12.md) over
 ---
 
 ## 6. Change Log
+
+### 2026-09-20 — Phase 10 models: three guarantees, stated once
+
+Fifteen models, and the interesting part is a single trait. `FinancialRow` states three things so that
+twelve classes do not each carry their own version of them:
+
+1. **A money row is inserted only by its owning service** (INV-21, [D-IMP-2]). The service assigns the
+   number under a lock, snapshots the attribution, writes the cache delta and schedules the follow-up
+   work. A row created anywhere else has none of that **and looks completely normal in the table** —
+   which is why the refusal is structural and names the service it wants.
+2. **Only a short whitelist of columns may ever change.** What somebody earned, from which receipt,
+   under which rule, at which rate, on which date — none of it moves. What moves is the bookkeeping
+   *around* the row: its status, its approval, how much a payout has claimed, how much has been undone.
+3. **Nothing is ever deleted.** The database has the trigger; the model throws **first** and says why,
+   because the spine's R-5 lesson is that a bare `SQLSTATE 45000` with no explanation is how a trigger
+   eventually gets dropped.
+
+The escape hatch is one greppable call — `allowDirectWrites()` — restored in a `finally`, so a throwing
+factory cannot leave the guard open for the rest of the process. The probe asserts that specifically.
+
+**Three defects the verification found, none of which a reading would have.**
+
+- `CollaboratorWalletReconciliation::isClean()` **shadowed `Model::isClean()`**, Eloquent's dirty-tracking
+  method, with an incompatible signature — a fatal error the moment the class was instantiated. It is
+  `matchesLedger()` now.
+- `replicate()` on six of these models **fails**, because Eloquent copies every loaded attribute and
+  MariaDB refuses an INSERT that names a generated column (`1906`). The error names the column but not
+  the reason. `HasGeneratedColumns` declares them and drops them from the copy, and the list is now
+  written down where somebody adding a cast can see it.
+- `activitySecretAttributes()` was overridden with `parent::` — but it comes from a **trait**, not a
+  parent class, so there was nothing to call. The two payout models restate the four defaults.
+
+**What the models carry beyond their columns.** `payableRemaining()` is one expression of the rule the
+`payable()` scope filters on, so a screen and a query can never disagree about what a payout may
+consume. `CollaboratorCommissionEntitlement::remaining()` returns **null** when the promise is uncapped
+rather than a large number, because a caller that treats "no limit" as a figure will eventually compare
+it. `CollaboratorWallet::identityHolds()` puts R2 — `lifetime = pending + available + reserved + paid` —
+where the nightly job, a test and a screen all ask it in the same words.
+
+**Verified:** 201 assertions over 141 relations against the live schema, and 52 on the write guards in
+a rolled-back transaction.
+
 
 ### 2026-09-20 — Phase 10 schema: fifteen tables, and the guarantees they actually carry
 
@@ -1381,6 +1425,8 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-20 | Phase 10 §2 object list | `information_schema` counted in PHP, on `my_office_test` **and** `my_office` | PASS — **126/126** each: 15 tables, 9 STORED generated columns, 32 CHECKs the server kept, 31 named unique indexes, 9 `BEFORE DELETE` triggers, `idx_cr_superseded_by` present and NOT unique (ND-12), no `deleted_at` on the twelve append-only tables, every money column `decimal(15,2)`, every rate `decimal(8,4)`, and **0** columns carrying `ON UPDATE CURRENT_TIMESTAMP` (D67) |
 | 2026-09-20 | Phase 10 migration round trip | `migrate` → `rollback --step=21` → `migrate` on both databases | PASS — 0 tables and 0 triggers left behind; object list 126/126 again afterwards. 8 external and 3 deferred foreign keys reported as waiting for phases 13-17, as designed |
 | 2026-09-20 | Phase 10 schema guards | probe in a rolled-back transaction on `my_office` | PASS — **58/58**: one wallet per collaborator and a negative available balance still legal; one active referral per subject with several losers sharing one winner; one open rule per scope and a rule refused without its number; one current entitlement per document and INV-12 refusing an over-release; `uq_cle_source` and `uq_cle_dedupe`; the sign, reversal, debit-clean, INV-11 and INV-10 ceilings; `uq_cp_txn`; `uq_cpa_pair` holding even after release; `uq_sf_generation`; `net_received_amount` following a refund; and four no-delete triggers. Found 1 real defect (D70) |
+| 2026-09-20 | Phase 10 models against the live schema | reflection walk over all 15 models | PASS — **201/201** across **141 relations**: no stray cast, no stray fillable, no generated column mass-assignable, every relation resolving to a real table. Found 1 fatal (`isClean()` shadowing Eloquent's) and 1 latent break (`replicate()` on the six tables with generated columns) |
+| 2026-09-20 | Phase 10 model write guards | probe in a rolled-back transaction | PASS — **52/52**: seven insert refusals naming their service, `allowDirectWrites()` opening and closing (including after a throw), INV-8 on a receipt's amount and date, INV-4 on a commission's amount, rate and source, INV-17 on a rate change, three no-delete refusals, the entitlement's cap and its null-when-uncapped remaining, the referral date window in three directions, the wallet identity and freeze, and an allocation returning to available on a cancellation but not on a reversal |
 
 ---
 

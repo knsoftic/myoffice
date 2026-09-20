@@ -140,7 +140,13 @@ return new class extends Migration
             );
 
             logger()->warning($message);
-            echo $message.PHP_EOL;
+
+            // Printed for a person running `migrate`, but not for the test runner: every suite that
+            // refreshes the database would otherwise repeat it, and a warning that appears forty times
+            // an hour is one nobody reads.
+            if (! app()->runningUnitTests()) {
+                echo $message.PHP_EOL;
+            }
         }
     }
 
