@@ -2,14 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Http\Controllers\Admin\MilestoneController;
-use App\Http\Controllers\Admin\ProjectController;
-use App\Http\Controllers\Admin\ProjectMemberController;
-use App\Http\Controllers\Admin\TaskBoardController;
-use App\Http\Controllers\Admin\TaskChecklistController;
-use App\Http\Controllers\Admin\TaskController;
-use App\Http\Controllers\Admin\TimeTrackingController;
-use App\Models\Project\Project;
 use App\Enums\Cms\SectionPlacement;
 use App\Enums\LeadStatus;
 use App\Http\Controllers\Admin\ActivityLogController;
@@ -49,6 +41,13 @@ use App\Http\Controllers\Admin\Cms\TechnologyController;
 use App\Http\Controllers\Admin\Cms\TestimonialController;
 use App\Http\Controllers\Admin\Cms\WebsiteOverviewController;
 use App\Http\Controllers\Admin\DashboardController;
+use App\Http\Controllers\Admin\Hr\DepartmentController;
+use App\Http\Controllers\Admin\Hr\DesignationController;
+use App\Http\Controllers\Admin\Hr\EmployeeController;
+use App\Http\Controllers\Admin\Hr\HolidayController;
+use App\Http\Controllers\Admin\Hr\LeaveTypeController;
+use App\Http\Controllers\Admin\Hr\SalaryComponentController;
+use App\Http\Controllers\Admin\Hr\WorkShiftController;
 use App\Http\Controllers\Admin\LeadActivityController;
 use App\Http\Controllers\Admin\LeadBoardController;
 use App\Http\Controllers\Admin\LeadController;
@@ -56,11 +55,20 @@ use App\Http\Controllers\Admin\LeadConversionController;
 use App\Http\Controllers\Admin\LeadFollowUpController;
 use App\Http\Controllers\Admin\LeadImportController;
 use App\Http\Controllers\Admin\LoginHistoryController;
+use App\Http\Controllers\Admin\MilestoneController;
 use App\Http\Controllers\Admin\ModuleController;
 use App\Http\Controllers\Admin\PermissionController;
+use App\Http\Controllers\Admin\ProjectController;
+use App\Http\Controllers\Admin\ProjectMemberController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\SettingsController;
+use App\Http\Controllers\Admin\TaskBoardController;
+use App\Http\Controllers\Admin\TaskChecklistController;
+use App\Http\Controllers\Admin\TaskController;
+use App\Http\Controllers\Admin\TimeTrackingController;
 use App\Http\Controllers\Admin\UserController;
+use App\Models\Hr\Employee;
+use App\Models\Project\Project;
 use App\Services\Core\SettingsService;
 use Illuminate\Support\Facades\Route;
 
@@ -975,5 +983,89 @@ Route::prefix('admin')
             Route::post('timer/{entry}/pause', [TimeTrackingController::class, 'pause'])->whereNumber('entry')->middleware('can:runTimer,entry')->name('timer.pause');
             Route::post('timer/{entry}/resume', [TimeTrackingController::class, 'resume'])->whereNumber('entry')->middleware('can:runTimer,entry')->name('timer.resume');
             Route::post('timer/{entry}/stop', [TimeTrackingController::class, 'stop'])->whereNumber('entry')->middleware('can:runTimer,entry')->name('timer.stop');
+        });
+
+        /*
+        |------------------------------------------------------------------
+        | phase-07 §7.1 — Employees
+        |------------------------------------------------------------------
+        | `restore` takes a raw id rather than a bound model: the binding would 404 on an archived row
+        | before the policy could allow it. Falling outside the §9 window answers 404, never 403 — the
+        | ids being probed here are people's salaries.
+        */
+        Route::middleware('module:employees')->group(static function (): void {
+            Route::get('employees', [EmployeeController::class, 'index'])->middleware('can:viewAny,'.Employee::class)->name('employees.index');
+            Route::get('employees/create', [EmployeeController::class, 'create'])->middleware('can:employees.create')->name('employees.create');
+            Route::post('employees', [EmployeeController::class, 'store'])->middleware('can:employees.create')->name('employees.store');
+            Route::get('employees/export/{format}', [EmployeeController::class, 'export'])->middleware('can:employees.export')->name('employees.export');
+            Route::get('employees/{employee}', [EmployeeController::class, 'show'])->whereNumber('employee')->middleware('can:view,employee')->name('employees.show');
+            Route::get('employees/{employee}/edit', [EmployeeController::class, 'edit'])->whereNumber('employee')->middleware('can:update,employee')->name('employees.edit');
+            Route::put('employees/{employee}', [EmployeeController::class, 'update'])->whereNumber('employee')->middleware('can:update,employee')->name('employees.update');
+            Route::delete('employees/{employee}', [EmployeeController::class, 'destroy'])->whereNumber('employee')->middleware('can:delete,employee')->name('employees.destroy');
+            Route::post('employees/{employee}/restore', [EmployeeController::class, 'restore'])->whereNumber('employee')->middleware('can:employees.restore')->name('employees.restore');
+            Route::post('employees/{employee}/status', [EmployeeController::class, 'status'])->whereNumber('employee')->middleware('can:changeStatus,employee')->name('employees.status');
+            Route::post('employees/{employee}/assignments', [EmployeeController::class, 'assignments'])->whereNumber('employee')->middleware('can:assign,employee')->name('employees.assignments');
+            Route::post('employees/{employee}/user', [EmployeeController::class, 'linkUser'])->whereNumber('employee')->middleware('can:update,employee')->name('employees.user.link');
+            Route::delete('employees/{employee}/user', [EmployeeController::class, 'unlinkUser'])->whereNumber('employee')->middleware('can:update,employee')->name('employees.user.unlink');
+            Route::get('employees/{employee}/print', [EmployeeController::class, 'print'])->whereNumber('employee')->middleware('can:print,employee')->name('employees.print');
+        });
+
+        /*
+        |------------------------------------------------------------------
+        | phase-07 §7.1, §7.2, §7.4, §7.5 — HR setup
+        |------------------------------------------------------------------
+        | Six catalogues: the org chart, the working patterns, the calendar, the leave rules and the
+        | salary component list. Each is its own module slug, so a business that does not run shifts can
+        | switch that one off without losing departments.
+        */
+        Route::middleware('module:departments')->group(static function (): void {
+            Route::get('departments', [DepartmentController::class, 'index'])->middleware('can:departments.view_any')->name('departments.index');
+            Route::post('departments', [DepartmentController::class, 'store'])->middleware('can:departments.create')->name('departments.store');
+            Route::put('departments/{department}', [DepartmentController::class, 'update'])->whereNumber('department')->middleware('can:update,department')->name('departments.update');
+            Route::post('departments/{department}/head', [DepartmentController::class, 'head'])->whereNumber('department')->middleware('can:assign,department')->name('departments.head');
+            Route::post('departments/{department}/toggle', [DepartmentController::class, 'toggle'])->whereNumber('department')->middleware('can:changeStatus,department')->name('departments.toggle');
+            Route::delete('departments/{department}', [DepartmentController::class, 'destroy'])->whereNumber('department')->middleware('can:delete,department')->name('departments.destroy');
+        });
+
+        Route::middleware('module:designations')->group(static function (): void {
+            Route::get('designations', [DesignationController::class, 'index'])->middleware('can:designations.view_any')->name('designations.index');
+            Route::post('designations', [DesignationController::class, 'store'])->middleware('can:designations.create')->name('designations.store');
+            Route::put('designations/{designation}', [DesignationController::class, 'update'])->whereNumber('designation')->middleware('can:update,designation')->name('designations.update');
+            Route::post('designations/{designation}/toggle', [DesignationController::class, 'toggle'])->whereNumber('designation')->middleware('can:changeStatus,designation')->name('designations.toggle');
+            Route::delete('designations/{designation}', [DesignationController::class, 'destroy'])->whereNumber('designation')->middleware('can:delete,designation')->name('designations.destroy');
+        });
+
+        Route::middleware('module:work_shifts')->group(static function (): void {
+            Route::get('work-shifts', [WorkShiftController::class, 'index'])->middleware('can:work_shifts.view_any')->name('work-shifts.index');
+            Route::post('work-shifts', [WorkShiftController::class, 'store'])->middleware('can:work_shifts.create')->name('work-shifts.store');
+            Route::put('work-shifts/{shift}', [WorkShiftController::class, 'update'])->whereNumber('shift')->middleware('can:update,shift')->name('work-shifts.update');
+            Route::post('work-shifts/{shift}/toggle', [WorkShiftController::class, 'toggle'])->whereNumber('shift')->middleware('can:changeStatus,shift')->name('work-shifts.toggle');
+            Route::post('work-shifts/{shift}/assign', [WorkShiftController::class, 'assign'])->whereNumber('shift')->middleware('can:assign,shift')->name('work-shifts.assign');
+            Route::delete('work-shifts/{shift}', [WorkShiftController::class, 'destroy'])->whereNumber('shift')->middleware('can:delete,shift')->name('work-shifts.destroy');
+        });
+
+        Route::middleware('module:holidays')->group(static function (): void {
+            Route::get('holidays', [HolidayController::class, 'index'])->middleware('can:holidays.view_any')->name('holidays.index');
+            Route::get('holidays/calendar', [HolidayController::class, 'calendar'])->middleware('can:holidays.view_any')->name('holidays.calendar');
+            Route::post('holidays', [HolidayController::class, 'store'])->middleware('can:holidays.create')->name('holidays.store');
+            Route::post('holidays/copy-year', [HolidayController::class, 'copyYear'])->middleware('can:holidays.create')->name('holidays.copy-year');
+            Route::put('holidays/{holiday}', [HolidayController::class, 'update'])->whereNumber('holiday')->middleware('can:update,holiday')->name('holidays.update');
+            Route::delete('holidays/{holiday}', [HolidayController::class, 'destroy'])->whereNumber('holiday')->middleware('can:delete,holiday')->name('holidays.destroy');
+        });
+
+        Route::middleware('module:leave_types')->group(static function (): void {
+            Route::get('leave-types', [LeaveTypeController::class, 'index'])->middleware('can:leave_types.view_any')->name('leave-types.index');
+            Route::post('leave-types', [LeaveTypeController::class, 'store'])->middleware('can:leave_types.create')->name('leave-types.store');
+            Route::put('leave-types/{leaveType}', [LeaveTypeController::class, 'update'])->whereNumber('leaveType')->middleware('can:update,leaveType')->name('leave-types.update');
+            Route::post('leave-types/{leaveType}/toggle', [LeaveTypeController::class, 'toggle'])->whereNumber('leaveType')->middleware('can:changeStatus,leaveType')->name('leave-types.toggle');
+            Route::delete('leave-types/{leaveType}', [LeaveTypeController::class, 'destroy'])->whereNumber('leaveType')->middleware('can:delete,leaveType')->name('leave-types.destroy');
+        });
+
+        Route::middleware('module:salary_components')->group(static function (): void {
+            Route::get('salary-components', [SalaryComponentController::class, 'index'])->middleware('can:salary_components.view_any')->name('salary-components.index');
+            Route::post('salary-components', [SalaryComponentController::class, 'store'])->middleware('can:salary_components.create')->name('salary-components.store');
+            Route::put('salary-components/{component}', [SalaryComponentController::class, 'update'])->whereNumber('component')->middleware('can:update,component')->name('salary-components.update');
+            Route::post('salary-components/{component}/toggle', [SalaryComponentController::class, 'toggle'])->whereNumber('component')->middleware('can:changeStatus,component')->name('salary-components.toggle');
+            Route::delete('salary-components/{component}', [SalaryComponentController::class, 'destroy'])->whereNumber('component')->middleware('can:delete,component')->name('salary-components.destroy');
         });
     });

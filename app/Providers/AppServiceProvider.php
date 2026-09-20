@@ -4,24 +4,8 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
-use App\Models\Project\Attachment;
-use App\Models\Project\Project;
-use App\Models\Project\ProjectMember;
-use App\Models\Project\ProjectMilestone;
-use App\Models\Project\ProjectValueRevision;
-use App\Models\Project\Task;
-use App\Models\Project\TaskChecklistItem;
-use App\Models\Project\TaskComment;
-use App\Models\Project\TimeEntry;
-use App\Policies\Project\AttachmentPolicy;
-use App\Policies\Project\ProjectMemberPolicy;
-use App\Policies\Project\ProjectMilestonePolicy;
-use App\Policies\Project\ProjectPolicy;
-use App\Policies\Project\ProjectValueRevisionPolicy;
-use App\Policies\Project\TaskChecklistItemPolicy;
-use App\Policies\Project\TaskCommentPolicy;
-use App\Policies\Project\TaskPolicy;
-use App\Policies\Project\TimeEntryPolicy;
+use App\Contracts\Projects\ProjectCreator;
+use App\Contracts\Referrals\ReferralRecorder;
 use App\Dashboard\Cms\BlogActivityWidget;
 use App\Dashboard\Cms\InquiryRoutingBacklogWidget;
 use App\Dashboard\Cms\NewApplicationsWidget;
@@ -29,6 +13,7 @@ use App\Dashboard\Cms\NewInquiriesWidget;
 use App\Dashboard\Cms\OpenJobsWidget;
 use App\Dashboard\Cms\PendingModerationWidget;
 use App\Dashboard\Cms\TopViewedPostsWidget;
+use App\Enums\InquiryType;
 use App\Events\ModuleStateChanged;
 use App\Events\SettingsChanged;
 use App\Models\Cms\BlogCategory;
@@ -66,7 +51,32 @@ use App\Models\Crm\LeadActivity;
 use App\Models\Crm\LeadConversion;
 use App\Models\Crm\LeadFollowUp;
 use App\Models\Crm\LeadImport;
+use App\Models\Hr\Attendance;
+use App\Models\Hr\AttendanceCorrection;
+use App\Models\Hr\Department;
+use App\Models\Hr\Designation;
+use App\Models\Hr\Employee;
+use App\Models\Hr\EmployeeAdvance;
+use App\Models\Hr\EmployeeDocument;
+use App\Models\Hr\Holiday;
+use App\Models\Hr\LeaveBalance;
+use App\Models\Hr\LeaveRequest;
+use App\Models\Hr\LeaveType;
+use App\Models\Hr\PayrollRun;
+use App\Models\Hr\PayrollRunItem;
+use App\Models\Hr\SalaryComponent;
+use App\Models\Hr\SalaryStructure;
+use App\Models\Hr\WorkShift;
 use App\Models\Module;
+use App\Models\Project\Attachment;
+use App\Models\Project\Project;
+use App\Models\Project\ProjectMember;
+use App\Models\Project\ProjectMilestone;
+use App\Models\Project\ProjectValueRevision;
+use App\Models\Project\Task;
+use App\Models\Project\TaskChecklistItem;
+use App\Models\Project\TaskComment;
+use App\Models\Project\TimeEntry;
 use App\Models\Role;
 use App\Models\User;
 use App\Policies\Cms\BlogCategoryPolicy;
@@ -105,13 +115,39 @@ use App\Policies\Crm\LeadConversionPolicy;
 use App\Policies\Crm\LeadFollowUpPolicy;
 use App\Policies\Crm\LeadImportPolicy;
 use App\Policies\Crm\LeadPolicy;
+use App\Policies\Hr\AttendanceCorrectionPolicy;
+use App\Policies\Hr\AttendancePolicy;
+use App\Policies\Hr\DepartmentPolicy;
+use App\Policies\Hr\DesignationPolicy;
+use App\Policies\Hr\EmployeeAdvancePolicy;
+use App\Policies\Hr\EmployeeDocumentPolicy;
+use App\Policies\Hr\EmployeePolicy;
+use App\Policies\Hr\HolidayPolicy;
+use App\Policies\Hr\LeaveBalancePolicy;
+use App\Policies\Hr\LeaveRequestPolicy;
+use App\Policies\Hr\LeaveTypePolicy;
+use App\Policies\Hr\PayrollRunItemPolicy;
+use App\Policies\Hr\PayrollRunPolicy;
+use App\Policies\Hr\SalaryComponentPolicy;
+use App\Policies\Hr\SalaryStructurePolicy;
+use App\Policies\Hr\WorkShiftPolicy;
 use App\Policies\ModulePolicy;
+use App\Policies\Project\AttachmentPolicy;
+use App\Policies\Project\ProjectMemberPolicy;
+use App\Policies\Project\ProjectMilestonePolicy;
+use App\Policies\Project\ProjectPolicy;
+use App\Policies\Project\ProjectValueRevisionPolicy;
+use App\Policies\Project\TaskChecklistItemPolicy;
+use App\Policies\Project\TaskCommentPolicy;
+use App\Policies\Project\TaskPolicy;
+use App\Policies\Project\TimeEntryPolicy;
 use App\Policies\RolePolicy;
 use App\Policies\UserPolicy;
 use App\Services\Cms\CacheVersion;
 use App\Services\Cms\InquiryRouter;
 use App\Services\Cms\PublicCache;
 use App\Services\Cms\SitemapGenerator;
+use App\Support\ClientPortalRegistry;
 use App\Support\Cms\PublicFormRateLimits;
 use App\Support\Cms\SectionRegistry;
 use App\Support\Cms\Sections\MarketingSectionTypes;
@@ -124,30 +160,26 @@ use App\Support\Cms\Sitemap\ServiceSitemapProvider;
 use App\Support\Cms\Sitemap\TeamSitemapProvider;
 use App\Support\ConfigureFromSettings;
 use App\Support\DashboardRegistry;
+use App\Support\Inquiry\CrmLeadInquiryTarget;
 use App\Support\Modules;
+use App\Support\Portal\Sections\DocumentsSection;
+use App\Support\Portal\Sections\MilestonesSection;
+use App\Support\Portal\Sections\NotificationsSection;
+use App\Support\Portal\Sections\ProjectsSection;
+use App\Support\Portal\Sections\TasksSection;
+use App\Support\Projects\NullProjectCreator;
+use App\Support\Referrals\NullReferralRecorder;
 use App\Support\SettingsRepository;
 use App\Support\SiteSettings;
 use Closure;
 use Illuminate\Auth\Access\Gate as AccessGate;
 use Illuminate\Contracts\Auth\Access\Gate as GateContract;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Throwable;
-use App\Contracts\Projects\ProjectCreator;
-use App\Contracts\Referrals\ReferralRecorder;
-use App\Enums\InquiryType;
-use App\Support\ClientPortalRegistry;
-use App\Support\Inquiry\CrmLeadInquiryTarget;
-use App\Support\Portal\Sections\MilestonesSection;
-use App\Support\Portal\Sections\ProjectsSection;
-use App\Support\Portal\Sections\TasksSection;
-use App\Support\Portal\Sections\DocumentsSection;
-use App\Support\Portal\Sections\NotificationsSection;
-use App\Support\Projects\NullProjectCreator;
-use App\Support\Referrals\NullReferralRecorder;
-use Illuminate\Contracts\Foundation\Application;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -213,6 +245,25 @@ class AppServiceProvider extends ServiceProvider
         TaskComment::class => TaskCommentPolicy::class,
         Attachment::class => AttachmentPolicy::class,
         TimeEntry::class => TimeEntryPolicy::class,
+        // phase-07 §7: one policy per HR model. Six of them are catalogues and share one trait — there is
+        // no per-row visibility question for a shift or a holiday, only "does this user hold the ability".
+        // salary_structures and employee_advances deliberately expose no edit or delete (§4.1).
+        Department::class => DepartmentPolicy::class,
+        Designation::class => DesignationPolicy::class,
+        Employee::class => EmployeePolicy::class,
+        EmployeeDocument::class => EmployeeDocumentPolicy::class,
+        WorkShift::class => WorkShiftPolicy::class,
+        Holiday::class => HolidayPolicy::class,
+        Attendance::class => AttendancePolicy::class,
+        AttendanceCorrection::class => AttendanceCorrectionPolicy::class,
+        LeaveType::class => LeaveTypePolicy::class,
+        LeaveBalance::class => LeaveBalancePolicy::class,
+        LeaveRequest::class => LeaveRequestPolicy::class,
+        SalaryComponent::class => SalaryComponentPolicy::class,
+        SalaryStructure::class => SalaryStructurePolicy::class,
+        EmployeeAdvance::class => EmployeeAdvancePolicy::class,
+        PayrollRun::class => PayrollRunPolicy::class,
+        PayrollRunItem::class => PayrollRunItemPolicy::class,
     ];
 
     /**

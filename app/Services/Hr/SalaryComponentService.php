@@ -34,9 +34,8 @@ class SalaryComponentService
     {
         return DB::transaction(function () use ($data): SalaryComponent {
             $component = new SalaryComponent;
-            $component->fill($this->prepare($data));
 
-            $this->persist($component);
+            $this->persist($this->apply($component, $data));
 
             return $component;
         });
@@ -52,9 +51,7 @@ class SalaryComponentService
         }
 
         return DB::transaction(function () use ($component, $data): SalaryComponent {
-            $component->fill($this->prepare($data, $component));
-
-            $this->persist($component);
+            $this->persist($this->apply($component, $data));
 
             return $component;
         });
@@ -94,6 +91,25 @@ class SalaryComponentService
         }
 
         $component->delete();
+    }
+
+    /**
+     * Fill what a form may set, then **force** `side`.
+     *
+     * `side` is deliberately outside `$fillable`: it is derived from the group and must never arrive from
+     * a request, or a component filed as an allowance could be saved as a deduction and every slip using
+     * it would still add up.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function apply(SalaryComponent $component, array $data): SalaryComponent
+    {
+        $prepared = $this->prepare($data, $component->exists ? $component : null);
+
+        $side = $prepared['side'] ?? $component->side?->value;
+        unset($prepared['side']);
+
+        return $component->fill($prepared)->forceFill($side === null ? [] : ['side' => $side]);
     }
 
     /**
