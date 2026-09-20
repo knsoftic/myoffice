@@ -7,6 +7,7 @@ namespace App\Services\Hr;
 use App\Models\Hr\Employee;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Who a user may see in HR (phase-07 §6.1, §9).
@@ -35,6 +36,9 @@ class EmployeeScopeResolver
 
     /** @var array<int, array{mode: string, ids: list<int>}> */
     private array $cache = [];
+
+    /** Which tables carry which column — a schema fact, so it is shared for the process. */
+    private static array $columns = [];
 
     /**
      * @return array{mode: 'all'|'team'|'own'|'none', ids: list<int>}
@@ -90,13 +94,18 @@ class EmployeeScopeResolver
      * D11's branch rule, applied on top of every other answer: a user pinned to a branch sees that
      * branch's rows and the unassigned ones.
      *
+     * **Only where the table actually carries a branch.** Several HR tables deliberately do not — a
+     * correction and a leave-balance row belong to a person, and the person already carries the branch.
+     * Asking for a column that is not there produced a 500 on the correction queue the first time this
+     * shipped, so the column is checked rather than assumed, once per table per process.
+     *
      * @param  Builder<covariant \Illuminate\Database\Eloquent\Model>  $query
      */
     public function applyBranch(Builder $query, ?User $user, string $column = 'branch_id'): Builder
     {
         $branchId = $user?->branch_id;
 
-        if ($branchId === null) {
+        if ($branchId === null || ! $this->hasColumn($query, $column)) {
             return $query;
         }
 
@@ -135,6 +144,20 @@ class EmployeeScopeResolver
     public function forget(): void
     {
         $this->cache = [];
+    }
+
+    /**
+     * Does the table behind this query have the column? Cached per table for the life of the process —
+     * a schema lookup per row would be absurd, and the schema does not change under a running request.
+     *
+     * @param  Builder<covariant \Illuminate\Database\Eloquent\Model>  $query
+     */
+    private function hasColumn(Builder $query, string $column): bool
+    {
+        $table = $query->getModel()->getTable();
+        $key = $table.'.'.$column;
+
+        return self::$columns[$key] ??= Schema::hasColumn($table, $column);
     }
 
     /**

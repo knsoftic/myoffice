@@ -325,9 +325,16 @@ final class Sidebar
                         'permission' => 'leaves.view_any',
                     ],
                     [
+                        'label' => 'Leave Balances',
+                        'icon' => 'scale',
+                        'route' => 'admin.leave-balances.index',
+                        'module' => 'leave_balances',
+                        'permission' => 'leave_balances.view_any',
+                    ],
+                    [
                         'label' => 'Payroll',
                         'icon' => 'banknotes',
-                        'route' => 'admin.payroll.index',
+                        'route' => 'admin.payroll-runs.index',
                         'module' => 'payroll',
                         'permission' => 'payroll.view_any',
                     ],
@@ -336,7 +343,7 @@ final class Sidebar
                     [
                         'label' => 'Salary Slips',
                         'icon' => 'document-currency-dollar',
-                        'route' => 'admin.salary-slips.index',
+                        'route' => 'admin.payslips.index',
                         'module' => 'salary_slips',
                         'permission' => 'salary_slips.view_any',
                     ],
@@ -350,7 +357,7 @@ final class Sidebar
                     [
                         'label' => 'Advances',
                         'icon' => 'credit-card',
-                        'route' => 'admin.employee-advances.index',
+                        'route' => 'admin.advances.index',
                         'module' => 'employee_advances',
                         'permission' => 'employee_advances.view_any',
                     ],

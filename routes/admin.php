@@ -41,12 +41,22 @@ use App\Http\Controllers\Admin\Cms\TechnologyController;
 use App\Http\Controllers\Admin\Cms\TestimonialController;
 use App\Http\Controllers\Admin\Cms\WebsiteOverviewController;
 use App\Http\Controllers\Admin\DashboardController;
+use App\Http\Controllers\Admin\Hr\AttendanceController;
+use App\Http\Controllers\Admin\Hr\AttendanceCorrectionController;
+use App\Http\Controllers\Admin\Hr\AttendanceSummaryController;
 use App\Http\Controllers\Admin\Hr\DepartmentController;
 use App\Http\Controllers\Admin\Hr\DesignationController;
+use App\Http\Controllers\Admin\Hr\EmployeeAdvanceController;
 use App\Http\Controllers\Admin\Hr\EmployeeController;
 use App\Http\Controllers\Admin\Hr\HolidayController;
+use App\Http\Controllers\Admin\Hr\LeaveBalanceController;
+use App\Http\Controllers\Admin\Hr\LeaveRequestController;
 use App\Http\Controllers\Admin\Hr\LeaveTypeController;
+use App\Http\Controllers\Admin\Hr\PayrollRunController;
+use App\Http\Controllers\Admin\Hr\PayrollRunItemController;
+use App\Http\Controllers\Admin\Hr\PayslipController;
 use App\Http\Controllers\Admin\Hr\SalaryComponentController;
+use App\Http\Controllers\Admin\Hr\SalaryStructureController;
 use App\Http\Controllers\Admin\Hr\WorkShiftController;
 use App\Http\Controllers\Admin\LeadActivityController;
 use App\Http\Controllers\Admin\LeadBoardController;
@@ -67,7 +77,15 @@ use App\Http\Controllers\Admin\TaskChecklistController;
 use App\Http\Controllers\Admin\TaskController;
 use App\Http\Controllers\Admin\TimeTrackingController;
 use App\Http\Controllers\Admin\UserController;
+use App\Models\Hr\Attendance;
+use App\Models\Hr\AttendanceCorrection;
 use App\Models\Hr\Employee;
+use App\Models\Hr\EmployeeAdvance;
+use App\Models\Hr\LeaveBalance;
+use App\Models\Hr\LeaveRequest;
+use App\Models\Hr\PayrollRun;
+use App\Models\Hr\PayrollRunItem;
+use App\Models\Hr\SalaryStructure;
 use App\Models\Project\Project;
 use App\Services\Core\SettingsService;
 use Illuminate\Support\Facades\Route;
@@ -1008,6 +1026,118 @@ Route::prefix('admin')
             Route::post('employees/{employee}/user', [EmployeeController::class, 'linkUser'])->whereNumber('employee')->middleware('can:update,employee')->name('employees.user.link');
             Route::delete('employees/{employee}/user', [EmployeeController::class, 'unlinkUser'])->whereNumber('employee')->middleware('can:update,employee')->name('employees.user.unlink');
             Route::get('employees/{employee}/print', [EmployeeController::class, 'print'])->whereNumber('employee')->middleware('can:print,employee')->name('employees.print');
+        });
+
+        /*
+        |------------------------------------------------------------------
+        | phase-07 §7.3 — Attendance, corrections and the monthly summaries
+        |------------------------------------------------------------------
+        | `punch` is throttled because a kiosk is a button somebody leans on. Nothing here writes a status
+        | directly: a manual change goes through a correction, so both paths leave the same evidence.
+        */
+        Route::middleware('module:attendance')->group(static function (): void {
+            Route::get('attendance', [AttendanceController::class, 'index'])->middleware('can:viewAny,'.Attendance::class)->name('attendance.index');
+            Route::get('attendance/monthly', [AttendanceController::class, 'monthly'])->middleware('can:attendance.view_any')->name('attendance.monthly');
+            Route::get('attendance/summaries', [AttendanceSummaryController::class, 'index'])->middleware('can:attendance.view_reports')->name('attendance-summaries.index');
+            Route::post('attendance/summaries/rebuild', [AttendanceSummaryController::class, 'rebuild'])->middleware('can:attendance.change_status')->name('attendance-summaries.rebuild');
+            Route::get('attendance/summaries/export/{format}', [AttendanceSummaryController::class, 'export'])->middleware('can:attendance.export')->name('attendance-summaries.export');
+            Route::get('attendance/export/{format}', [AttendanceController::class, 'export'])->middleware('can:attendance.export')->name('attendance.export');
+            Route::post('attendance/punch', [AttendanceController::class, 'punch'])->middleware(['can:attendance.create', 'throttle:60,1'])->name('attendance.punch');
+            Route::post('attendance/mark', [AttendanceController::class, 'mark'])->middleware('can:attendance.create')->name('attendance.mark');
+            Route::post('attendance/close', [AttendanceController::class, 'close'])->middleware('can:attendance.create')->name('attendance.close');
+            Route::get('attendance/{attendance}', [AttendanceController::class, 'show'])->whereNumber('attendance')->middleware('can:view,attendance')->name('attendance.show');
+            Route::post('attendance/{attendance}/recompute', [AttendanceController::class, 'recompute'])->whereNumber('attendance')->middleware('can:update,attendance')->name('attendance.recompute');
+            Route::post('attendance/{attendance}/corrections', [AttendanceCorrectionController::class, 'store'])->whereNumber('attendance')->middleware('can:update,attendance')->name('attendance.corrections.store');
+
+            Route::get('attendance-corrections', [AttendanceCorrectionController::class, 'index'])->middleware('can:viewAny,'.AttendanceCorrection::class)->name('attendance-corrections.index');
+            Route::post('attendance-corrections/{correction}/approve', [AttendanceCorrectionController::class, 'approve'])->whereNumber('correction')->middleware('can:approve,correction')->name('attendance-corrections.approve');
+            Route::post('attendance-corrections/{correction}/reject', [AttendanceCorrectionController::class, 'reject'])->whereNumber('correction')->middleware('can:reject,correction')->name('attendance-corrections.reject');
+        });
+
+        /*
+        |------------------------------------------------------------------
+        | phase-07 §7.4 — Leave requests and balances
+        |------------------------------------------------------------------
+        | Approving and rejecting are decided by the policy, not by a permission alone: the named approver
+        | may act without holding `leaves.approve`, and nobody may act on their own request.
+        */
+        Route::middleware('module:leaves')->group(static function (): void {
+            Route::get('leaves', [LeaveRequestController::class, 'index'])->middleware('can:viewAny,'.LeaveRequest::class)->name('leaves.index');
+            Route::get('leaves/calendar', [LeaveRequestController::class, 'calendar'])->middleware('can:leaves.view_any')->name('leaves.calendar');
+            Route::get('leaves/create', [LeaveRequestController::class, 'create'])->middleware('can:leaves.create')->name('leaves.create');
+            Route::post('leaves', [LeaveRequestController::class, 'store'])->middleware('can:leaves.create')->name('leaves.store');
+            Route::get('leaves/{leaveRequest}', [LeaveRequestController::class, 'show'])->whereNumber('leaveRequest')->middleware('can:view,leaveRequest')->name('leaves.show');
+            Route::post('leaves/{leaveRequest}/approve', [LeaveRequestController::class, 'approve'])->whereNumber('leaveRequest')->middleware('can:approve,leaveRequest')->name('leaves.approve');
+            Route::post('leaves/{leaveRequest}/reject', [LeaveRequestController::class, 'reject'])->whereNumber('leaveRequest')->middleware('can:reject,leaveRequest')->name('leaves.reject');
+            Route::post('leaves/{leaveRequest}/cancel', [LeaveRequestController::class, 'cancel'])->whereNumber('leaveRequest')->middleware('can:changeStatus,leaveRequest')->name('leaves.cancel');
+        });
+
+        Route::middleware('module:leave_balances')->group(static function (): void {
+            Route::get('leave-balances', [LeaveBalanceController::class, 'index'])->middleware('can:viewAny,'.LeaveBalance::class)->name('leave-balances.index');
+            Route::post('leave-balances/adjust', [LeaveBalanceController::class, 'adjust'])->middleware('can:leave_balances.create')->name('leave-balances.adjust');
+            Route::post('leave-balances/grant-year', [LeaveBalanceController::class, 'grantYear'])->middleware('can:leave_balances.create')->name('leave-balances.grant-year');
+            Route::get('leave-balances/export/{format}', [LeaveBalanceController::class, 'export'])->middleware('can:leave_balances.export')->name('leave-balances.export');
+            Route::get('leave-balances/{employee}', [LeaveBalanceController::class, 'show'])->whereNumber('employee')->middleware('can:view,employee')->name('leave-balances.show');
+        });
+
+        /*
+        |------------------------------------------------------------------
+        | phase-07 §7.5 — Salary structures and advances
+        |------------------------------------------------------------------
+        | Neither module has an `edit` or a `delete` (§4.1): a rate is never updated and an advance is
+        | never deleted. The overview route is this phase's own addition — a sidebar entry needs a URL
+        | with no parameters in it.
+        */
+        Route::middleware('module:salary_structures')->group(static function (): void {
+            Route::get('salary-structures', [SalaryStructureController::class, 'overview'])->middleware('can:viewAny,'.SalaryStructure::class)->name('salary-structures.index');
+            Route::get('employees/{employee}/salary-structures', [SalaryStructureController::class, 'index'])->whereNumber('employee')->middleware('can:view,employee')->name('employees.salary-structures.index');
+            Route::get('employees/{employee}/salary-structures/create', [SalaryStructureController::class, 'create'])->whereNumber('employee')->middleware('can:salary_structures.create')->name('employees.salary-structures.create');
+            Route::post('employees/{employee}/salary-structures', [SalaryStructureController::class, 'store'])->whereNumber('employee')->middleware('can:salary_structures.create')->name('employees.salary-structures.store');
+            Route::post('salary-structures/{structure}/cancel', [SalaryStructureController::class, 'cancel'])->whereNumber('structure')->middleware('can:changeStatus,structure')->name('salary-structures.cancel');
+        });
+
+        Route::middleware('module:employee_advances')->group(static function (): void {
+            Route::get('advances', [EmployeeAdvanceController::class, 'index'])->middleware('can:viewAny,'.EmployeeAdvance::class)->name('advances.index');
+            Route::get('advances/create', [EmployeeAdvanceController::class, 'create'])->middleware('can:employee_advances.create')->name('advances.create');
+            Route::post('advances', [EmployeeAdvanceController::class, 'store'])->middleware('can:employee_advances.create')->name('advances.store');
+            Route::get('advances/{advance}', [EmployeeAdvanceController::class, 'show'])->whereNumber('advance')->middleware('can:view,advance')->name('advances.show');
+            Route::post('advances/{advance}/approve', [EmployeeAdvanceController::class, 'approve'])->whereNumber('advance')->middleware('can:approve,advance')->name('advances.approve');
+            Route::post('advances/{advance}/reject', [EmployeeAdvanceController::class, 'reject'])->whereNumber('advance')->middleware('can:reject,advance')->name('advances.reject');
+            Route::post('advances/{advance}/disburse', [EmployeeAdvanceController::class, 'disburse'])->whereNumber('advance')->middleware('can:changeStatus,advance')->name('advances.disburse');
+            Route::post('advances/{advance}/recovery', [EmployeeAdvanceController::class, 'recovery'])->whereNumber('advance')->middleware('can:changeStatus,advance')->name('advances.recovery');
+            Route::post('advances/{advance}/waive', [EmployeeAdvanceController::class, 'waive'])->whereNumber('advance')->middleware('can:waive,advance')->name('advances.waive');
+            Route::post('advances/{advance}/cancel', [EmployeeAdvanceController::class, 'cancel'])->whereNumber('advance')->middleware('can:changeStatus,advance')->name('advances.cancel');
+        });
+
+        /*
+        |------------------------------------------------------------------
+        | phase-07 §7.6 — Payroll runs and salary slips
+        |------------------------------------------------------------------
+        | `generate` is throttled: rebuilding a four-hundred-slip run is expensive and a double click
+        | should cost one 429 rather than two runs. There is no unlock route, because there is no unlock.
+        */
+        Route::middleware('module:payroll')->group(static function (): void {
+            Route::get('payroll', [PayrollRunController::class, 'index'])->middleware('can:viewAny,'.PayrollRun::class)->name('payroll-runs.index');
+            Route::get('payroll/create', [PayrollRunController::class, 'create'])->middleware('can:payroll.create')->name('payroll-runs.create');
+            Route::post('payroll', [PayrollRunController::class, 'store'])->middleware('can:payroll.create')->name('payroll-runs.store');
+            Route::post('payroll/items/{item}/pay', [PayrollRunItemController::class, 'pay'])->whereNumber('item')->middleware('can:pay,item')->name('payroll-items.pay');
+            Route::post('payroll/items/{item}/hold', [PayrollRunItemController::class, 'hold'])->whereNumber('item')->middleware('can:hold,item')->name('payroll-items.hold');
+            Route::post('payroll/items/{item}/release', [PayrollRunItemController::class, 'release'])->whereNumber('item')->middleware('can:hold,item')->name('payroll-items.release');
+            Route::post('payroll/items/{item}/correction', [PayrollRunItemController::class, 'correction'])->whereNumber('item')->middleware('can:correct,item')->name('payroll-items.correction');
+            Route::get('payroll/{run}', [PayrollRunController::class, 'show'])->whereNumber('run')->middleware('can:view,run')->name('payroll-runs.show');
+            Route::post('payroll/{run}/generate', [PayrollRunController::class, 'generate'])->whereNumber('run')->middleware(['can:generate,run', 'throttle:6,1'])->name('payroll-runs.generate');
+            Route::get('payroll/{run}/preview/{employee}', [PayrollRunController::class, 'preview'])->whereNumber(['run', 'employee'])->middleware('can:viewFinancial,run')->name('payroll-runs.preview');
+            Route::post('payroll/{run}/lock', [PayrollRunController::class, 'lock'])->whereNumber('run')->middleware('can:approve,run')->name('payroll-runs.lock');
+            Route::post('payroll/{run}/cancel', [PayrollRunController::class, 'cancel'])->whereNumber('run')->middleware('can:cancel,run')->name('payroll-runs.cancel');
+            Route::get('payroll/{run}/export/{format}', [PayrollRunController::class, 'export'])->whereNumber('run')->middleware('can:payroll.export')->name('payroll-runs.export');
+            Route::get('payroll/{run}/register/print', [PayrollRunController::class, 'register'])->whereNumber('run')->middleware('can:payroll.print')->name('payroll-runs.register.print');
+        });
+
+        Route::middleware('module:salary_slips')->group(static function (): void {
+            Route::get('payslips', [PayslipController::class, 'index'])->middleware('can:viewAny,'.PayrollRunItem::class)->name('payslips.index');
+            Route::get('payslips/export/{format}', [PayslipController::class, 'export'])->middleware('can:salary_slips.export')->name('payslips.export');
+            Route::get('payslips/{item}', [PayslipController::class, 'show'])->whereNumber('item')->middleware('can:view,item')->name('payslips.show');
+            Route::get('payslips/{item}/print', [PayslipController::class, 'print'])->whereNumber('item')->middleware('can:print,item')->name('payslips.print');
         });
 
         /*
