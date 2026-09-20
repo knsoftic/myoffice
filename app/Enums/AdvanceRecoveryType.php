@@ -41,7 +41,6 @@ enum AdvanceRecoveryType: string
         };
     }
 
-
     /**
      * Does this need a written note? Waiving money and correcting a recovery both do (HR-20).
      */

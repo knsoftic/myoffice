@@ -42,7 +42,6 @@ enum PayrollRunType: string
         };
     }
 
-
     /**
      * May an item or component on this run carry a negative amount? Corrections only (HR-17).
      */

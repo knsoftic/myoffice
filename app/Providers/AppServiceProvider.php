@@ -147,6 +147,8 @@ use App\Services\Cms\CacheVersion;
 use App\Services\Cms\InquiryRouter;
 use App\Services\Cms\PublicCache;
 use App\Services\Cms\SitemapGenerator;
+use App\Services\Hr\EmployeeScopeResolver;
+use App\Services\Hr\WorkCalendarService;
 use App\Support\ClientPortalRegistry;
 use App\Support\Cms\PublicFormRateLimits;
 use App\Support\Cms\SectionRegistry;
@@ -276,6 +278,12 @@ class AppServiceProvider extends ServiceProvider
 
         // phase-03 (D22): one cache version stamp and one bump batch per request or queued job.
         $this->app->scoped(CacheVersion::class);
+
+        // phase-07 §6.1: one calendar per request. WorkCalendarService caches holidays so that resolving a
+        // month is one query rather than fifteen hundred; a fresh instance per resolve would give each
+        // service its own cache, and a holiday edited mid-request would be stale in one of them.
+        $this->app->scoped(WorkCalendarService::class);
+        $this->app->scoped(EmployeeScopeResolver::class);
 
         // phase-03 §5.3: the public views' only settings reader (stateless, so a singleton).
         $this->app->singleton(SiteSettings::class);

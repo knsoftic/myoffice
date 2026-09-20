@@ -4,13 +4,6 @@ declare(strict_types=1);
 
 namespace App\Support;
 
-use App\Models\Project\Attachment;
-use App\Models\Project\ProjectMember;
-use App\Models\Project\ProjectValueRevision;
-use App\Models\Project\TaskChecklistItem;
-use App\Models\Project\TaskCommentMention;
-use App\Models\Project\TimeEntry;
-use App\Models\Project\TimeEntrySegment;
 use App\Models\Activity;
 use App\Models\Cms\BlogPostBlogTag;
 use App\Models\Cms\BlogPostView;
@@ -35,6 +28,13 @@ use App\Models\Crm\LeadImportRow;
 use App\Models\LoginHistory;
 use App\Models\Module;
 use App\Models\Permission;
+use App\Models\Project\Attachment;
+use App\Models\Project\ProjectMember;
+use App\Models\Project\ProjectValueRevision;
+use App\Models\Project\TaskChecklistItem;
+use App\Models\Project\TaskCommentMention;
+use App\Models\Project\TimeEntry;
+use App\Models\Project\TimeEntrySegment;
 use App\Models\Role;
 use App\Models\Setting;
 use App\Models\User;

@@ -67,7 +67,7 @@ final class TimeRollupService
 
         DB::statement(
             "UPDATE `{$table}` SET `actual_seconds` = ("
-            ."SELECT COALESCE(SUM(`duration_seconds`), 0) FROM `time_entries`"
+            .'SELECT COALESCE(SUM(`duration_seconds`), 0) FROM `time_entries`'
             ." WHERE `time_entries`.`{$foreignKey}` = ? AND `time_entries`.`deleted_at` IS NULL"
             .') WHERE `id` = ?',
             [$id, $id]

@@ -42,7 +42,6 @@ enum SalaryComponentCalculation: string
         };
     }
 
-
     public function needsRate(): bool
     {
         return $this !== self::Fixed;

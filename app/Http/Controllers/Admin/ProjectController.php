@@ -26,8 +26,8 @@ use App\Services\Project\ProjectProgressService;
 use App\Services\Project\ProjectService;
 use App\Services\Project\ProjectValueService;
 use Illuminate\Contracts\View\View;
-use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 

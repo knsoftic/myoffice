@@ -6,6 +6,7 @@ namespace App\Support;
 
 use App\Enums\Cms\SectionPlacement;
 use App\Enums\PanelType;
+use App\Models\Hr\Employee;
 use App\Models\User;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
@@ -18,6 +19,7 @@ use Throwable;
  *   1. its module is enabled        — Modules::enabled($item['module'])
  *   2. its route exists             — Route::has($item['route'])
  *   3. the user holds the permission — $user->can($item['permission'])
+ *   4. its optional `when` closure agrees — for a condition a permission cannot express
  * A parent with children survives when at least one child survives; a group with no surviving
  * items disappears entirely.
  *
@@ -26,7 +28,7 @@ use Throwable;
  * no edit to this file is needed then.
  *
  * Declared item keys (all optional except label):
- *   label, icon, route, params, module, permission, children, group, match
+ *   label, icon, route, params, module, permission, when, children, group, match
  *     match  — route-name pattern(s) deciding the active state; defaults to "prefix.*"
  *     group  — optional sub-heading inside a group
  *
@@ -364,6 +366,11 @@ final class Sidebar
                     [
                         'label' => 'My HR',
                         'icon' => 'user-circle',
+                        // Every one of these 404s without an employee record (§9), so the whole group is
+                        // hidden rather than offering pages that cannot open.
+                        'when' => static fn (User $user): bool => Employee::query()
+                            ->where('user_id', $user->getKey())
+                            ->exists(),
                         'children' => [
                             [
                                 'label' => 'My Profile',
@@ -1421,6 +1428,14 @@ final class Sidebar
         $permission = isset($item['permission']) ? (string) $item['permission'] : null;
 
         if ($permission !== null && ! self::allows($user, $permission)) {
+            return null;
+        }
+
+        // Gate 4: a condition the permission cannot express. Employee self-service is the first case —
+        // holding `employee_self_service.view` does not mean there *is* an employee record behind the
+        // login, and those screens answer 404 when there is not (phase-07 §9). A menu must not offer a
+        // page the user cannot open.
+        if (isset($item['when']) && is_callable($item['when']) && ! ($item['when'])($user)) {
             return null;
         }
 

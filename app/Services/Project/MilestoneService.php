@@ -16,6 +16,7 @@ use App\Services\Project\Exceptions\InvalidStatusTransition;
 use App\Services\Project\Exceptions\ProjectRuleException;
 use App\Support\Money;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Milestones (phase-06 §6.1, requirement §21).
@@ -239,7 +240,7 @@ final readonly class MilestoneService
      */
     private function blockingPayment(ProjectMilestone $milestone): ?string
     {
-        if (! \Illuminate\Support\Facades\Schema::hasTable('project_payments')) {
+        if (! Schema::hasTable('project_payments')) {
             return null;
         }
 

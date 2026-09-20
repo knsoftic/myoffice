@@ -47,7 +47,6 @@ enum AttendanceSource: string
         };
     }
 
-
     /**
      * Did the employee mark this themselves?
      */

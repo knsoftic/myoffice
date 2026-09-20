@@ -211,8 +211,8 @@ final class ProjectProgressService
      */
     public function setAuto(Project $project, string $reason, ?User $actor = null): Project
     {
-        return DB::transaction(function () use ($project, $reason, $actor): Project {
-            Project::unlock(Project::GROUP_PROGRESS, function () use ($project, $reason, $actor): void {
+        return DB::transaction(function () use ($project, $actor): Project {
+            Project::unlock(Project::GROUP_PROGRESS, function () use ($project, $actor): void {
                 $project->forceFill([
                     'progress_mode' => ProgressMode::Auto->value,
                     'progress_reason' => null,

@@ -39,7 +39,6 @@ enum LeaveAccrualMethod: string
         };
     }
 
-
     /**
      * Does this method credit a balance at all?
      */

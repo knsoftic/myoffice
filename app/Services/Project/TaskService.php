@@ -23,6 +23,7 @@ use App\Models\User;
 use App\Services\Project\Exceptions\InvalidStatusTransition;
 use App\Services\Project\Exceptions\ProjectRuleException;
 use App\Support\Money;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -469,9 +470,9 @@ final readonly class TaskService
     }
 
     /**
-     * @return \Illuminate\Support\Collection<int, object>
+     * @return Collection<int, object>
      */
-    private function orderedColumn(Project $project, TaskStatus $column): \Illuminate\Support\Collection
+    private function orderedColumn(Project $project, TaskStatus $column): Collection
     {
         return DB::table('tasks')
             ->select('id', 'board_position')

@@ -38,7 +38,6 @@ enum SkillLevel: string
         };
     }
 
-
     /**
      * Sort key, so a skills list reads strongest first.
      */

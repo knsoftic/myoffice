@@ -38,7 +38,6 @@ enum DayType: string
         };
     }
 
-
     public function isWorking(): bool
     {
         return $this === self::Working;

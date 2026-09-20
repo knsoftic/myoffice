@@ -42,7 +42,6 @@ enum HolidayType: string
         };
     }
 
-
     /**
      * Does this holiday actually make the day non-working?
      */

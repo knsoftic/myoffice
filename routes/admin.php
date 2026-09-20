@@ -56,11 +56,11 @@ use App\Http\Controllers\Admin\Hr\PayrollRunController;
 use App\Http\Controllers\Admin\Hr\PayrollRunItemController;
 use App\Http\Controllers\Admin\Hr\PayslipController;
 use App\Http\Controllers\Admin\Hr\SalaryComponentController;
+use App\Http\Controllers\Admin\Hr\SalaryStructureController;
 use App\Http\Controllers\Admin\Hr\SelfService\AttendanceController as MyAttendanceController;
 use App\Http\Controllers\Admin\Hr\SelfService\LeaveController as MyLeaveController;
 use App\Http\Controllers\Admin\Hr\SelfService\PayslipController as MyPayslipController;
 use App\Http\Controllers\Admin\Hr\SelfService\ProfileController as MyProfileController;
-use App\Http\Controllers\Admin\Hr\SalaryStructureController;
 use App\Http\Controllers\Admin\Hr\WorkShiftController;
 use App\Http\Controllers\Admin\LeadActivityController;
 use App\Http\Controllers\Admin\LeadBoardController;
@@ -1031,7 +1031,6 @@ Route::prefix('admin')
             Route::delete('employees/{employee}/user', [EmployeeController::class, 'unlinkUser'])->whereNumber('employee')->middleware('can:update,employee')->name('employees.user.unlink');
             Route::get('employees/{employee}/print', [EmployeeController::class, 'print'])->whereNumber('employee')->middleware('can:print,employee')->name('employees.print');
         });
-
 
         /*
         |------------------------------------------------------------------

@@ -38,7 +38,6 @@ enum DocumentVerificationStatus: string
         };
     }
 
-
     public function isTerminal(): bool
     {
         return $this === self::Rejected || $this === self::Expired;

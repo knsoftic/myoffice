@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Events\Project;
 
-use App\Models\Project\TimeEntry;
 use App\Enums\TimerStopReason;
+use App\Models\Project\TimeEntry;
 use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;

@@ -54,7 +54,6 @@ enum AttendanceStatus: string
         };
     }
 
-
     /**
      * Did the person actually turn up? Lateness and an early finish are still attendance.
      */

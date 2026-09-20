@@ -54,7 +54,6 @@ enum AdvanceStatus: string
         };
     }
 
-
     /**
      * Should payroll take a recovery line for this advance?
      */

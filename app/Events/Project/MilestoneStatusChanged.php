@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Events\Project;
 
-use App\Models\Project\ProjectMilestone;
 use App\Enums\MilestoneStatus;
+use App\Models\Project\ProjectMilestone;
 use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;

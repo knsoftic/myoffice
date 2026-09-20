@@ -44,7 +44,6 @@ enum PayrollItemStatus: string
         };
     }
 
-
     /**
      * Is every money column on this item frozen (HR-15)?
      */

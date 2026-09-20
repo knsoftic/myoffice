@@ -332,8 +332,8 @@ screens still to come**
 | [ ] | Phase 6's four manifest files (`tests/Support/*-manifest.php`) and their manifest test. The Phase 4 manifest test walks **its own** table list, so the new tables are not covered by anything today — P6-53 asks for the §2.14 object list to be asserted in CI |
 ### [ ] PHASE 7 — Employees, departments, attendance, leave, payroll
 
-Contract: [`docs/phases/phase-07.md`](docs/phases/phase-07.md) · **foundation and models built 2026-09-20,
-services and screens still to come**
+Contract: [`docs/phases/phase-07.md`](docs/phases/phase-07.md) · **built 2026-09-20; the named acceptance
+cases FT-HR-01 … FT-HR-62 and §10's jobs and notifications are still owed**
 
 | | Item |
 |---|---|
@@ -343,10 +343,19 @@ services and screens still to come**
 | [x] | Every guard proved to bite: **19 database assertions** — one attendance row per employee per day (HR-1), one counted leave day per date (HR-8), one open salary version (HR-10), one live regular run per month; a payable factor above 1 refused (HR-4); `paid + unpaid = total`; an advance refusing to be over-recovered (HR-19); an append-only row refusing deletion; and the subtle one — a **draft** run's item deletes while a **locked** run's does not, and a negative net salary is legal only on a correction item (HR-16, HR-17) |
 | [x] | Models: 24, 109 relations, verified against the live schema — no stray cast, no stray fillable, no generated column reachable through mass assignment |
 | [x] | Model invariants proved on **22 assertions**: HR-10 (a version refuses every money edit and every delete), D19 (the three append-only tables allow a short list and nothing else), HR-15 / HR-16 (draft editable, locked frozen, paid allows only notes), HR-19 (a disbursed advance freezes its amount), and the group deciding a salary component's side |
-| [ ] | §4 PermissionRegistry (11 new slugs), §5 the `hr` settings group, §4.3 `modules.depends_on`, §4.4 role grants |
-| [ ] | §6 services: `WorkCalendarService`, `AttendanceService`, `AttendanceCorrectionService`, `AttendanceSummaryService`, `LeaveBalanceService`, `LeaveRequestService`, `SalaryStructureService`, `AdvanceService`, `PayrollCalculator`, `PayrollRunService` |
-| [ ] | §7 routes, §8 screens (including the employee self-service panel), §10 jobs and commands |
-| [ ] | §11 acceptance tests FT-HR-01 … FT-HR-62 |
+| [x] | §4 PermissionRegistry (11 new slugs), §5 the `hr` settings group (43 keys), §4.3 `modules.depends_on` (10 edges), §4.4 role grants. `salary_structures` and `employee_advances` deliberately declare **no `edit` and no `delete`**, so "a rate is never updated" is visible on the role screen rather than buried in a service |
+| [x] | §6.1 support classes: `WorkCalendarService` (the single answer to "what kind of day is this?"), `ShiftWindow` (what an attendance row snapshots, HR-2), `EmployeeScopeResolver` (§9's four answers, with a depth cap of 5 on the reporting tree), `PayslipDraft` / `PayslipLine` / `PayrollPeriod` / `PayrollInputs` |
+| [x] | §6.2 services, all sixteen: `EmployeeService`, `DepartmentService`, `WorkShiftService`, `HolidayService`, `SalaryComponentService`, `AttendanceService`, `AttendanceCorrectionService`, `AttendanceSummaryService`, `LeaveBalanceService`, `LeaveRequestService`, `SalaryStructureService`, `AdvanceService`, `PayrollCalculator`, `PayrollRunService`, `PayslipService`, `HrNumberService` |
+| [x] | §6.3's thirteen resolution steps, §6.4's R1-R5 bridge, §6.5's day expansion and approval chain, §6.6's twelve-step algorithm — the contract's worked example (FT-HR-33) comes out to the paisa: 49,000 / 31 stored as 1,580.65, x 2.5 lost days = 3,951.63, net **38,848.37** |
+| [x] | §6.7 lock and §6.8 correction: there is no unlock route anywhere, a locked slip refuses every money edit at the model, and a correction is a new item on a correction run that never touches the original |
+| [x] | 16 policies in `app/Policies/Hr/`, six sharing one `CataloguePolicy` trait. Missing ability → 403; holding it but not reaching the row → **404** (`denyAsNotFound`), because the ids being probed here are people's salaries |
+| [x] | §7 routes: 86 across the six setup catalogues, employees, attendance, leave, structures, advances, payroll, slips and `/admin/my/*` |
+| [x] | §8 screens: 33 Blade views — the daily register, the monthly grid, the correction queue, the summaries, the leave statement, the salary timeline, the payroll run, the printable slip and the whole employee self-service panel |
+| [x] | Checked in a browser against the dev database with a complete HR month seeded in: three employees, a public holiday, an approved three-day leave, a 20,000 advance, 31 days of attendance, and a payroll run generated, locked and part-paid |
+| [x] | Integration gate `tests/Feature/Hr/HrPayrollTest.php` — **30 tests / 140 assertions**: every screen's permission, the money-withheld rule, 404-not-403, the resolution steps, R1/R2, the ledger identity (HR-7), the worked example, determinism, the lock, the correction, and self-service isolation |
+| [ ] | §11 acceptance suite FT-HR-01 … FT-HR-62 (the named cases, beyond the integration gate above) |
+| [ ] | §10 events, queued jobs, notifications and the scheduler (`hr:close-attendance-day`, leave accrual, the document-expiry reminder) |
+| [ ] | §7.1 employee documents (upload / download / expiry screen), §8.2's 5-step create wizard, §8.21 dashboard widgets, the attendance and employee importers |
 ### [ ] PHASE 8 — Collaborator management (profiles, panel shell, commission settings)
 
 > **Release note** — note: the financial spine's migration set (spine §1.3, 15 tables) is applied in the same release, immediately after Phase 8's own migrations; the spine-dependent screens stay hidden behind their module switches until then, and `collaborators:backfill-wallets` + `collaborators:seed-initial-rules` run once afterwards (phase-08-09 §1.4 [D-P8-1]).
@@ -375,6 +384,52 @@ services and screens still to come**
 ---
 
 ## 6. Change Log
+
+### 2026-09-20 — Phase 7: the sixteen services, the payroll algorithm, and the HR screens
+
+The half of Phase 7 that decides what a day was and what it costs, plus the screens that show it. Built
+directly in the session — no workflow, no background agents.
+
+- **The calendar is asked once.** `WorkCalendarService` is the only answer to "what kind of day is this?",
+  and it is bound **scoped**: a fresh instance per resolve gave each service its own holiday cache, and a
+  holiday edited mid-request was stale in one of them. The test that flips `is_paid` and re-resolves is
+  what caught it.
+- **`AttendanceService::resolve()` is a pure function of the row** (§6.3): thirteen steps in order,
+  stopping at the first that decides. It refuses a locked row (HR-18) and leaves a manual one alone —
+  otherwise the nightly pass would undo every correction at 23:50. The eighteen-hour punch-out guard flags
+  the row **outside** the transaction it refuses in; flagging and throwing together rolled the flag back
+  with the refusal, and the correction queue never saw the day.
+- **Leave days are a ledger with the balance as a cache** (HR-7). Additive columns move with an entry's
+  sign and subtractive ones against it, which makes `available_days` exactly `SUM(signed_days)` — one
+  identity to check instead of eight. `assertConsistent()` runs after every scenario in the tests.
+- **`PayrollCalculator::build()` writes nothing, dispatches nothing and never calls `now()`.** The
+  contract's worked example comes out exactly: 49,000 / 31 = 1,580.645161 stored as **1,580.65**, x 2.5
+  lost days = **3,951.63**, tax 1,200, advance 5,000 inside a 21,924.19 cap, net **38,848.37**. Every step
+  that produces money produces a stored line, so a slip that does not add up is impossible rather than
+  unlikely (HR-13).
+- **One rule corrected along the way.** `Employee::isPayrollEligibleOn()` asked the status alone, so
+  somebody became ineligible the moment HR recorded a resignation and their final month would silently
+  never have been generated — the opposite of §6.10 #2. The exit date decides now, and the status only
+  decides for somebody still employed.
+- **Three bugs the browser found that no probe could.** `EmployeeScopeResolver` applied D11's branch rule
+  to every table, and `attendance_corrections` has no `branch_id`, so the correction queue 500'd for any
+  user pinned to a branch — the resolver checks the column now, once per table per process.
+  `PayrollRun::periodLabel()` read `period_start`, so a screen that selected only the columns it needed
+  printed "2026-08" instead of "August 2026". And `SalaryComponentService` filled `side` through `fill()`,
+  which silently dropped it, because `side` is deliberately outside `$fillable`.
+- **Probed in rolled-back transactions on `my_office_test` before any of it reached a screen**: 323
+  assertions across five probes — the calendar and the thirteen resolution steps, the monthly figures and
+  the correction trail, grants through carry-forward, the whole payroll lifecycle including the
+  negative-net ladder and the rounding line, and the setup services.
+- **Then checked in a browser** against `my_office` with a whole month seeded in, which is how the three
+  bugs above surfaced.
+
+One deliberate addition to the contract: §7.5 describes only employee-scoped salary-structure routes, so a
+sidebar entry had nowhere to point. `admin.salary-structures.index` is a new overview of who is on what,
+and the employee-scoped screens live under `admin.employees.salary-structures.*` exactly as §7.5 has them.
+
+Still owed in Phase 7: the named acceptance cases FT-HR-01 … FT-HR-62, §10's events, jobs, notifications
+and scheduler, employee documents, the importers and the dashboard widgets.
 
 ### 2026-09-20 — Phase 7 foundation: enums, the 24-table HR schema, and the models
 
@@ -943,6 +998,12 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-20 | Phase 7 models | scripted walk against the live schema | PASS — 24 models, 109 relations, no stray cast, no stray fillable, no generated column fillable |
 | 2026-09-20 | Phase 7 model invariants | probe in a rolled-back transaction | PASS — **22/22**: HR-10, D19's three append-only tables, HR-15 / HR-16's two-step payroll freeze, HR-19, and the component group deciding its side. Found 2 real bugs (`getOriginal()` applying casts), both fixed |
 | 2026-09-20 | Phase 7 foundation full suite | `php artisan test` (run by me) | PASS — **1,545 tests / 61,499 assertions**, 1,035 s |
+| 2026-09-20 | Phase 7 attendance and the calendar | probe in a rolled-back transaction | PASS — **66/66**: the thirteen §6.3 steps, the night shift keeping its start row, the exempt employee, the unpaid holiday, half-day leave plus a worked half, the eighteen-hour guard, close-day idempotency, and the shiftless employee judged on hours alone |
+| 2026-09-20 | Phase 7 summaries and corrections | probe in a rolled-back transaction | PASS — **45/45**: R1 and R2 on a full month and on a month with 2.5 lost days, the idempotent rebuild, both correction doors leaving identical evidence, the write whitelist refusing `locked_at`, and a locked summary refusing to be rebuilt |
+| 2026-09-20 | Phase 7 leave | probe in a rolled-back transaction | PASS — **62/62**: grants and accruals idempotent, four calendar days costing three quota days, the HR-8 overlap guard naming the existing request, self-approval refused, reservation → consumption → release, cancellation re-resolving the calendar, carry-forward capped and lapsed, and the balance equal to its ledger at every step |
+| 2026-09-20 | Phase 7 payroll | probe in a rolled-back transaction | PASS — **93/93**: the contract's worked example to the paisa, the version timeline, the recovery cap, the lock freezing slips and attendance, payment posting the advance recovery once, over-recovery refused naming the remainder, corrections positive and negative, the hold with its reason, and the rounding line |
+| 2026-09-20 | Phase 7 setup services | probe in a rolled-back transaction | PASS — **57/57**: derived shift minutes, the single default shift, the employee code issued once, the full exit sequence settling encashable leave, the scope resolver's three modes, a holiday declared late re-resolving an absence, and a component's side overruling a wrong one |
+| 2026-09-20 | Phase 7 integration gate | `php artisan test tests/Feature/Hr` | PASS — **30 tests / 140 assertions**, 57 s |
 
 ---
 

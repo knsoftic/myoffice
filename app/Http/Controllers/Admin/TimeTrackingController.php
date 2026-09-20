@@ -12,8 +12,8 @@ use App\Models\Project\TimeEntry;
 use App\Services\Project\TimeEntryService;
 use App\Services\Project\TimerService;
 use Illuminate\Contracts\View\View;
-use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 

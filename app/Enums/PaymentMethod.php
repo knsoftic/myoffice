@@ -60,7 +60,6 @@ enum PaymentMethod: string
         };
     }
 
-
     /**
      * Did money actually move? An adjustment settles a balance against something else.
      */

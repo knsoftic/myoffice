@@ -8,12 +8,12 @@ use App\Enums\TaskStatus;
 use App\Enums\TimeEntrySource;
 use App\Enums\TimeEntryStatus;
 use App\Enums\TimerStopReason;
+use App\Events\Project\TimeEntryRecorded;
 use App\Events\Project\TimerAutoStopped;
 use App\Events\Project\TimerPaused;
 use App\Events\Project\TimerResumed;
 use App\Events\Project\TimerStarted;
 use App\Events\Project\TimerStopped;
-use App\Events\Project\TimeEntryRecorded;
 use App\Models\Project\Project;
 use App\Models\Project\Task;
 use App\Models\Project\TimeEntry;
@@ -25,6 +25,7 @@ use App\Support\Device;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -235,9 +236,9 @@ final readonly class TimerService
     /**
      * Every live entry for a worker — one running, any number paused (§6.4).
      *
-     * @return \Illuminate\Support\Collection<int, TimeEntry>
+     * @return Collection<int, TimeEntry>
      */
-    public function live(?User $user, ?int $collaboratorId = null): \Illuminate\Support\Collection
+    public function live(?User $user, ?int $collaboratorId = null): Collection
     {
         return TimeEntry::query()
             ->with(['project:id,name,code', 'task:id,title'])

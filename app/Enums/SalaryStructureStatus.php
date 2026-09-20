@@ -45,7 +45,6 @@ enum SalaryStructureStatus: string
         };
     }
 
-
     /**
      * Is this version the one in force, or about to be?
      */

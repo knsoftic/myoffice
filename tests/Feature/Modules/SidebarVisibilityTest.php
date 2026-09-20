@@ -172,6 +172,24 @@ final class SidebarVisibilityTest extends TestCase
                 'Task board',
                 'Tasks',
                 'Time Tracking',
+                // phase-07 §7-§8: HR. `My HR` is deliberately absent — its fourth gate asks whether the
+                // user *is* an employee, and a Super Admin with no employee record is not offered pages
+                // that would answer 404 (§9). `HR Setup` is a parent, like `Projects`.
+                'Employees',
+                'Departments',
+                'Attendance',
+                'Leaves',
+                'Leave Balances',
+                'Payroll',
+                'Salary Slips',
+                'Salary Structures',
+                'Advances',
+                'HR Setup',
+                'Designations',
+                'Work Shifts',
+                'Holidays',
+                'Leave Types',
+                'Salary Components',
                 // phase-03 §7-§8: the nine Website CMS entries whose routes now exist.
                 'Website Overview',
                 'Sections',

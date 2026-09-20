@@ -35,7 +35,6 @@ enum CorrectionSource: string
         };
     }
 
-
     /**
      * Does a correction from this source wait for somebody to approve it?
      */

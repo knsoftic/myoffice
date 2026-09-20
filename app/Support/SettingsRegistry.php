@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Support;
 
-use App\Enums\ProgressBasis;
 use App\Enums\Cms\SitemapChangeFrequency;
+use App\Enums\ProgressBasis;
 use App\Enums\ThemePreference;
 use App\Models\Branch;
 use App\Models\User;

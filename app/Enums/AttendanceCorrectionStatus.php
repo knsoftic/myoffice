@@ -38,7 +38,6 @@ enum AttendanceCorrectionStatus: string
         };
     }
 
-
     public function isTerminal(): bool
     {
         return $this !== self::Pending;

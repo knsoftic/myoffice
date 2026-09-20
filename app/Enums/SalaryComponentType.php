@@ -32,7 +32,6 @@ enum SalaryComponentType: string
         };
     }
 
-
     /**
      * +1 for an earning, -1 for a deduction.
      */

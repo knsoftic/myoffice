@@ -38,7 +38,6 @@ enum LeaveDayPortion: string
         };
     }
 
-
     /**
      * The share of a day this portion consumes, as a decimal string.
      */

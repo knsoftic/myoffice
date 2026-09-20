@@ -49,7 +49,6 @@ enum PayrollRunStatus: string
         };
     }
 
-
     /**
      * Is the money on this run frozen? Locked, and everything after it.
      */

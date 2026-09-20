@@ -4,15 +4,16 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Project;
 
+use App\DataObjects\Crm\ClientData;
 use App\DataObjects\Project\ProjectData;
 use App\DataObjects\Project\TaskData;
 use App\Enums\ProjectStatus;
 use App\Enums\TaskStatus;
 use App\Models\Crm\Client;
 use App\Models\Project\Project;
-use App\Models\Project\ProjectValueRevision;
 use App\Models\Project\Task;
 use App\Models\User;
+use App\Services\Crm\ClientService;
 use App\Services\Project\Exceptions\ImmutableRevisionException;
 use App\Services\Project\Exceptions\ProjectRuleException;
 use App\Services\Project\Exceptions\TimerAlreadyRunningException;
@@ -383,14 +384,14 @@ final class ProjectDeliveryTest extends TestCase
     /**
      * A client login bound to its own client row, with the portal switched on.
      *
-     * @return array{0: User, 1: \App\Models\Crm\Client}
+     * @return array{0: User, 1: Client}
      */
     private function portalClient(string $name = 'Portal Client Ltd'): array
     {
         $user = $this->createUserWithRole('Client', ['must_change_password' => false]);
 
-        $client = app(\App\Services\Crm\ClientService::class)
-            ->create(new \App\DataObjects\Crm\ClientData(name: $name, companyName: $name, email: $user->email));
+        $client = app(ClientService::class)
+            ->create(new ClientData(name: $name, companyName: $name, email: $user->email));
 
         $client->forceFill([
             'user_id' => $user->getKey(),
@@ -416,7 +417,7 @@ final class ProjectDeliveryTest extends TestCase
 
     private function client(): Client
     {
-        return app(\App\Services\Crm\ClientService::class)
-            ->create(new \App\DataObjects\Crm\ClientData(name: 'Delivery Test Client'));
+        return app(ClientService::class)
+            ->create(new ClientData(name: 'Delivery Test Client'));
     }
 }

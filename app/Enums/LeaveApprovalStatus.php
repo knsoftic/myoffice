@@ -42,7 +42,6 @@ enum LeaveApprovalStatus: string
         };
     }
 
-
     public function isDecided(): bool
     {
         return $this !== self::Pending;

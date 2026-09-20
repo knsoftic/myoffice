@@ -71,7 +71,6 @@ enum LeaveLedgerReason: string
         };
     }
 
-
     /**
      * Does this reason need a written note? The three that are a human's decision (HR-20).
      */

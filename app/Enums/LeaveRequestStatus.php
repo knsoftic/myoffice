@@ -43,7 +43,6 @@ enum LeaveRequestStatus: string
         };
     }
 
-
     public function isOpen(): bool
     {
         return $this === self::Pending;

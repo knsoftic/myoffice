@@ -69,7 +69,6 @@ enum EmployeeDocumentType: string
         };
     }
 
-
     /**
      * Does this kind of document normally carry an expiry date the business should be warned about?
      */

@@ -48,7 +48,6 @@ enum EmployeeStatus: string
         };
     }
 
-
     /**
      * May a payroll run produce a slip for this employee? `active` and `probation` only.
      */

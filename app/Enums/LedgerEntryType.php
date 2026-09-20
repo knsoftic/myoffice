@@ -39,7 +39,6 @@ enum LedgerEntryType: string
         };
     }
 
-
     /**
      * +1 for a credit, -1 for a debit — the multiplier behind every `signed_*` generated column.
      */
