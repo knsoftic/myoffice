@@ -2,6 +2,14 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Admin\MilestoneController;
+use App\Http\Controllers\Admin\ProjectController;
+use App\Http\Controllers\Admin\ProjectMemberController;
+use App\Http\Controllers\Admin\TaskBoardController;
+use App\Http\Controllers\Admin\TaskChecklistController;
+use App\Http\Controllers\Admin\TaskController;
+use App\Http\Controllers\Admin\TimeTrackingController;
+use App\Models\Project\Project;
 use App\Enums\Cms\SectionPlacement;
 use App\Enums\LeadStatus;
 use App\Http\Controllers\Admin\ActivityLogController;
@@ -878,5 +886,94 @@ Route::prefix('admin')
             Route::patch('clients/{client}/documents/{document}/visibility', [ClientDocumentController::class, 'visibility'])->whereNumber(['client', 'document'])->middleware('can:changeVisibility,document')->name('clients.documents.visibility');
             Route::delete('clients/{client}/documents/{document}', [ClientDocumentController::class, 'destroy'])->whereNumber(['client', 'document'])->middleware('can:delete,document')->name('clients.documents.destroy');
             Route::get('client-documents/{document}/download', [ClientDocumentController::class, 'download'])->whereNumber('document')->middleware('can:download,document')->name('client-documents.download');
+        });
+
+        /*
+        |------------------------------------------------------------------
+        | phase-06 §7.1 — Projects
+        |------------------------------------------------------------------
+        | `restore` takes a raw id rather than a bound model: the binding would 404 on a trashed row
+        | before the policy could allow it. Ownership failures answer 404, not 403 (INV-P15).
+        */
+        Route::middleware('module:projects')->group(static function (): void {
+            Route::get('projects', [ProjectController::class, 'index'])->middleware('can:viewAny,'.Project::class)->name('projects.index');
+            Route::get('projects/create', [ProjectController::class, 'create'])->middleware('can:projects.create')->name('projects.create');
+            Route::post('projects', [ProjectController::class, 'store'])->middleware('can:projects.create')->name('projects.store');
+            Route::get('projects/{project}', [ProjectController::class, 'show'])->whereNumber('project')->middleware('can:view,project')->name('projects.show');
+            Route::get('projects/{project}/edit', [ProjectController::class, 'edit'])->whereNumber('project')->middleware('can:update,project')->name('projects.edit');
+            Route::put('projects/{project}', [ProjectController::class, 'update'])->whereNumber('project')->middleware('can:update,project')->name('projects.update');
+            Route::delete('projects/{project}', [ProjectController::class, 'destroy'])->whereNumber('project')->middleware('can:delete,project')->name('projects.destroy');
+            Route::post('projects/{project}/restore', [ProjectController::class, 'restore'])->whereNumber('project')->middleware('can:projects.restore')->name('projects.restore');
+            Route::post('projects/{project}/status', [ProjectController::class, 'status'])->whereNumber('project')->middleware('can:projects.change_status')->name('projects.status');
+            Route::post('projects/{project}/progress', [ProjectController::class, 'progress'])->whereNumber('project')->middleware('can:projects.edit')->name('projects.progress');
+            Route::get('projects/{project}/value', [ProjectController::class, 'value'])->whereNumber('project')->middleware('can:viewFinancial,project')->name('projects.value.index');
+            Route::post('projects/{project}/value', [ProjectController::class, 'storeValue'])->whereNumber('project')->middleware('can:revise,project')->name('projects.value.store');
+
+            Route::get('projects/{project}/members', [ProjectMemberController::class, 'index'])->whereNumber('project')->middleware('can:view,project')->name('projects.members.index');
+            Route::post('projects/{project}/members', [ProjectMemberController::class, 'store'])->whereNumber('project')->middleware('can:assign,project')->name('projects.members.store');
+            Route::put('projects/{project}/members/{member}', [ProjectMemberController::class, 'update'])->whereNumber(['project', 'member'])->middleware('can:update,member')->name('projects.members.update');
+            Route::delete('projects/{project}/members/{member}', [ProjectMemberController::class, 'destroy'])->whereNumber(['project', 'member'])->middleware('can:delete,member')->name('projects.members.destroy');
+        });
+
+        /*
+        |------------------------------------------------------------------
+        | phase-06 §7.2 — Milestones
+        |------------------------------------------------------------------
+        | `amount` has no ability of its own: it is money, gated by `projects.view_financial` (§4.2).
+        */
+        Route::middleware('module:project_milestones')->group(static function (): void {
+            Route::get('projects/{project}/milestones', [MilestoneController::class, 'index'])->whereNumber('project')->middleware('can:project_milestones.view_any')->name('milestones.index');
+            Route::post('projects/{project}/milestones', [MilestoneController::class, 'store'])->whereNumber('project')->middleware('can:project_milestones.create')->name('milestones.store');
+            Route::post('projects/{project}/milestones/reorder', [MilestoneController::class, 'reorder'])->whereNumber('project')->middleware('can:project_milestones.edit')->name('milestones.reorder');
+            Route::get('milestones/{milestone}', [MilestoneController::class, 'show'])->whereNumber('milestone')->middleware('can:view,milestone')->name('milestones.show');
+            Route::put('milestones/{milestone}', [MilestoneController::class, 'update'])->whereNumber('milestone')->middleware('can:update,milestone')->name('milestones.update');
+            Route::delete('milestones/{milestone}', [MilestoneController::class, 'destroy'])->whereNumber('milestone')->middleware('can:delete,milestone')->name('milestones.destroy');
+            Route::post('milestones/{milestone}/status', [MilestoneController::class, 'status'])->whereNumber('milestone')->middleware('can:project_milestones.change_status')->name('milestones.status');
+        });
+
+        /*
+        |------------------------------------------------------------------
+        | phase-06 §7.3 — Tasks and the Kanban board
+        |------------------------------------------------------------------
+        | `move` is throttled because it is a drag handler: a stuck pointer should cost one 429, not a
+        | thousand writes. The board lives under `projects` too, so a project page can open its own.
+        */
+        Route::middleware('module:tasks')->group(static function (): void {
+            Route::get('tasks', [TaskController::class, 'index'])->middleware('can:tasks.view_any')->name('tasks.index');
+            Route::get('tasks/board', [TaskBoardController::class, 'index'])->middleware('can:tasks.view_any')->name('tasks.board');
+            Route::get('tasks/my', [TaskController::class, 'mine'])->middleware('can:tasks.view')->name('tasks.my');
+            Route::get('tasks/create', [TaskController::class, 'create'])->middleware('can:tasks.create')->name('tasks.create');
+            Route::post('tasks', [TaskController::class, 'store'])->middleware('can:tasks.create')->name('tasks.store');
+            Route::get('tasks/{task}', [TaskController::class, 'show'])->whereNumber('task')->middleware('can:view,task')->name('tasks.show');
+            Route::put('tasks/{task}', [TaskController::class, 'update'])->whereNumber('task')->middleware('can:update,task')->name('tasks.update');
+            Route::delete('tasks/{task}', [TaskController::class, 'destroy'])->whereNumber('task')->middleware('can:delete,task')->name('tasks.destroy');
+            Route::post('tasks/{task}/restore', [TaskController::class, 'restore'])->whereNumber('task')->middleware('can:tasks.restore')->name('tasks.restore');
+            Route::post('tasks/{task}/status', [TaskController::class, 'status'])->whereNumber('task')->middleware('can:changeStatus,task')->name('tasks.status');
+            Route::post('tasks/{task}/assign', [TaskController::class, 'assign'])->whereNumber('task')->middleware('can:assign,task')->name('tasks.assign');
+            Route::post('tasks/{task}/move', [TaskBoardController::class, 'move'])->whereNumber('task')->middleware(['can:changeStatus,task', 'throttle:120,1'])->name('tasks.move');
+            Route::post('tasks/{task}/subtasks', [TaskController::class, 'storeSubtask'])->whereNumber('task')->middleware('can:tasks.create')->name('tasks.subtasks.store');
+            Route::post('tasks/{task}/checklist', [TaskChecklistController::class, 'store'])->whereNumber('task')->middleware('can:update,task')->name('checklist.store');
+            Route::put('checklist-items/{item}', [TaskChecklistController::class, 'update'])->whereNumber('item')->middleware('can:update,item')->name('checklist.update');
+            Route::delete('checklist-items/{item}', [TaskChecklistController::class, 'destroy'])->whereNumber('item')->middleware('can:delete,item')->name('checklist.destroy');
+
+            Route::get('projects/{project}/board', [TaskBoardController::class, 'forProject'])->whereNumber('project')->middleware('can:tasks.view_any')->name('projects.board');
+        });
+
+        /*
+        |------------------------------------------------------------------
+        | phase-06 §7.5 — Time tracking
+        |------------------------------------------------------------------
+        | Starting, pausing, resuming and stopping are `create`: the worker is logging their own time.
+        | Editing somebody else's entry needs `edit` plus `view_any`, which the policy asks for.
+        */
+        Route::middleware('module:time_tracking')->group(static function (): void {
+            Route::get('time', [TimeTrackingController::class, 'index'])->middleware('can:time_tracking.view')->name('time.index');
+            Route::post('time', [TimeTrackingController::class, 'store'])->middleware('can:time_tracking.create')->name('time.store');
+            Route::put('time/{entry}', [TimeTrackingController::class, 'update'])->whereNumber('entry')->middleware('can:update,entry')->name('time.update');
+            Route::delete('time/{entry}', [TimeTrackingController::class, 'destroy'])->whereNumber('entry')->middleware('can:delete,entry')->name('time.destroy');
+            Route::post('timer/start', [TimeTrackingController::class, 'start'])->middleware('can:time_tracking.create')->name('timer.start');
+            Route::post('timer/{entry}/pause', [TimeTrackingController::class, 'pause'])->whereNumber('entry')->middleware('can:runTimer,entry')->name('timer.pause');
+            Route::post('timer/{entry}/resume', [TimeTrackingController::class, 'resume'])->whereNumber('entry')->middleware('can:runTimer,entry')->name('timer.resume');
+            Route::post('timer/{entry}/stop', [TimeTrackingController::class, 'stop'])->whereNumber('entry')->middleware('can:runTimer,entry')->name('timer.stop');
         });
     });

@@ -4,6 +4,24 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Models\Project\Attachment;
+use App\Models\Project\Project;
+use App\Models\Project\ProjectMember;
+use App\Models\Project\ProjectMilestone;
+use App\Models\Project\ProjectValueRevision;
+use App\Models\Project\Task;
+use App\Models\Project\TaskChecklistItem;
+use App\Models\Project\TaskComment;
+use App\Models\Project\TimeEntry;
+use App\Policies\Project\AttachmentPolicy;
+use App\Policies\Project\ProjectMemberPolicy;
+use App\Policies\Project\ProjectMilestonePolicy;
+use App\Policies\Project\ProjectPolicy;
+use App\Policies\Project\ProjectValueRevisionPolicy;
+use App\Policies\Project\TaskChecklistItemPolicy;
+use App\Policies\Project\TaskCommentPolicy;
+use App\Policies\Project\TaskPolicy;
+use App\Policies\Project\TimeEntryPolicy;
 use App\Dashboard\Cms\BlogActivityWidget;
 use App\Dashboard\Cms\InquiryRoutingBacklogWidget;
 use App\Dashboard\Cms\NewApplicationsWidget;
@@ -181,6 +199,17 @@ class AppServiceProvider extends ServiceProvider
         Client::class => ClientPolicy::class,
         ClientContact::class => ClientContactPolicy::class,
         ClientDocument::class => ClientDocumentPolicy::class,
+        // phase-06 §6.1: one policy per Project model. ProjectValueRevision has view methods only —
+        // there is no update or delete ability to grant on an append-only table (INV-P3).
+        Project::class => ProjectPolicy::class,
+        ProjectMilestone::class => ProjectMilestonePolicy::class,
+        ProjectMember::class => ProjectMemberPolicy::class,
+        ProjectValueRevision::class => ProjectValueRevisionPolicy::class,
+        Task::class => TaskPolicy::class,
+        TaskChecklistItem::class => TaskChecklistItemPolicy::class,
+        TaskComment::class => TaskCommentPolicy::class,
+        Attachment::class => AttachmentPolicy::class,
+        TimeEntry::class => TimeEntryPolicy::class,
     ];
 
     /**

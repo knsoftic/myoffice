@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models\Project;
 
 use App\Enums\Priority;
+use App\Enums\ProjectMemberRole;
 use App\Enums\TaskStatus;
 use App\Models\Concerns\Blameable;
 use App\Models\Concerns\LogsActivityWithContext;
@@ -240,6 +241,37 @@ class Task extends Model
     public function scopeVisibleToClient(Builder $query): Builder
     {
         return $query->where($query->qualifyColumn('is_client_visible'), true);
+    }
+
+    /**
+     * The single definition of "this user may see this task" (§9).
+     *
+     * Always inside the projects they can see. `tasks.view_any` stops there; without it the set narrows to
+     * the tasks they are assigned, the ones they reported, and everything inside a project where their
+     * membership role can manage — a lead needs the whole board, a developer needs their own cards.
+     */
+    public function scopeVisibleTo(Builder $query, ?User $user): Builder
+    {
+        if ($user === null) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        $query->whereIn('tasks.project_id', Project::query()->visibleTo($user)->select('projects.id'));
+
+        if ($user->can('tasks.view_any')) {
+            return $query;
+        }
+
+        return $query->where(function (Builder $scoped) use ($user): void {
+            $scoped
+                ->where('tasks.assigned_user_id', $user->getKey())
+                ->orWhere('tasks.reporter_id', $user->getKey())
+                ->orWhereIn('tasks.project_id', ProjectMember::query()
+                    ->whereNull('deleted_at')
+                    ->where('user_id', $user->getKey())
+                    ->whereIn('role', [ProjectMemberRole::Manager->value, ProjectMemberRole::Lead->value])
+                    ->select('project_id'));
+        });
     }
 
     /*

@@ -18,6 +18,7 @@ use App\Models\Crm\Concerns\RelatesToLaterPhases;
 use App\Models\Crm\Lead;
 use App\Models\Project\Concerns\GuardsServiceOwnedColumns;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -255,6 +256,38 @@ class Project extends Model
     public function getReferenceAttribute(): string
     {
         return (string) $this->code;
+    }
+
+    /**
+     * The single definition of "this user may see this project" (§9).
+     *
+     * `projects.view_any` lifts every restriction. Without it a user reaches a project three ways — they
+     * manage it, they are an active member of it, or they are assigned a task inside it. That last clause
+     * is what keeps a developer's own board working without giving them the project list.
+     *
+     * Deliberately **not** in this scope: `projects.collaborator_id`. It is a display snapshot written by
+     * one listener and read by no scope and no engine (R5, D37, F-8.2) — a stale or hand-edited value must
+     * never be able to hand another partner's project, client name or contract value to the wrong
+     * collaborator.
+     */
+    public function scopeVisibleTo(Builder $query, ?User $user): Builder
+    {
+        if ($user === null) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        if ($user->can('projects.view_any')) {
+            return $query;
+        }
+
+        return $query->where(function (Builder $scoped) use ($user): void {
+            $scoped
+                ->where('projects.project_manager_id', $user->getKey())
+                ->orWhereHas('members', fn (Builder $member) => $member
+                    ->where('user_id', $user->getKey())
+                    ->whereNull('deleted_at'))
+                ->orWhereHas('tasks', fn (Builder $task) => $task->where('assigned_user_id', $user->getKey()));
+        });
     }
 
     /*
