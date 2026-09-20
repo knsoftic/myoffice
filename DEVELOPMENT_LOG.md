@@ -429,6 +429,18 @@ Contract: [`docs/phases/phase-10-12.md`](docs/phases/phase-10-12.md) over
 | [x] | §11 the acceptance suite so far: `tests/Feature/Financial` — **48 tests / 300 assertions**. FT-01 … FT-05 of §120, the §11.2 money and rounding cases, the §11.3 rule and attribution cases, §11.4's wiring and immutability, and §11.6's authorization. Every money test ends with `assertWalletMatchesLedger()` |
 | [ ] | §11's remaining rows: the concurrency cases (two workers, two payouts), the discount-supersede cases (need Phase 18's `StudentFeeService::addDiscount()`), and everything project-side or payout-side — Phase 11 and Phase 12 |
 ### [ ] PHASE 11 — Project referral commission engine (`ProjectCommissionService`)
+
+Contract: [`docs/phases/phase-10-12.md`](docs/phases/phase-10-12.md) · **engine built 2026-09-20; the
+register and the widgets still to come**
+
+| | Item |
+|---|---|
+| [x] | `ProjectCommissionService` — the **same** G0-G11 / C1-C8 sequence as the student side, through the shared `RunsCommissionGuards`. Four things differ and they are the four it supplies: the attribution is on the **project** (a client referral deliberately does not earn on every project that client later commissions), the per-project override of §45, G10's milestone guard, and the two extra base modes |
+| [x] | `PaymentService::recordProjectPayment()` on the **same class** as the student side — a refund, a void and an approval are the same act whichever table the money came from. `is_advance` is derived from the absence of an invoice, and `client_id` is denormalised from the project rather than taken from the form |
+| [x] | `ProjectPaymentRecorded` + `QueueProjectPaymentCommission` + `ProcessProjectPaymentCommission`, identical queue contract to the student job |
+| [x] | §11.1 FT-06 … FT-08 and §120.6 / §120.7: **10 tests**. 15% of 100,000 = 15,000.00; a `total_value` base on a 200,000 project promises 30,000.00 and releases 15,000.00 twice and **no more**; a refund preserves the original; a project override beats the partner's rate; a disabled partner rule beats the override |
+| [ ] | §7.2 / §8.2's project variant — the project payments register and the payment-trail tab |
+| [ ] | The project commission widgets (§8.12) |
 ### [ ] PHASE 12 — Collaborator wallet, commission ledger, payouts, statements
 ### [ ] PHASE 13 — Software-house finance: invoices, payments, expenses, income
 ### [ ] PHASE 14 — Institute: course categories, courses, outline (modules / topics / lectures)
@@ -1546,6 +1558,7 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-20 | Phase 10 §11 acceptance | `tests/Feature/Financial` | PASS — **37 tests / 237 assertions**. The static scan FT-IMP-01 fired on six legitimate `Money::percentage()` calls in payroll, attendance and project progress, so it now scans for commission arithmetic specifically rather than for the general money helper |
 | 2026-09-20 | Phase 10 §7.1 / §8.2 screens | rendered through the HTTP kernel, then `tests/Feature/Financial/FeePaymentScreenTest` | PASS — 4/4 at 200; **11 tests / 63 assertions**. A double submit takes the money once, a submission with no idempotency key is refused and writes nothing, the preview writes nothing and matches the receipt, a refund needs `payment_reversals.create` rather than the receipt's own permission, and no edit or destroy route exists |
 | 2026-09-20 | Phase 10 sidebar placement | `tests/Feature/Modules` | PASS — 94 tests. The Fee Receipts entry was first put in the Collaborator group; `student_fee_payments` is an **Institute** module, so it moved beside the charges it pays off. Its parent "Fees" node appears with it, because a group renders once it has a visible child |
+| 2026-09-20 | Phase 11 project engine | `tests/Feature/Financial/ProjectCommissionEngineTest` | PASS — **10 tests**, and the whole financial suite at **58 / 358**. Found that the per-project override was gated on `projects.collaborator_id`, a display snapshot the engine is explicitly never supposed to read — a project whose snapshot was unset fell silently back to the partner's ordinary rate |
 
 ---
 

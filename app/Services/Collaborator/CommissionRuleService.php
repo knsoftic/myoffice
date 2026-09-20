@@ -315,17 +315,17 @@ final class CommissionRuleService
     /**
      * The per-project override (§45): the project row carries the rate, and `rule_source` says so.
      *
-     * It applies only to the collaborator the project is actually attributed to — a project override is
-     * a statement about *this* engagement, and reading it for a different partner would pay somebody
-     * else's rate.
+     * **It is a statement about the engagement, not about a partner**, so it applies to whoever the
+     * attribution resolves to. It deliberately does **not** check `projects.collaborator_id`: that
+     * column is a display snapshot, the same as `student_fees.collaborator_id`, and the spine is
+     * explicit that the engine never reads it — it resolves the referral effective on the payment
+     * date instead. Gating the override on a denormalised column would mean a project whose snapshot
+     * was never filled in silently fell back to the partner's ordinary rate, which is the quietest
+     * possible way to pay the wrong number.
      */
     private function projectOverride(?Project $project, Collaborator $collaborator): ?RuleResolution
     {
         if ($project === null || $project->commission_type === null) {
-            return null;
-        }
-
-        if ((int) $project->collaborator_id !== (int) $collaborator->getKey()) {
             return null;
         }
 

@@ -24,6 +24,7 @@ use App\Enums\StudentFeeType;
 use App\Events\Finance\PaymentReversalApproved;
 use App\Events\Finance\PaymentReversalRecorded;
 use App\Events\Finance\PaymentReversalRejected;
+use App\Events\Finance\ProjectPaymentRecorded;
 use App\Events\Finance\StudentFeePaymentRecorded;
 use App\Models\Collaborator\Collaborator;
 use App\Models\Collaborator\CollaboratorCommissionEntitlement;
@@ -32,6 +33,8 @@ use App\Models\Finance\ProjectPayment;
 use App\Models\Institute\StudentFee;
 use App\Models\Institute\StudentFeeInstallment;
 use App\Models\Institute\StudentFeePayment;
+use App\Models\Project\Project;
+use App\Models\Project\ProjectMilestone;
 use App\Models\User;
 use App\Services\Collaborator\CommissionBaseResolver;
 use App\Services\Collaborator\CommissionCalculator;
@@ -179,6 +182,131 @@ final class PaymentService
 
             return $payment;
         }, 3);
+    }
+
+    /**
+     * Record one client payment against a project (phase-11).
+     *
+     * The same shape as the student side, and deliberately the same method on the same class: a
+     * refund, a void and an approval are the same act whichever table the money came from, and
+     * splitting the two sides across two services would mean two implementations of "recompute under
+     * the row lock and snapshot the attribution" that agree only until somebody edits one.
+     *
+     * `is_advance` is derived, not asked for: a payment with no invoice behind it **is** an advance,
+     * and a boolean somebody ticks is a boolean somebody eventually forgets to tick.
+     */
+    public function recordProjectPayment(Project $project, RecordPaymentData $data): PaymentResult
+    {
+        $key = $data->key();
+        $existing = ProjectPayment::query()->where('idempotency_key', $key)->first();
+
+        if ($existing !== null) {
+            return new PaymentResult($existing, false);
+        }
+
+        try {
+            $payment = $this->insertProjectPayment($project, $data, $key);
+        } catch (UniqueConstraintViolationException) {
+            $winner = ProjectPayment::query()->where('idempotency_key', $key)->first();
+
+            if ($winner === null) {
+                throw PaymentRuleException::refuse('amount',
+                    'This payment collided on a unique column - a payment number or a gateway '
+                    .'transaction id already in use. Nothing was written.');
+            }
+
+            return new PaymentResult($winner, false);
+        }
+
+        ProjectPaymentRecorded::dispatch($payment);
+
+        return new PaymentResult($payment, true);
+    }
+
+    private function insertProjectPayment(Project $project, RecordPaymentData $data, string $key): ProjectPayment
+    {
+        return $this->db->transaction(function () use ($project, $data, $key): ProjectPayment {
+            /** @var Project $locked */
+            $locked = Project::query()->whereKey($project->getKey())->lockForUpdate()->firstOrFail();
+
+            $paidOn = $this->assertValueDate($data->paidOn, 'project_payments.approve');
+            $amount = $data->amount();
+            $milestoneId = $this->assertMilestoneBelongsToProject($locked, $data->milestoneId);
+
+            $referral = $this->referrals->effectiveOnSubject(
+                ReferralSubject::Project,
+                (int) $locked->getKey(),
+                $paidOn,
+            );
+
+            return ProjectPayment::allowDirectWrites(function () use (
+                $locked, $data, $key, $amount, $paidOn, $milestoneId, $referral
+            ): ProjectPayment {
+                $row = new ProjectPayment;
+
+                $row->forceFill([
+                    'payment_no' => $this->numbers->next('finance.project_payment_prefix', 'finance.project_payment_next_number', '%06d'),
+                    'idempotency_key' => $key,
+                    'duplicate_fingerprint' => sha1(implode('|', [
+                        (string) $locked->getKey(),
+                        (string) ($milestoneId ?? ''),
+                        $amount,
+                        $paidOn->toDateString(),
+                        $data->method->value,
+                        (string) ($data->referenceNo ?? ''),
+                    ])),
+                    'project_id' => $locked->getKey(),
+                    // Denormalised from the project rather than taken from the form: a client id a
+                    // caller supplies is a client id a caller can get wrong, and every panel query
+                    // scopes on this column.
+                    'client_id' => $locked->client_id,
+                    'project_milestone_id' => $milestoneId,
+                    'invoice_id' => $data->invoiceId,
+                    'amount' => $amount,
+                    'is_advance' => $data->invoiceId === null,
+                    'payment_method' => $data->method->value,
+                    'payment_method_id' => $data->paymentMethodId,
+                    'reference_no' => $data->referenceNo,
+                    'gateway_txn_id' => $data->gatewayTxnId,
+                    'paid_on' => $paidOn->toDateString(),
+                    'recorded_at' => now(),
+                    'status' => ReceivedPaymentStatus::Cleared->value,
+                    'collaborator_id' => $referral?->collaborator_id,
+                    'collaborator_referral_id' => $referral?->getKey(),
+                    'commission_state' => CommissionProcessingState::Queued->value,
+                    'received_by' => $data->receivedBy ?? auth()->id(),
+                    'received_by_name' => $data->receivedByName ?? auth()->user()?->name,
+                    'notes' => $data->notes === null ? null : mb_substr($data->notes, 0, 255),
+                ])->save();
+
+                return $row->refresh();
+            });
+        }, 3);
+    }
+
+    /**
+     * A milestone belongs to the project being paid, or the payment is refused.
+     *
+     * Allocating a payment to another project's milestone would make both projects wrong - one shows
+     * money it never received, the other a milestone settled by somebody else's client.
+     */
+    private function assertMilestoneBelongsToProject(Project $project, ?int $milestoneId): ?int
+    {
+        if ($milestoneId === null) {
+            return null;
+        }
+
+        $belongs = ProjectMilestone::query()
+            ->whereKey($milestoneId)
+            ->where('project_id', $project->getKey())
+            ->exists();
+
+        if (! $belongs) {
+            throw PaymentRuleException::refuse('project_milestone_id',
+                'That milestone belongs to a different project.');
+        }
+
+        return $milestoneId;
     }
 
     /*
