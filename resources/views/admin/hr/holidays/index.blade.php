@@ -44,7 +44,7 @@
                         <tr>
                             <td class="px-4 py-3 tabular-nums text-slate-600 dark:text-slate-300">
                                 <span class="block">{{ app_date($holiday->holiday_date) }}</span>
-                                <span class="block text-xs text-slate-500 dark:text-slate-400">{{ $holiday->holiday_date->format('l') }}</span>
+                                <span class="block text-xs text-slate-500 dark:text-slate-400">{{ app_date($holiday->holiday_date, 'l') }}</span>
                             </td>
                             <td class="px-4 py-3">
                                 <span class="block font-medium text-slate-900 dark:text-white">{{ $holiday->title }}</span>

@@ -10,10 +10,10 @@
 @endphp
 
 @section('header')
-    <x-ui.page-header title="Monthly attendance" :subtitle="$month->format('F Y')" icon="table-cells">
+    <x-ui.page-header title="Monthly attendance" :subtitle="app_date($month, 'F Y')" icon="table-cells">
         <x-slot:actions>
             <x-ui.button variant="secondary" :href="route('admin.attendance.index', ['date' => $month->toDateString()])" icon="calendar-days">Daily register</x-ui.button>
-            <x-ui.button variant="secondary" :href="route('admin.attendance-summaries.index', ['month' => $month->format('Y-m')])" icon="chart-bar">Summaries</x-ui.button>
+            <x-ui.button variant="secondary" :href="route('admin.attendance-summaries.index', ['month' => app_date($month, 'Y-m')])" icon="chart-bar">Summaries</x-ui.button>
         </x-slot:actions>
     </x-ui.page-header>
 @endsection
@@ -22,7 +22,7 @@
     <x-ui.card class="mb-4">
         <form method="GET" class="flex flex-wrap items-end gap-3">
             <div class="w-44">
-                <x-ui.form.input type="month" name="month" label="Month" :value="$month->format('Y-m')" />
+                <x-ui.form.input type="month" name="month" label="Month" :value="app_date($month, 'Y-m')" />
             </div>
             <div class="w-56">
                 <x-ui.form.select name="department_id" label="Department" placeholder="Every department">

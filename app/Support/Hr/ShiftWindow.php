@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Support\Hr;
 
 use App\Models\Hr\WorkShift;
+use App\Support\Format;
 use Illuminate\Support\Carbon;
 
 /**
@@ -39,15 +40,28 @@ final readonly class ShiftWindow
      *
      * A shift that ends at or before it starts runs through midnight, so its end belongs to the **next**
      * day — which is why a 02:00 punch-out is this row's check-out and never a row of its own (§6.3).
+     *
+     * **The shift's times are business wall clock; the window is an instant** (D61). `work_shifts`
+     * stores "09:00" meaning nine in the morning where the business is, and every stamp in this system
+     * is stored UTC. Building the window on a UTC clock and then comparing it against a punch taken with
+     * `now()` made everybody five hours late in Karachi — so the window is built in
+     * {@see Format::timezone()} and converted, and the two sides of the comparison finally mean the same
+     * thing.
      */
     public static function fromShift(WorkShift $shift, Carbon $date): self
     {
-        $in = $date->copy()->startOfDay()->setTimeFromTimeString((string) $shift->start_time);
-        $out = $date->copy()->startOfDay()->setTimeFromTimeString((string) $shift->end_time);
+        $businessDay = Carbon::parse($date->toDateString().' 00:00:00', Format::timezone());
+
+        $in = $businessDay->copy()->setTimeFromTimeString((string) $shift->start_time);
+        $out = $businessDay->copy()->setTimeFromTimeString((string) $shift->end_time);
 
         if ($out->lessThanOrEqualTo($in)) {
             $out->addDay();
         }
+
+        // Stored and compared as instants, like every other stamp (D61).
+        $in = $in->utc();
+        $out = $out->utc();
 
         return new self(
             workShiftId: (int) $shift->getKey(),

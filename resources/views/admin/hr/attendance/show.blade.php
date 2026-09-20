@@ -9,8 +9,8 @@
 
 @section('header')
     <x-ui.page-header
-        :title="$attendance->employee?->name . ' — ' . $attendance->attendance_date->format('j F Y')"
-        :subtitle="$attendance->attendance_date->format('l') . ' · ' . $attendance->day_type->label()"
+        :title="$attendance->employee?->name . ' — ' . app_date($attendance->attendance_date, 'j F Y')"
+        :subtitle="app_date($attendance->attendance_date, 'l') . ' · ' . $attendance->day_type->label()"
         icon="clock">
         <x-slot:actions>
             <x-ui.button variant="secondary" :href="route('admin.attendance.index', ['date' => $attendance->attendance_date->toDateString()])">Back to the register</x-ui.button>
@@ -47,11 +47,11 @@
                     </div>
                     <div>
                         <dt class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Checked in</dt>
-                        <dd class="mt-1 text-sm tabular-nums text-slate-900 dark:text-white">{{ $attendance->check_in_at?->format('H:i') ?? '—' }}</dd>
+                        <dd class="mt-1 text-sm tabular-nums text-slate-900 dark:text-white">{{ $attendance->check_in_at ? app_time($attendance->check_in_at, 'H:i') : '—' }}</dd>
                     </div>
                     <div>
                         <dt class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Checked out</dt>
-                        <dd class="mt-1 text-sm tabular-nums text-slate-900 dark:text-white">{{ $attendance->check_out_at?->format('H:i') ?? '—' }}</dd>
+                        <dd class="mt-1 text-sm tabular-nums text-slate-900 dark:text-white">{{ $attendance->check_out_at ? app_time($attendance->check_out_at, 'H:i') : '—' }}</dd>
                     </div>
                     <div>
                         <dt class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Worked</dt>
@@ -88,11 +88,11 @@
                     </div>
                     <div>
                         <dt class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Expected in</dt>
-                        <dd class="mt-1 text-sm tabular-nums text-slate-900 dark:text-white">{{ $attendance->expected_in_at?->format('H:i') ?? '—' }}</dd>
+                        <dd class="mt-1 text-sm tabular-nums text-slate-900 dark:text-white">{{ $attendance->expected_in_at ? app_time($attendance->expected_in_at, 'H:i') : '—' }}</dd>
                     </div>
                     <div>
                         <dt class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Expected out</dt>
-                        <dd class="mt-1 text-sm tabular-nums text-slate-900 dark:text-white">{{ $attendance->expected_out_at?->format('H:i') ?? '—' }}</dd>
+                        <dd class="mt-1 text-sm tabular-nums text-slate-900 dark:text-white">{{ $attendance->expected_out_at ? app_time($attendance->expected_out_at, 'H:i') : '—' }}</dd>
                     </div>
                     <div>
                         <dt class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Grace in / out</dt>
@@ -157,9 +157,9 @@
                         @csrf
                         <x-ui.form.select name="correction_type" label="What kind of correction" :options="$correctionTypes" selected="wrong_time" required />
                         <x-ui.form.input type="datetime-local" name="check_in_at" label="Check-in"
-                            :value="$attendance->check_in_at?->format('Y-m-d\TH:i')" />
+                            :value="$attendance->check_in_at ? app_datetime($attendance->check_in_at, 'Y-m-d\TH:i') : null" />
                         <x-ui.form.input type="datetime-local" name="check_out_at" label="Check-out"
-                            :value="$attendance->check_out_at?->format('Y-m-d\TH:i')" />
+                            :value="$attendance->check_out_at ? app_datetime($attendance->check_out_at, 'Y-m-d\TH:i') : null" />
                         <x-ui.form.select name="status" label="Status" :options="$statuses" :selected="$attendance->status->value" />
                         <x-ui.form.input type="number" step="0.0001" min="0" max="1" name="payable_factor" label="Payable share"
                             :value="(string) $attendance->payable_factor" />

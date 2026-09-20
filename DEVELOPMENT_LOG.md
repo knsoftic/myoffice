@@ -181,6 +181,7 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D66 | **A milestone on hold can be resumed.** phase-06 §2.13.2 lists `pending` / `in_progress` -> `on_hold` but no row back out except `cancelled`. `MilestoneStatus::allowedTransitions()` adds `on_hold` -> `pending` / `in_progress`, and `MilestoneService` checks the held-from stamp on top. | Taken literally the table traps a held milestone forever — the only way out would be to cancel it, which is a different business fact. The project lifecycle §2.13.1 has exactly the missing row ("`on_hold` -> the status it was held from"), so the omission reads as an editing slip rather than a rule. |
 | D67 | **The clock columns `time_entries.started_at` / `ended_at` and `time_entry_segments.started_at` / `ended_at` are `DATETIME`, not the `TIMESTAMP` phase-06 §2.10-§2.11 names.** Every other Phase 6 stamp stays `TIMESTAMP`. | This server runs `explicit_defaults_for_timestamp = OFF`, where the first `TIMESTAMP NOT NULL` column in a table silently acquires `DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP` — verified on `my_office_test` before the migrations were written. On an append-only clock record that would rewrite `started_at` on any UPDATE and change `duration_seconds` underneath every SUM already taken, breaking INV-P5 silently. `DATETIME` carries no such rule, and with the session timezone pinned to `+00:00` (D61) the two types store the same UTC instant. The other stamps are all nullable, which never triggers the rule. |
 | D68 | **The three Phase 7 date guards use `CAST(date AS CHAR)`, not the `DATE_FORMAT(col, '%Y-%m-%d')` phase-07 §2.8 / §2.9 / §2.16 spell them with.** | MariaDB refuses `DATE_FORMAT()` inside a generated column outright — `1901 Function or expression 'date_format()' cannot be used in the GENERATED ALWAYS AS clause` — because it classes it as locale-dependent. Casting a DATE to CHAR is deterministic, is accepted, and produces the identical `YYYY-MM-DD` string; both forms were run side by side on this server before the change was made. Without a working guard, `uq_hol_guard`, `uq_att_day` and `uq_lrd_day` could not exist, and HR-1 and HR-8 would be service conventions rather than database facts. |
+| D69 | **A work shift's `start_time` / `end_time` are business wall clock; the window built from them is a UTC instant.** `ShiftWindow::fromShift()` builds the day in `Format::timezone()` and then calls `->utc()`, and `AttendanceService` files a punch under the business calendar date rather than the UTC one. | D61 stores every stamp UTC and displays it in `localization.timezone`, but `work_shifts` holds a **local** clock — "09:00" means nine in the morning in Karachi. The window was being built on a UTC clock and then compared against a punch taken with `now()`, so in Asia/Karachi every arrival was five hours late, every day was an early leave, and the register printed 14:02 for a 09:02 punch. Found by opening the attendance register in a browser after the `->format()` calls in the Blade views were replaced with `app_time()`; no unit probe had caught it, because every probe built its expectation the same wrong way. |
 
 ---
 
@@ -384,6 +385,45 @@ cases FT-HR-01 … FT-HR-62 and §10's jobs and notifications are still owed**
 ---
 
 ## 6. Change Log
+
+### 2026-09-20 — Phase 7 follow-up: the display formats, and the five-hour attendance bug behind them
+
+**Every `->format()` in the Phase 7 views is gone.** `NoHardcodedFormatsTest` found 33 of them across
+14 Blade files — dates, times and month labels printed with a hardcoded pattern instead of through
+`app_date()` / `app_time()` / `app_datetime()`, which is the only path that honours the
+`localization.*` settings. All 33 are now helper calls; the helpers take an explicit pattern, so
+`app_date($d, 'l')` and `app_time($t, 'H:i')` keep the places that genuinely wanted a fixed shape.
+
+**That fix exposed a real defect (D69).** With the times finally routed through `Format`, the
+attendance register printed **14:02 – 22:10** for a punch at nine in the morning, and marked everybody
+late. The cause was not the formatter:
+
+- `work_shifts.start_time` is **business wall clock** — "09:00" means nine o'clock where the business is.
+- `ShiftWindow::fromShift()` built the window by stamping that time onto the date **on a UTC clock**.
+- The punch itself comes from `now()`, a genuine UTC instant.
+
+So the two sides of every comparison meant different things, and in Asia/Karachi (UTC+5) that is a
+five-hour error in one direction: every arrival late, every departure early. `fromShift()` now builds
+the day in `Format::timezone()` and converts with `->utc()`, and `AttendanceService::businessDate()`
+files a row under the business calendar date rather than the UTC one — so a 01:00 punch in Karachi is
+still yesterday's night shift, not a row of its own.
+
+**A test that pins it.** `a_shift_window_is_business_time_and_a_punch_is_measured_against_it` builds
+09:00 business time, punches it, and asserts `late_minutes === 0` and that the register reads `09:00`;
+a second punch at 09:45 asserts 30 late minutes (45 less the 15-minute grace) and `AttendanceStatus::Late`.
+The old code passes none of it.
+
+**Verified in the browser, not only in the suite.** The dev month was re-seeded with punches built the
+way a real kiosk in Karachi produces them, and `/admin/attendance?date=2026-08-05` now reads
+`09:40 – 17:10 · 25m late` for the one late employee and `09:02 – 17:10 · Present` for the other two.
+
+**The browser check has now earned its place three times** in this phase: the correction queue's
+`Unknown column 'branch_id'` 500, `periodLabel()` printing `2026-08` from a column that narrowed selects
+never loaded, and this. None of the three was visible to a service-level probe.
+
+**Suite:** 1,577 tests / 64,965 assertions green (run in two slices for live progress —
+1,121 / 39,744 and 456 / 25,221).
+
 
 ### 2026-09-20 — Phase 7: the sixteen services, the payroll algorithm, and the HR screens
 
@@ -1004,6 +1044,10 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-20 | Phase 7 payroll | probe in a rolled-back transaction | PASS — **93/93**: the contract's worked example to the paisa, the version timeline, the recovery cap, the lock freezing slips and attendance, payment posting the advance recovery once, over-recovery refused naming the remainder, corrections positive and negative, the hold with its reason, and the rounding line |
 | 2026-09-20 | Phase 7 setup services | probe in a rolled-back transaction | PASS — **57/57**: derived shift minutes, the single default shift, the employee code issued once, the full exit sequence settling encashable leave, the scope resolver's three modes, a holiday declared late re-resolving an absence, and a component's side overruling a wrong one |
 | 2026-09-20 | Phase 7 integration gate | `php artisan test tests/Feature/Hr` | PASS — **30 tests / 140 assertions**, 57 s |
+| 2026-09-20 | Phase 7 display formats | `tests/Feature/Views/NoHardcodedFormatsTest` | PASS — 33 hardcoded `->format()` calls across 14 HR Blade files replaced with `app_date()` / `app_time()` / `app_datetime()`; `tests/Feature/Views` **29 tests** green |
+| 2026-09-20 | Phase 7 shift window is business time (D69) | `tests/Feature/Hr` after the fix | PASS — **31 tests**; the new case asserts a 09:00 business punch is 0 late minutes and renders `09:00`, and a 09:45 punch is 30 late minutes and `Late` |
+| 2026-09-20 | Phase 7 attendance register, in a browser | dev month re-seeded, `/admin/attendance?date=2026-08-05` read in the browser | PASS — `09:40 – 17:10 · 25m · Late` for the late employee and `09:02 – 17:10 · Present` for the other two; before the fix the same rows read `14:40 – 22:10` and marked everybody late |
+| 2026-09-20 | Full suite after the format + timezone fixes | `./vendor/bin/phpunit` in two slices (live progress) | PASS — **1,577 tests / 64,965 assertions**: 1,121 / 39,744 in 7 m 41 s and 456 / 25,221 in 16 m 42 s |
 
 ---
 

@@ -45,6 +45,7 @@ use App\Services\Hr\PayrollCalculator;
 use App\Services\Hr\PayrollRunService;
 use App\Services\Hr\SalaryStructureService;
 use App\Services\Hr\WorkCalendarService;
+use App\Support\Format;
 use App\Support\Hr\PayrollInputs;
 use App\Support\Hr\PayrollPeriod;
 use App\Support\Hr\PayslipLine;
@@ -196,6 +197,39 @@ final class HrPayrollTest extends TestCase
         $this->assertSame($first->getKey(), $second->getKey(), 'A second punch is the same row (HR-1).');
         $this->assertSame('2026-03-02 09:05:00', $second->check_in_at->toDateTimeString());
         $this->assertSame(1, Attendance::query()->where('employee_id', $employee->getKey())->count());
+    }
+
+    #[Test]
+    public function a_shift_window_is_business_time_and_a_punch_is_measured_against_it(): void
+    {
+        $this->actingAs($this->createSuperAdmin());
+        $employee = $this->employee('Nine To Five');
+        $service = app(AttendanceService::class);
+
+        // Nine in the morning where the business is — stamps are stored UTC (D61), so the punch is
+        // built in the business timezone and converted, exactly as a real request would.
+        $businessNine = Carbon::parse('2026-03-02 09:00:00', Format::timezone())->utc();
+
+        $row = $service->checkIn($employee, $businessNine, AttendanceSource::Kiosk);
+        $row = $service->checkOut($employee, $businessNine->copy()->addHours(8), AttendanceSource::Kiosk, null, Carbon::parse('2026-03-02'));
+
+        $this->assertSame(0, $row->late_minutes, 'A punch at the shift start is not late.');
+        $this->assertSame(0, $row->early_leave_minutes);
+        $this->assertSame(AttendanceStatus::Present, $row->status);
+        $this->assertSame(
+            '09:00',
+            app_time($row->expected_in_at, 'H:i'),
+            'The expected window reads as the business wall clock it was configured with.'
+        );
+        $this->assertSame('2026-03-02', $row->attendance_date->toDateString());
+
+        // Half an hour late is half an hour late, grace and all.
+        $late = $this->employee('Late Riser');
+        $service->checkIn($late, $businessNine->copy()->addMinutes(45), AttendanceSource::Kiosk);
+        $lateRow = $service->checkOut($late, $businessNine->copy()->addHours(8), AttendanceSource::Kiosk, null, Carbon::parse('2026-03-02'));
+
+        $this->assertSame(30, $lateRow->late_minutes, '45 minutes, less the 15-minute grace.');
+        $this->assertSame(AttendanceStatus::Late, $lateRow->status, 'Late is the status; the minutes are stored either way.');
     }
 
     #[Test]

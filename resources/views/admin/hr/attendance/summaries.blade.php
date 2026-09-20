@@ -3,9 +3,9 @@
 @section('title', 'Monthly summaries')
 
 @section('header')
-    <x-ui.page-header title="Monthly summaries" :subtitle="$month->format('F Y') . ' — the only figures payroll reads'" icon="chart-bar">
+    <x-ui.page-header title="Monthly summaries" :subtitle="app_date($month, 'F Y') . ' — the only figures payroll reads'" icon="chart-bar">
         <x-slot:actions>
-            <x-ui.button variant="secondary" :href="route('admin.attendance.monthly', ['month' => $month->format('Y-m')])" icon="table-cells">Monthly grid</x-ui.button>
+            <x-ui.button variant="secondary" :href="route('admin.attendance.monthly', ['month' => app_date($month, 'Y-m')])" icon="table-cells">Monthly grid</x-ui.button>
         </x-slot:actions>
     </x-ui.page-header>
 @endsection
@@ -24,7 +24,7 @@
         <div class="flex flex-wrap items-end gap-3">
             <form method="GET" class="flex flex-1 flex-wrap items-end gap-3">
                 <div class="w-44">
-                    <x-ui.form.input type="month" name="month" label="Month" :value="$month->format('Y-m')" />
+                    <x-ui.form.input type="month" name="month" label="Month" :value="app_date($month, 'Y-m')" />
                 </div>
                 <div class="w-56">
                     <x-ui.form.select name="department_id" label="Department" placeholder="Every department">

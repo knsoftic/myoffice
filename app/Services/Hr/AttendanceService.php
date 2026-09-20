@@ -12,6 +12,7 @@ use App\Models\Hr\Employee;
 use App\Models\Hr\LeaveRequestDay;
 use App\Services\Hr\Exceptions\HrRuleException;
 use App\Services\Hr\Exceptions\LockedAttendanceException;
+use App\Support\Format;
 use App\Support\Hr\ShiftWindow;
 use App\Support\Money;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -65,7 +66,7 @@ class AttendanceService
         ?string $ip = null,
         ?Carbon $date = null,
     ): Attendance {
-        $date = ($date ?? $at->copy())->startOfDay();
+        $date = $date === null ? $this->businessDate($at) : $date->copy()->startOfDay();
         $at = $at->copy()->startOfSecond();
 
         return DB::transaction(function () use ($employee, $at, $source, $ip, $date): Attendance {
@@ -494,9 +495,11 @@ class AttendanceService
      */
     private function openRowFor(Employee $employee, Carbon $at): Attendance
     {
+        $businessDate = $this->businessDate($at);
+
         $today = Attendance::query()
             ->where('employee_id', $employee->getKey())
-            ->whereDate('attendance_date', $at->toDateString())
+            ->whereDate('attendance_date', $businessDate->toDateString())
             ->lockForUpdate()
             ->first();
 
@@ -508,7 +511,7 @@ class AttendanceService
 
         $yesterday = Attendance::query()
             ->where('employee_id', $employee->getKey())
-            ->whereDate('attendance_date', $at->copy()->subDay()->toDateString())
+            ->whereDate('attendance_date', $businessDate->copy()->subDay()->toDateString())
             ->whereNotNull('check_in_at')
             ->whereNull('check_out_at')
             ->lockForUpdate()
@@ -520,7 +523,7 @@ class AttendanceService
             return $yesterday;
         }
 
-        return $today ?? $this->rowFor($employee, $at->copy()->startOfDay(), lock: true);
+        return $today ?? $this->rowFor($employee, $businessDate, lock: true);
     }
 
     /*
@@ -617,6 +620,18 @@ class AttendanceService
             ->where('is_active', true)
             ->where('is_counted', true)
             ->first();
+    }
+
+    /**
+     * The **business** calendar date an instant falls on.
+     *
+     * Stamps are stored UTC (D61) and the business thinks in `localization.timezone`. Reading the date
+     * straight off a UTC instant would file a 01:00 punch in Karachi under the previous day — which is
+     * a missing attendance row, an absence, and eventually a deduction.
+     */
+    private function businessDate(Carbon $at): Carbon
+    {
+        return Carbon::parse($at->copy()->setTimezone(Format::timezone())->toDateString())->startOfDay();
     }
 
     private function assertUnlocked(Attendance $attendance): void

@@ -25,7 +25,7 @@
     <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         @for ($month = 1; $month <= 12; $month++)
             @php $inMonth = $holidays->get($month, collect()); @endphp
-            <x-ui.card :title="\Illuminate\Support\Carbon::create($year, $month, 1)->format('F')"
+            <x-ui.card :title="app_date(\Illuminate\Support\Carbon::create($year, $month, 1), 'F')"
                        :subtitle="$inMonth->count() . ' holiday(s)'">
                 @if ($inMonth->isEmpty())
                     <p class="text-sm text-slate-500 dark:text-slate-400">No holidays.</p>
@@ -36,7 +36,7 @@
                                 <div class="min-w-0">
                                     <span class="block truncate text-sm font-medium text-slate-900 dark:text-white">{{ $holiday->title }}</span>
                                     <span class="block text-xs text-slate-500 dark:text-slate-400">
-                                        {{ $holiday->holiday_date->format('D j M') }} · {{ $holiday->is_paid ? 'paid' : 'unpaid' }}
+                                        {{ app_date($holiday->holiday_date, 'D j M') }} · {{ $holiday->is_paid ? 'paid' : 'unpaid' }}
                                     </span>
                                 </div>
                                 <x-ui.badge :color="$holiday->holiday_type->color()" size="xs">{{ $holiday->holiday_type->label() }}</x-ui.badge>

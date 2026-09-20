@@ -45,7 +45,7 @@
                     <div>
                         <dt class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Recovery starts</dt>
                         <dd class="mt-1 text-sm text-slate-900 dark:text-white">
-                            {{ $advance->first_recovery_year ? \Illuminate\Support\Carbon::create((int) $advance->first_recovery_year, (int) $advance->first_recovery_month, 1)->format('F Y') : '—' }}
+                            {{ $advance->first_recovery_year ? app_date(\Illuminate\Support\Carbon::create((int) $advance->first_recovery_year, (int) $advance->first_recovery_month, 1), 'F Y') : '—' }}
                         </dd>
                     </div>
                     <div>

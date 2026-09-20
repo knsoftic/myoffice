@@ -20,7 +20,7 @@
     <x-ui.card class="mb-4">
         <form method="GET" class="flex flex-wrap items-end gap-3">
             <div class="w-44">
-                <x-ui.form.input type="month" name="month" label="Month" :value="$month?->format('Y-m')" />
+                <x-ui.form.input type="month" name="month" label="Month" :value="$month ? app_date($month, 'Y-m') : null" />
             </div>
             <div class="w-48">
                 <x-ui.form.select name="status" label="Status" :options="$statuses" :selected="request('status')" placeholder="Every status" />

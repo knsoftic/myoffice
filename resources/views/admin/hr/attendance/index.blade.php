@@ -7,9 +7,9 @@
 @endphp
 
 @section('header')
-    <x-ui.page-header title="Attendance" :subtitle="$date->format('l, j F Y')" icon="calendar-days">
+    <x-ui.page-header title="Attendance" :subtitle="app_date($date, 'l, j F Y')" icon="calendar-days">
         <x-slot:actions>
-            <x-ui.button variant="secondary" :href="route('admin.attendance.monthly', ['month' => $date->format('Y-m')])" icon="table-cells">Monthly grid</x-ui.button>
+            <x-ui.button variant="secondary" :href="route('admin.attendance.monthly', ['month' => app_date($date, 'Y-m')])" icon="table-cells">Monthly grid</x-ui.button>
             <x-ui.button variant="secondary" :href="route('admin.attendance-corrections.index')" icon="wrench-screwdriver">Corrections</x-ui.button>
         </x-slot:actions>
     </x-ui.page-header>
@@ -72,7 +72,7 @@
                     </td>
                     <td class="px-4 py-3 tabular-nums text-slate-600 dark:text-slate-300">
                         @if ($row?->check_in_at)
-                            {{ $row->check_in_at->format('H:i') }} – {{ $row->check_out_at?->format('H:i') ?? '…' }}
+                            {{ app_time($row->check_in_at, 'H:i') }} – {{ $row->check_out_at ? app_time($row->check_out_at, 'H:i') : '…' }}
                         @else
                             <span class="text-slate-400">—</span>
                         @endif

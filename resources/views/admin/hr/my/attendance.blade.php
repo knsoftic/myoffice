@@ -3,7 +3,7 @@
 @section('title', 'My attendance')
 
 @section('header')
-    <x-ui.page-header title="My attendance" :subtitle="$month->format('F Y')" icon="clock">
+    <x-ui.page-header title="My attendance" :subtitle="app_date($month, 'F Y')" icon="clock">
         <x-slot:actions>
             <x-ui.button variant="secondary" :href="route('admin.my.profile')">My profile</x-ui.button>
         </x-slot:actions>
@@ -20,11 +20,11 @@
                     <dl class="grid grid-cols-2 gap-3 sm:grid-cols-4">
                         <div>
                             <dt class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Checked in</dt>
-                            <dd class="mt-1 text-sm tabular-nums text-slate-900 dark:text-white">{{ $today->check_in_at?->format('H:i') ?? '—' }}</dd>
+                            <dd class="mt-1 text-sm tabular-nums text-slate-900 dark:text-white">{{ $today->check_in_at ? app_time($today->check_in_at, 'H:i') : '—' }}</dd>
                         </div>
                         <div>
                             <dt class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Checked out</dt>
-                            <dd class="mt-1 text-sm tabular-nums text-slate-900 dark:text-white">{{ $today->check_out_at?->format('H:i') ?? '—' }}</dd>
+                            <dd class="mt-1 text-sm tabular-nums text-slate-900 dark:text-white">{{ $today->check_out_at ? app_time($today->check_out_at, 'H:i') : '—' }}</dd>
                         </div>
                         <div>
                             <dt class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Worked</dt>
@@ -55,10 +55,10 @@
                 @endif
             </x-ui.card>
 
-            <x-ui.card :title="$month->format('F Y')">
+            <x-ui.card :title="app_date($month, 'F Y')">
                 <form method="GET" class="mb-4 flex items-end gap-3">
                     <div class="w-44">
-                        <x-ui.form.input type="month" name="month" label="Month" :value="$month->format('Y-m')" />
+                        <x-ui.form.input type="month" name="month" label="Month" :value="app_date($month, 'Y-m')" />
                     </div>
                     <x-ui.button type="submit" variant="secondary">Show</x-ui.button>
                 </form>
@@ -75,11 +75,11 @@
                         <tr>
                             <td class="px-4 py-3 tabular-nums text-slate-600 dark:text-slate-300">
                                 <span class="block">{{ app_date($row->attendance_date) }}</span>
-                                <span class="block text-xs text-slate-500 dark:text-slate-400">{{ $row->attendance_date->format('l') }}</span>
+                                <span class="block text-xs text-slate-500 dark:text-slate-400">{{ app_date($row->attendance_date, 'l') }}</span>
                             </td>
                             <td class="px-4 py-3 tabular-nums text-slate-600 dark:text-slate-300">
                                 @if ($row->check_in_at)
-                                    {{ $row->check_in_at->format('H:i') }} – {{ $row->check_out_at?->format('H:i') ?? '…' }}
+                                    {{ app_time($row->check_in_at, 'H:i') }} – {{ $row->check_out_at ? app_time($row->check_out_at, 'H:i') : '…' }}
                                 @else
                                     —
                                 @endif

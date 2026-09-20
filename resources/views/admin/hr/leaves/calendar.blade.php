@@ -3,7 +3,7 @@
 @section('title', 'Leave calendar')
 
 @section('header')
-    <x-ui.page-header title="Leave calendar" :subtitle="$month->format('F Y')" icon="calendar-days">
+    <x-ui.page-header title="Leave calendar" :subtitle="app_date($month, 'F Y')" icon="calendar-days">
         <x-slot:actions>
             <x-ui.button variant="secondary" :href="route('admin.leaves.index')" icon="list-bullet">List view</x-ui.button>
         </x-slot:actions>
@@ -14,7 +14,7 @@
     <x-ui.card class="mb-4">
         <form method="GET" class="flex items-end gap-3">
             <div class="w-44">
-                <x-ui.form.input type="month" name="month" label="Month" :value="$month->format('Y-m')" />
+                <x-ui.form.input type="month" name="month" label="Month" :value="app_date($month, 'Y-m')" />
             </div>
             <x-ui.button type="submit" variant="secondary">Show</x-ui.button>
         </form>

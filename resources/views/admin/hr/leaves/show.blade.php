@@ -85,7 +85,7 @@
                         <tr class="{{ $day->is_counted ? '' : 'opacity-60' }}">
                             <td class="px-4 py-3 tabular-nums text-slate-600 dark:text-slate-300">
                                 <span class="block">{{ app_date($day->leave_date) }}</span>
-                                <span class="block text-xs text-slate-500 dark:text-slate-400">{{ $day->leave_date->format('l') }}</span>
+                                <span class="block text-xs text-slate-500 dark:text-slate-400">{{ app_date($day->leave_date, 'l') }}</span>
                             </td>
                             <td class="px-4 py-3 text-slate-600 dark:text-slate-300">{{ $day->day_portion->label() }}</td>
                             <td class="px-4 py-3 text-right tabular-nums text-slate-600 dark:text-slate-300">
