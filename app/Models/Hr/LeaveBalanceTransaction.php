@@ -35,10 +35,7 @@ class LeaveBalanceTransaction extends Model
     use Blameable;
     use LogsActivityWithContext;
 
-
     protected $table = 'leave_balance_transactions';
-
-
 
     /**
      * @return array<string, string>

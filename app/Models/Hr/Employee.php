@@ -153,18 +153,22 @@ class Employee extends Model
     */
 
     /**
-     * May a payroll run produce a slip for this person for the given period?
+     * May a payroll run produce a slip for this person for the period starting on this date?
      *
-     * Status decides it, and an exit date closes the door from the day after it: somebody who left in
-     * March is paid for March and not for April.
+     * **The exit date decides, not the status** (phase-07 §6.10 #2). Somebody who resigned on 31 March is
+     * `resigned` the moment HR records it, and their status alone would say "never pay this person" — so
+     * the final month's salary would silently never be generated. An exit closes the door from the day
+     * after it instead: paid for March, not for April.
+     *
+     * Somebody still employed is decided by their status, so a suspended employee is not paid.
      */
-    public function isPayrollEligibleOn(Carbon $periodEnd): bool
+    public function isPayrollEligibleOn(Carbon $periodStart): bool
     {
-        if (! $this->status->isPayrollEligible()) {
-            return false;
+        if ($this->exit_date !== null) {
+            return $this->exit_date->greaterThanOrEqualTo($periodStart->copy()->startOfDay());
         }
 
-        return $this->exit_date === null || $this->exit_date->greaterThanOrEqualTo($periodEnd->copy()->startOfDay());
+        return $this->status->isPayrollEligible();
     }
 
     /**

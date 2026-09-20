@@ -44,12 +44,14 @@ class PayrollCalculator
         PayrollInputs $inputs,
     ): PayslipDraft {
         // ---- step 0: resolve inputs, and refuse to guess -------------------------------------------
-        if (! $employee->status->isPayrollEligible()) {
-            return PayslipDraft::skipped((int) $employee->getKey(), 'not_payroll_eligible');
-        }
-
         if ($employee->exit_date !== null && $employee->exit_date->lessThan($period->start)) {
             return PayslipDraft::skipped((int) $employee->getKey(), 'exited_before_period');
+        }
+
+        // A leaver is still paid for the month they left (§6.10 #2), so the exit date is checked first
+        // and the status only decides for somebody who is still employed.
+        if ($employee->exit_date === null && ! $employee->status->isPayrollEligible()) {
+            return PayslipDraft::skipped((int) $employee->getKey(), 'not_payroll_eligible');
         }
 
         if ($structure === null) {

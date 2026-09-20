@@ -30,10 +30,7 @@ class LeaveApproval extends Model
     use Blameable;
     use LogsActivityWithContext;
 
-
     protected $table = 'leave_approvals';
-
-
 
     /**
      * @return array<string, string>

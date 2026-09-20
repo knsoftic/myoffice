@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Models\Hr;
 
 use App\Models\Concerns\Blameable;
-use App\Support\Money;
 use App\Models\Concerns\LogsActivityWithContext;
+use App\Support\Money;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -30,10 +30,7 @@ class LeaveBalance extends Model
     use Blameable;
     use LogsActivityWithContext;
 
-
     protected $table = 'leave_balances';
-
-
 
     /**
      * @return array<string, string>

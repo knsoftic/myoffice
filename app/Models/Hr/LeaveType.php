@@ -32,7 +32,6 @@ class LeaveType extends Model
     use LogsActivityWithContext;
     use SoftDeletes;
 
-
     protected $table = 'leave_types';
 
     /**
@@ -66,8 +65,6 @@ class LeaveType extends Model
         'is_active',
         'sort_order',
     ];
-
-
 
     /**
      * @return array<string, string>

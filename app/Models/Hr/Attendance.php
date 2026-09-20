@@ -9,8 +9,8 @@ use App\Enums\AttendanceStatus;
 use App\Enums\DayType;
 use App\Models\Branch;
 use App\Models\Concerns\Blameable;
-use App\Support\Money;
 use App\Models\Concerns\LogsActivityWithContext;
+use App\Support\Money;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -44,10 +44,7 @@ class Attendance extends Model
     use LogsActivityWithContext;
     use SoftDeletes;
 
-
     protected $table = 'attendances';
-
-
 
     /**
      * @return array<string, string>

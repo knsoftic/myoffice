@@ -29,10 +29,7 @@ class PayrollRunItemComponent extends Model
     use Blameable;
     use LogsActivityWithContext;
 
-
     protected $table = 'payroll_run_item_components';
-
-
 
     /**
      * @return array<string, string>

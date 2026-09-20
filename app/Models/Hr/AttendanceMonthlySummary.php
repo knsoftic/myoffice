@@ -30,10 +30,7 @@ class AttendanceMonthlySummary extends Model
     use Blameable;
     use LogsActivityWithContext;
 
-
     protected $table = 'attendance_monthly_summaries';
-
-
 
     /**
      * @return array<string, string>

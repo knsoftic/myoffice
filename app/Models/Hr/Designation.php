@@ -26,7 +26,6 @@ class Designation extends Model
     use LogsActivityWithContext;
     use SoftDeletes;
 
-
     protected $table = 'designations';
 
     /**
@@ -41,8 +40,6 @@ class Designation extends Model
         'is_active',
         'sort_order',
     ];
-
-
 
     /**
      * @return array<string, string>

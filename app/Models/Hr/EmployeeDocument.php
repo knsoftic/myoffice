@@ -32,7 +32,6 @@ class EmployeeDocument extends Model
     use LogsActivityWithContext;
     use SoftDeletes;
 
-
     protected $table = 'employee_documents';
 
     /**
@@ -49,8 +48,6 @@ class EmployeeDocument extends Model
         'is_confidential',
         'notes',
     ];
-
-
 
     /**
      * @return array<string, string>

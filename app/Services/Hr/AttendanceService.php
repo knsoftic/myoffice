@@ -389,7 +389,9 @@ class AttendanceService
                 ->whereNull('exit_date')
                 ->orWhereDate('exit_date', '>=', $date->toDateString()))
             ->get()
-            ->filter(fn (Employee $employee): bool => $employee->status->isPayrollEligible());
+            // The exit date decides, not the status (§6.10 #2): a leaver still needs rows for the days
+            // they actually worked, or their final month has nothing behind it.
+            ->filter(fn (Employee $employee): bool => $employee->isPayrollEligibleOn($date));
 
         $report = ['created' => 0, 'resolved' => 0, 'flagged' => 0];
 

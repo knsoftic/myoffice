@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Models\Hr;
 
-use App\Enums\PayrollItemStatus;
 use App\Enums\PaymentMethod;
+use App\Enums\PayrollItemStatus;
 use App\Enums\PayrollRunType;
 use App\Models\Concerns\Blameable;
 use App\Models\Concerns\LogsActivityWithContext;

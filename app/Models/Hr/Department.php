@@ -30,7 +30,6 @@ class Department extends Model
     use LogsActivityWithContext;
     use SoftDeletes;
 
-
     protected $table = 'departments';
 
     /**
@@ -45,8 +44,6 @@ class Department extends Model
         'is_active',
         'sort_order',
     ];
-
-
 
     /**
      * @return array<string, string>

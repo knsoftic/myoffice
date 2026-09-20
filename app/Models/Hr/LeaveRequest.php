@@ -34,7 +34,6 @@ class LeaveRequest extends Model
     use LogsActivityWithContext;
     use SoftDeletes;
 
-
     protected $table = 'leave_requests';
 
     /**
@@ -49,8 +48,6 @@ class LeaveRequest extends Model
         'reason',
         'contact_during_leave',
     ];
-
-
 
     /**
      * @return array<string, string>

@@ -31,7 +31,6 @@ class Holiday extends Model
     use LogsActivityWithContext;
     use SoftDeletes;
 
-
     protected $table = 'holidays';
 
     /**
@@ -47,8 +46,6 @@ class Holiday extends Model
         'description',
         'is_active',
     ];
-
-
 
     /**
      * @return array<string, string>

@@ -33,7 +33,6 @@ class SalaryComponent extends Model
     use LogsActivityWithContext;
     use SoftDeletes;
 
-
     protected $table = 'salary_components';
 
     /**
@@ -54,8 +53,6 @@ class SalaryComponent extends Model
         'is_active',
         'sort_order',
     ];
-
-
 
     /**
      * @return array<string, string>

@@ -24,7 +24,6 @@ class EmployeeSkill extends Model
     use LogsActivityWithContext;
     use SoftDeletes;
 
-
     protected $table = 'employee_skills';
 
     /**
@@ -37,8 +36,6 @@ class EmployeeSkill extends Model
         'years_experience',
         'sort_order',
     ];
-
-
 
     /**
      * @return array<string, string>

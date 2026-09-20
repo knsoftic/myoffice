@@ -31,10 +31,7 @@ class EmployeeAdvanceRepayment extends Model
     use Blameable;
     use LogsActivityWithContext;
 
-
     protected $table = 'employee_advance_repayments';
-
-
 
     /**
      * @return array<string, string>

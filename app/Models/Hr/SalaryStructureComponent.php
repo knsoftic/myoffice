@@ -24,10 +24,7 @@ class SalaryStructureComponent extends Model
     use Blameable;
     use LogsActivityWithContext;
 
-
     protected $table = 'salary_structure_components';
-
-
 
     /**
      * @return array<string, string>

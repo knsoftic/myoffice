@@ -34,10 +34,7 @@ class AttendanceCorrection extends Model
     use Blameable;
     use LogsActivityWithContext;
 
-
     protected $table = 'attendance_corrections';
-
-
 
     /**
      * @return array<string, string>

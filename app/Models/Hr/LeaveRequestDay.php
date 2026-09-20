@@ -29,10 +29,7 @@ class LeaveRequestDay extends Model
     use Blameable;
     use LogsActivityWithContext;
 
-
     protected $table = 'leave_request_days';
-
-
 
     /**
      * @return array<string, string>
