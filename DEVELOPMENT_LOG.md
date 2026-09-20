@@ -11,7 +11,7 @@
 | **Database** | `my_office` (utf8mb4_unicode_ci) |
 | **Created** | 2026-09-12 |
 | **Last updated** | 2026-09-19 |
-| **Current phase** | PHASE 6 — Projects, milestones, tasks, time tracking |
+| **Current phase** | PHASE 7 — Employees, departments, attendance, leave, payroll |
 
 ---
 
@@ -180,6 +180,7 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D65 | **Seeders converge additively on existing roles.** `RoleSeeder` grants registry permissions a system role is missing but never revokes one an administrator granted in the role editor; a fresh install still gets exactly the seeded grants. `DemoUserSeeder` refuses production even with `SEED_DEMO=true`. | `syncPermissions` would silently undo every role-editor change on each deploy that re-runs seeders; and weak demo passwords must be impossible in production, not merely off by default. Raised by the installation-guide review. |
 | D66 | **A milestone on hold can be resumed.** phase-06 §2.13.2 lists `pending` / `in_progress` -> `on_hold` but no row back out except `cancelled`. `MilestoneStatus::allowedTransitions()` adds `on_hold` -> `pending` / `in_progress`, and `MilestoneService` checks the held-from stamp on top. | Taken literally the table traps a held milestone forever — the only way out would be to cancel it, which is a different business fact. The project lifecycle §2.13.1 has exactly the missing row ("`on_hold` -> the status it was held from"), so the omission reads as an editing slip rather than a rule. |
 | D67 | **The clock columns `time_entries.started_at` / `ended_at` and `time_entry_segments.started_at` / `ended_at` are `DATETIME`, not the `TIMESTAMP` phase-06 §2.10-§2.11 names.** Every other Phase 6 stamp stays `TIMESTAMP`. | This server runs `explicit_defaults_for_timestamp = OFF`, where the first `TIMESTAMP NOT NULL` column in a table silently acquires `DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP` — verified on `my_office_test` before the migrations were written. On an append-only clock record that would rewrite `started_at` on any UPDATE and change `duration_seconds` underneath every SUM already taken, breaking INV-P5 silently. `DATETIME` carries no such rule, and with the session timezone pinned to `+00:00` (D61) the two types store the same UTC instant. The other stamps are all nullable, which never triggers the rule. |
+| D68 | **The three Phase 7 date guards use `CAST(date AS CHAR)`, not the `DATE_FORMAT(col, '%Y-%m-%d')` phase-07 §2.8 / §2.9 / §2.16 spell them with.** | MariaDB refuses `DATE_FORMAT()` inside a generated column outright — `1901 Function or expression 'date_format()' cannot be used in the GENERATED ALWAYS AS clause` — because it classes it as locale-dependent. Casting a DATE to CHAR is deterministic, is accepted, and produces the identical `YYYY-MM-DD` string; both forms were run side by side on this server before the change was made. Without a working guard, `uq_hol_guard`, `uq_att_day` and `uq_lrd_day` could not exist, and HR-1 and HR-8 would be service conventions rather than database facts. |
 
 ---
 
@@ -330,6 +331,22 @@ screens still to come**
 | [ ] | §11 acceptance tests P6-01 … P6-55 (the delivery test above is the integration gate, not the acceptance run) |
 | [ ] | Phase 6's four manifest files (`tests/Support/*-manifest.php`) and their manifest test. The Phase 4 manifest test walks **its own** table list, so the new tables are not covered by anything today — P6-53 asks for the §2.14 object list to be asserted in CI |
 ### [ ] PHASE 7 — Employees, departments, attendance, leave, payroll
+
+Contract: [`docs/phases/phase-07.md`](docs/phases/phase-07.md) · **foundation and models built 2026-09-20,
+services and screens still to come**
+
+| | Item |
+|---|---|
+| [x] | Enums: all 28 of §3 / 155 cases, including `LedgerEntryType` and `PaymentMethod`, which Phase 7 declares on the finance spine's behalf because it migrates first ([D-HR-14], F-5.4). Every `label()` / `color()` arm exercised, and the two money-adjacent string contracts **checked rather than assumed**: every `AttendanceStatus::defaultPayableFactor()` and every `LeaveDayPortion::fraction()` is a 4-decimal string, never a float (HR-12) |
+| [x] | Schema: 27 migrations / 24 tables, applied to `my_office_test` **and** `my_office`; `rollback --step=27` leaves no table and no trigger behind, re-migrate clean. The two circular edges (`departments.head_employee_id`, the payroll lock on attendance) are their own migrations, so `migrate:fresh` works in any order ([D-HR-1]) |
+| [x] | §2.27 step 18: one raw-SQL migration carrying **9 STORED generated columns, 7 guard unique indexes, the §2 CHECK constraints and 5 `BEFORE DELETE` triggers**. Each is verified after creation and throws if the server did not keep it |
+| [x] | Every guard proved to bite: **19 database assertions** — one attendance row per employee per day (HR-1), one counted leave day per date (HR-8), one open salary version (HR-10), one live regular run per month; a payable factor above 1 refused (HR-4); `paid + unpaid = total`; an advance refusing to be over-recovered (HR-19); an append-only row refusing deletion; and the subtle one — a **draft** run's item deletes while a **locked** run's does not, and a negative net salary is legal only on a correction item (HR-16, HR-17) |
+| [x] | Models: 24, 109 relations, verified against the live schema — no stray cast, no stray fillable, no generated column reachable through mass assignment |
+| [x] | Model invariants proved on **22 assertions**: HR-10 (a version refuses every money edit and every delete), D19 (the three append-only tables allow a short list and nothing else), HR-15 / HR-16 (draft editable, locked frozen, paid allows only notes), HR-19 (a disbursed advance freezes its amount), and the group deciding a salary component's side |
+| [ ] | §4 PermissionRegistry (11 new slugs), §5 the `hr` settings group, §4.3 `modules.depends_on`, §4.4 role grants |
+| [ ] | §6 services: `WorkCalendarService`, `AttendanceService`, `AttendanceCorrectionService`, `AttendanceSummaryService`, `LeaveBalanceService`, `LeaveRequestService`, `SalaryStructureService`, `AdvanceService`, `PayrollCalculator`, `PayrollRunService` |
+| [ ] | §7 routes, §8 screens (including the employee self-service panel), §10 jobs and commands |
+| [ ] | §11 acceptance tests FT-HR-01 … FT-HR-62 |
 ### [ ] PHASE 8 — Collaborator management (profiles, panel shell, commission settings)
 
 > **Release note** — note: the financial spine's migration set (spine §1.3, 15 tables) is applied in the same release, immediately after Phase 8's own migrations; the spine-dependent screens stay hidden behind their module switches until then, and `collaborators:backfill-wallets` + `collaborators:seed-initial-rules` run once afterwards (phase-08-09 §1.4 [D-P8-1]).
@@ -358,6 +375,38 @@ screens still to come**
 ---
 
 ## 6. Change Log
+
+### 2026-09-20 — Phase 7 foundation: enums, the 24-table HR schema, and the models
+
+Built directly in the session — no workflow, no background agents, at the user's instruction.
+
+- **28 enums / 155 cases.** Two of them belong to the finance spine and are declared here because Phase 7
+  migrates first: `LedgerEntryType` and `PaymentMethod`. Two declarations of one `App\Enums` name is a
+  merge conflict, not a style question, so every later money phase reuses these.
+- **27 migrations / 24 tables**, forward and back, on both databases. Eleven tables carry no `deleted_at`
+  (D16, D19): a nullable one on an append-only payroll, ledger or audit table is an invitation — one
+  `->delete()` and a slip leaves every total while the money stays paid.
+- **One raw-SQL migration for everything the schema builder cannot say**, verified object by object. That
+  file is also where the phase's hardest guarantees live: at most one attendance row per employee per day,
+  one counted leave day per date, one open salary version per employee, one live regular payroll run per
+  branch per month.
+- **D68, found by running it.** MariaDB refuses `DATE_FORMAT()` inside a generated column, which the
+  contract uses for three of the guards. `CAST(date AS CHAR)` is deterministic, accepted, and produces the
+  same string — both forms were run side by side before the change was made. Without a working guard,
+  HR-1 and HR-8 would have been service conventions rather than database facts.
+- **24 models / 109 relations**, each checked against the live schema for a stray cast, a stray fillable or
+  a generated column left mass-assignable.
+- **Two real bugs the model probe caught, one root cause.** `getOriginal()` applies the model's casts, so a
+  status column comes back as an enum and never equals the string it is compared to: the advance guard was
+  passing silently on every advance, and the payroll guard was treating every draft slip as locked. Both
+  read `getRawOriginal()` now.
+- **One test was too narrow, not wrong.** `SchemaTest` asserts every migration's `down()` reverses
+  something, but its pattern only recognised schema-builder calls. Phase 7's step-18 migration is the first
+  whose `up()` is raw SQL and whose `down()` therefore drops raw objects; the check now recognises
+  `DB::statement()` and `DB::unprepared()` too.
+- **Suite 1,545 tests / 61,499 assertions green.**
+
+Still to come in Phase 7: the registries, the ten services, routes, screens and the FT-HR acceptance suite.
 
 ### 2026-09-20 — Phase 6: registries, services and the admin delivery screens
 
@@ -887,6 +936,13 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-20 | Phase 6 client panel | browser session as the demo client login | PASS — the project, its status and 43 % render; the page body carries no contract value, no budget and no hours, because the section never selects those columns |
 | 2026-09-20 | Phase 6 constraint sentinel | `php artisan projects:verify-constraints` on `my_office` | PASS — every generated column, CHECK, unique index and the append-only trigger still present |
 | 2026-09-20 | Phase 6 full suite, with the client sections | `php artisan test` (run by me) | PASS — **1,545 tests / 61,368 assertions**, 1,250 s |
+| 2026-09-20 | Phase 7 enums | scripted walk of all 28 enums | PASS — 155 cases, every arm exercised; every payable factor and leave fraction is a 4-decimal string, never a float (HR-12); every component group reports into a real slip column |
+| 2026-09-20 | Phase 7 migrations | `migrate` on `my_office_test`, `rollback --step=27`, `migrate` again, then `migrate` on `my_office` | PASS — 27/27 forward, 0 tables and 0 triggers left after rollback, clean re-migrate |
+| 2026-09-20 | Phase 7 §2 object list | `information_schema` counted in PHP | PASS — 24 tables, 9 STORED generated columns, 7 guard unique indexes, 5 BEFORE DELETE triggers, and **0** columns silently carrying `ON UPDATE CURRENT_TIMESTAMP` (D67) |
+| 2026-09-20 | Phase 7 database guards | probe in a rolled-back transaction | PASS — **19/19**: all seven guards, the signed generated columns, five CHECKs including the advance ceiling, the append-only triggers, and the draft-deletes / locked-refuses pair (HR-16) |
+| 2026-09-20 | Phase 7 models | scripted walk against the live schema | PASS — 24 models, 109 relations, no stray cast, no stray fillable, no generated column fillable |
+| 2026-09-20 | Phase 7 model invariants | probe in a rolled-back transaction | PASS — **22/22**: HR-10, D19's three append-only tables, HR-15 / HR-16's two-step payroll freeze, HR-19, and the component group deciding its side. Found 2 real bugs (`getOriginal()` applying casts), both fixed |
+| 2026-09-20 | Phase 7 foundation full suite | `php artisan test` (run by me) | PASS — **1,545 tests / 61,499 assertions**, 1,035 s |
 
 ---
 
