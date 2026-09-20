@@ -321,8 +321,12 @@ screens still to come**
 | [x] | §8 admin screens (13 Blade files): projects index / create / edit / show / value / team, milestones index + show, tasks index / create / show / board, time tracking |
 | [x] | Verified in a browser against the running app — the projects list, the project page (derived progress reads the 43 % §6.3 predicts), the Kanban board, and a timer started and stopped through the UI with **0.00 stored hours while it ran** (INV-P5 on screen) |
 | [x] | `tests/Feature/Project/ProjectDeliveryTest.php` — 13 tests / 41 assertions, green first run |
-| [ ] | §7.6 collaborator panel, §7.7 the read-only client contributions, §8.10-§8.12 their screens and the dashboard widgets |
-| [ ] | §6.1 `ProjectReferralService`, `TaskChecklistService`, `TaskCommentService`, `AttachmentService`, `TimesheetService`; §10 notifications, queued jobs and the scheduler |
+| [x] | §6.1 the remaining services: `ProjectReferralService` (INV-P13 — refuses rather than guessing once evidence exists), `TaskCommentService`, `AttachmentService` (private disk, extension **and** sniffed MIME), `TimesheetService` (one GROUP BY per rollup, grouped on `work_date`) |
+| [x] | §10.4 scheduler: `projects:auto-stop-timers`, `projects:verify-constraints` (passes against `my_office`), `projects:recalculate-progress`, `attachments:prune-deleted` |
+| [x] | §7.7 client panel: `ProjectsSection`, `MilestonesSection`, `TasksSection` registered into Phase 5's registry (D31), each with an explicit column list that never selects money or hours; four client views. Checked in the browser as the demo client — the page shows the project and its 43 %, and contains no money at all |
+| [x] | **A Phase 5/6 seam fixed**: `client.projects.show` read `can:viewByClient,project`, but that controller takes the id as a string, so no model reached the gate and it denied with 403 — the opposite of the 404 §9 requires. Ownership is now `ProjectsSection::find()`, as elsewhere in the panel; `ProjectPolicy::viewByClient()` ships and holds wherever a model is in hand |
+| [ ] | §7.6 collaborator panel and §8.10 its screens — **blocked until Phase 8 ships `collaborators`** |
+| [ ] | §10.1-§10.3 notifications and queued jobs; the dashboard widgets of §8.12 |
 | [ ] | §11 acceptance tests P6-01 … P6-55 (the delivery test above is the integration gate, not the acceptance run) |
 | [ ] | Phase 6's four manifest files (`tests/Support/*-manifest.php`) and their manifest test. The Phase 4 manifest test walks **its own** table list, so the new tables are not covered by anything today — P6-53 asks for the §2.14 object list to be asserted in CI |
 ### [ ] PHASE 7 — Employees, departments, attendance, leave, payroll
@@ -383,7 +387,7 @@ agents, at the user's instruction.
 - **Two sidebar tests went red for the right reason** and one of them was hiding a gap: the URL walk only
   ever looked at top-level items, and Phase 6 shipped the first **nested** entry. Fixing it to descend
   took that test from 46 assertions to 102.
-- **Suite 1,543 tests / 61,359 assertions green.**
+- **Suite 1,545 tests / 61,368 assertions green.**
 
 Still to come in Phase 6: the collaborator and client panel contributions, the remaining five services,
 §10's notifications / jobs / scheduler, and the P6-01 … P6-55 acceptance suite.
@@ -880,6 +884,9 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-20 | Phase 6 admin UI | browser session against `php artisan serve` as the Project Manager demo login | PASS — projects list (empty and populated), project page (derived progress 43 %, matching the §6.3 arithmetic), Kanban board, and a timer started and stopped through the UI showing 0.00 stored hours while running. Caught the missing `AuthorizesRequests` |
 | 2026-09-20 | Phase 6 delivery tests | `php artisan test tests/Feature/Project/ProjectDeliveryTest.php` | PASS — 13 tests / 41 assertions, green on the first run |
 | 2026-09-20 | Phase 6 full suite | `php artisan test` (run by me) | PASS — **1,543 tests / 61,359 assertions**, 1,008 s |
+| 2026-09-20 | Phase 6 client panel | browser session as the demo client login | PASS — the project, its status and 43 % render; the page body carries no contract value, no budget and no hours, because the section never selects those columns |
+| 2026-09-20 | Phase 6 constraint sentinel | `php artisan projects:verify-constraints` on `my_office` | PASS — every generated column, CHECK, unique index and the append-only trigger still present |
+| 2026-09-20 | Phase 6 full suite, with the client sections | `php artisan test` (run by me) | PASS — **1,545 tests / 61,368 assertions**, 1,250 s |
 
 ---
 
