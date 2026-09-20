@@ -57,6 +57,23 @@ enum ReceivedPaymentStatus: string
     }
 
     /**
+     * Does a receipt in this state reach the commission engine (spine §6.1 step 2, G3)?
+     *
+     * Deliberately **not** `countsAsReceived()`, and the extra case is the whole point: a fully
+     * refunded receipt still earns, and its reversal posts the offsetting debit. That is what makes the
+     * order of the two jobs irrelevant — whichever runs first, the pair nets to zero. If a refund that
+     * landed before the commission job silently suppressed the earning, the later reversal would have
+     * nothing to reverse and the partner's statement would show neither side of a transaction that
+     * really happened.
+     *
+     * `voided` and `bounced` stop here: no money ever arrived, so there is nothing to undo either.
+     */
+    public function earnsCommission(): bool
+    {
+        return in_array($this, [self::Cleared, self::PartiallyRefunded, self::Refunded], true);
+    }
+
+    /**
      * Is every rupee of this receipt gone?
      */
     public function isFullyUndone(): bool

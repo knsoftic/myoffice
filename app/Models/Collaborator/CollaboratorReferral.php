@@ -16,6 +16,7 @@ use App\Models\Crm\Client;
 use App\Models\Crm\Lead;
 use App\Models\Project\Project;
 use App\Models\User;
+use App\Services\Collaborator\ReferralService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -175,10 +176,14 @@ class CollaboratorReferral extends Model
     }
 
     /**
-     * Rows that could govern a payment on this date — the resolver's query, and the reason
-     * `idx_cr_student_from` and `idx_cr_project_from` exist.
+     * Rows whose **window** contains this date, whatever they say about earning.
+     *
+     * The date predicate lives here once and nowhere else, and it deliberately filters on nothing but
+     * the dates: the resolver needs to *see* a revoked row covering the day in order to let it block an
+     * older window that also covers it. A query that hid revoked rows would silently fall through to a
+     * predecessor whose credit had already been decided away.
      */
-    public function scopeEffectiveOn(Builder $query, Carbon $date): Builder
+    public function scopeCoveringDate(Builder $query, Carbon $date): Builder
     {
         $on = $date->copy()->startOfDay()->toDateString();
 
@@ -186,7 +191,21 @@ class CollaboratorReferral extends Model
             ->whereDate('effective_from', '<=', $on)
             ->where(static fn (Builder $inner): Builder => $inner
                 ->whereNull('effective_to')
-                ->orWhereDate('effective_to', '>=', $on))
+                ->orWhereDate('effective_to', '>=', $on));
+    }
+
+    /**
+     * Rows that could govern a payment on this date — the window, plus the two things that stop a row
+     * earning at all. The reason `idx_cr_student_from` and `idx_cr_project_from` exist.
+     *
+     * {@see ReferralService::effectiveOnSubject()} deliberately does not
+     * use this: it needs the losing rows too, so that the newest decision about a day wins even when
+     * that decision was "nobody".
+     */
+    public function scopeEffectiveOn(Builder $query, Carbon $date): Builder
+    {
+        return $query
+            ->coveringDate($date)
             ->where('commission_eligible', true)
             ->whereIn('status', [ReferralStatus::Active->value, ReferralStatus::Superseded->value]);
     }

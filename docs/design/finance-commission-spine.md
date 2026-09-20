@@ -705,7 +705,7 @@ rate applied, and the exact bcmath trace.
 |---|---|
 | `UNIQUE uq_cle_dedupe(dedupe_key)` | the canonical duplicate guard - the INSERT **is** the test, so concurrency, HTTP retries and replayed queue jobs all collapse onto one row |
 | `UNIQUE uq_cle_source(source_type, source_id, collaborator_id, purpose)` | the semantic restatement of §52, with all four columns NOT NULL so MariaDB actually enforces it. A nullable-column guard such as `(fee_payment_id, project_payment_id, collaborator_id, source_type)` would let **every** project commission through, because they all share `fee_payment_id = NULL` and unique indexes ignore NULLs. This index makes a second commission for the same receipt impossible even if somebody hand-crafts a different `dedupe_key` |
-| `UNIQUE uq_cle_reversal_pair(payment_reversal_id, reverses_entry_id)` | one reversal row can undo a given original exactly once |
+| `UNIQUE uq_cle_reversal_pair(payment_reversal_id, reverses_entry_id, purpose)` | one reversal row can undo a given original exactly once **per purpose**. `purpose` is in the key because a single reversal legitimately posts two debits against one original when part of the commission has already been paid out — a `reversal` for the unpaid part and a `clawback` for the rest (§6.6, §2.19). The two-column form shipped first and made that case a 1062; corrected by migration `2026_09_12_130022` |
 | `INDEX (collaborator_wallet_id, status)` | the wallet derivation query |
 | `INDEX (collaborator_id, status, transaction_date)` | approval queue, ageing, point-in-time movement |
 | `INDEX (collaborator_id, purpose, transaction_date)` | the §56 statement grouping |
@@ -1084,7 +1084,7 @@ mobile retry therefore produce **one** receipt, so the commission question never
 ALTER TABLE collaborator_commission_ledger_entries
   ADD UNIQUE KEY uq_cle_dedupe (dedupe_key),
   ADD UNIQUE KEY uq_cle_source (source_type, source_id, collaborator_id, purpose),
-  ADD UNIQUE KEY uq_cle_reversal_pair (payment_reversal_id, reverses_entry_id);
+  ADD UNIQUE KEY uq_cle_reversal_pair (payment_reversal_id, reverses_entry_id, purpose);
 ```
 
 `dedupe_key` is `varchar(191) NOT NULL`, composed **only** inside `LedgerWriter`, never by a caller:

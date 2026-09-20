@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Services\Collaborator;
 
+use App\DataObjects\Collaborator\RuleData;
 use App\Enums\CollaboratorStatus;
+use App\Enums\CommissionCalculationType;
+use App\Enums\CommissionScope;
 use App\Enums\UserStatus;
 use App\Models\Collaborator\Collaborator;
 use App\Models\Role;
@@ -250,10 +253,15 @@ final class CollaboratorOnboardingService
     /**
      * §6.2's "seed the first two commission rule versions".
      *
-     * The rule table and `CommissionRuleService` are the **spine's**, and the spine ships with Phase 10
-     * (§1.4). Until it does, this skips with a warning rather than writing the table itself — and
-     * `collaborators:seed-initial-rules` is the idempotent backfill that closes the gap for everybody
-     * onboarded in the meantime.
+     * The rule table and `CommissionRuleService` are the **spine's**, and Phase 10 has now shipped
+     * both — this calls the published method and never writes the rule table itself (§1.3 "must NOT
+     * create"). It still skips with a warning when the module is switched off or the table is absent,
+     * because an install caught between the two releases must not fail an approval that is otherwise
+     * complete; `collaborators:seed-initial-rules` is the idempotent backfill.
+     *
+     * Phase 2's `default_*_commission_rate` keys are used **here and only here**: they seed a partner's
+     * first version so somebody can see it and change it. They never authorise a payment on their own
+     * ([D-FS-9]) — a rate nobody looked at is exactly the commission that cannot be explained later.
      */
     private function seedInitialCommissionRules(Collaborator $collaborator, User $actor): void
     {
@@ -271,29 +279,26 @@ final class CollaboratorOnboardingService
             return;
         }
 
-        // The spine publishes CommissionRuleService::createVersion(); this phase calls it and never
-        // writes the rule table itself (§1.3 "must NOT create").
-        $service = 'App\\Services\\Collaborator\\CommissionRuleService';
+        $rules = app(CommissionRuleService::class);
 
-        if (! class_exists($service)) {
-            logger()->warning(
-                'phase-08 §6.2: CommissionRuleService is not available, so no initial rule was created.',
-                ['collaborator' => $collaborator->collaborator_code],
-            );
+        foreach (CommissionScope::cases() as $scope) {
+            $prefix = 'collaborator.default_'.$scope->value.'_commission_';
 
-            return;
-        }
+            $configured = CommissionCalculationType::tryFrom((string) setting($prefix.'type', 'percentage'));
+            $amount = (string) setting($prefix.'rate', '0');
 
-        foreach (['student', 'project'] as $scope) {
-            app($service)->createVersion(
-                collaborator: $collaborator,
+            // One settings key carries either a rate or a fixed amount, depending on the type beside
+            // it, and `chk_ccs_payload` refuses a row that fills in both or neither. An unrecognised
+            // type falls back to a percentage rather than failing the approval over a dropdown.
+            $isPercentage = $configured !== CommissionCalculationType::Fixed;
+
+            $rules->createVersion($collaborator, $scope, new RuleData(
                 scope: $scope,
-                calculationType: (string) setting('collaborator.default_'.$scope.'_commission_type', 'percentage'),
-                rate: (string) setting('collaborator.default_'.$scope.'_commission_rate', '0'),
-                effectiveFrom: now()->startOfDay(),
-                reason: 'initial rule at onboarding',
-                actor: $actor,
-            );
+                calculationType: $isPercentage ? CommissionCalculationType::Percentage : CommissionCalculationType::Fixed,
+                effectiveFrom: Carbon::now()->startOfDay(),
+                rate: $isPercentage ? $amount : null,
+                fixedAmount: $isPercentage ? null : $amount,
+            ), sprintf('Initial %s rule seeded when %s was approved.', $scope->value, (string) $actor->name));
         }
     }
 
