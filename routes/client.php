@@ -53,8 +53,16 @@ Route::prefix('client')
         Route::put('profile', [ProfileController::class, 'update'])->middleware('can:client_portal.profile')->name('profile.update');
 
         // Phase 6 sections: projects, progress, tasks, milestones, files.
+        //
+        // `projects.show` checks the permission here and leaves **ownership** to
+        // `ProjectsSection::find()`, which returns null for another client's id and the controller turns
+        // that into a 404 (ServesClientPortal::sectionRecord). It used to read `can:viewByClient,project`,
+        // which cannot work on this route: the controller takes the id as a string, so there is no bound
+        // model for the policy to receive and the gate denied everything with a 403 — the opposite of the
+        // 404 §9 requires. `ProjectPolicy::viewByClient()` still exists and still enforces the same rule
+        // wherever a Project instance is in hand.
         Route::get('projects', [ProjectController::class, 'index'])->middleware(['module:projects', 'can:client_portal.projects'])->name('projects.index');
-        Route::get('projects/{project}', [ProjectController::class, 'show'])->whereNumber('project')->middleware(['module:projects', 'can:viewByClient,project'])->name('projects.show');
+        Route::get('projects/{project}', [ProjectController::class, 'show'])->whereNumber('project')->middleware(['module:projects', 'can:client_portal.projects'])->name('projects.show');
         Route::get('projects/{project}/tasks', [TaskController::class, 'index'])->whereNumber('project')->middleware(['module:tasks', 'can:client_portal.tasks'])->name('tasks.index');
         Route::get('projects/{project}/milestones', [MilestoneController::class, 'index'])->whereNumber('project')->middleware(['module:project_milestones', 'can:client_portal.milestones'])->name('milestones.index');
         Route::get('projects/{project}/progress', [ProjectController::class, 'progress'])->whereNumber('project')->middleware(['module:projects', 'can:client_portal.projects'])->name('progress.show');

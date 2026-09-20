@@ -135,3 +135,22 @@ Schedule::command('crm:record-captured-referrals')->everyFifteenMinutes()->witho
 Schedule::command('crm:import-pending-inquiries')->everyTenMinutes()->withoutOverlapping();
 Schedule::command('crm:prune-imports')->dailyAt('02:30')->withoutOverlapping();
 Schedule::command('crm:stale-lead-digest')->dailyAt('09:15')->withoutOverlapping();
+
+/*
+|--------------------------------------------------------------------------
+| Delivery (phase-06 §10.4)
+|--------------------------------------------------------------------------
+| The commands live in app/Console/Commands/Project and are auto-discovered.
+|
+| projects:verify-constraints is the one that matters most and does the least: it asserts that every
+| generated column, CHECK, unique index and trigger of §2.14 is still there. Three Phase 6 guarantees
+| rest on database features Laravel cannot express, and a guarantee nobody checks is one that quietly
+| stops holding after a restored dump or a well-meant ALTER (INV-P17).
+|
+| projects:recalculate-progress is drift repair, and it *reports* what it corrects: every interactive
+| change already recalculates inline, so a row it has to fix means some path skipped the cascade.
+*/
+Schedule::command('projects:auto-stop-timers')->everyFiveMinutes()->withoutOverlapping(10);
+Schedule::command('projects:verify-constraints')->dailyAt('02:10')->withoutOverlapping();
+Schedule::command('attachments:prune-deleted')->dailyAt('02:40')->withoutOverlapping();
+Schedule::command('projects:recalculate-progress')->dailyAt('01:00')->withoutOverlapping();

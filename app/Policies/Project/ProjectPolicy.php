@@ -7,6 +7,7 @@ namespace App\Policies\Project;
 use App\Enums\Ability;
 use App\Models\Project\Project;
 use App\Models\User;
+use App\Policies\Crm\Concerns\ResolvesPortalClient;
 use App\Policies\Project\Concerns\ChecksProjectPermissions;
 use Illuminate\Auth\Access\Response;
 
@@ -29,6 +30,7 @@ use Illuminate\Auth\Access\Response;
 final class ProjectPolicy
 {
     use ChecksProjectPermissions;
+    use ResolvesPortalClient;
 
     public const MODULE = 'projects';
 
@@ -115,6 +117,28 @@ final class ProjectPolicy
         }
 
         return $this->seesProject($user, $project) ? true : Response::denyAsNotFound();
+    }
+
+    /**
+     * The client panel's own rule — `client.projects.show` checks this (phase-05 §7 wrote the route
+     * expecting Phase 6 to answer it; phase-06 §7.7, §9's Client row).
+     *
+     * A project belonging to a **different** client is a **404, not a 403**: a 403 would confirm that the
+     * project exists, which is exactly what an id-probing client is trying to find out (INV-P15).
+     */
+    public function viewByClient(User $user, Project $project): bool|Response
+    {
+        if (! $user->can('client_portal.projects')) {
+            return false;
+        }
+
+        // The client id comes from `ClientContext`, never from the request — the one resolution per
+        // request every panel query already shares (phase-05 §9.2).
+        $clientId = $this->portalClientId($user);
+
+        return $clientId !== null && (int) $project->client_id === $clientId
+            ? true
+            : Response::denyAsNotFound();
     }
 
     public function viewLogs(User $user, Project $project): bool|Response

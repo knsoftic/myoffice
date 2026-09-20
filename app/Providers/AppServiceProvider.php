@@ -140,6 +140,9 @@ use App\Contracts\Referrals\ReferralRecorder;
 use App\Enums\InquiryType;
 use App\Support\ClientPortalRegistry;
 use App\Support\Inquiry\CrmLeadInquiryTarget;
+use App\Support\Portal\Sections\MilestonesSection;
+use App\Support\Portal\Sections\ProjectsSection;
+use App\Support\Portal\Sections\TasksSection;
 use App\Support\Portal\Sections\DocumentsSection;
 use App\Support\Portal\Sections\NotificationsSection;
 use App\Support\Projects\NullProjectCreator;
@@ -352,7 +355,18 @@ class AppServiceProvider extends ServiceProvider
         };
 
         $registerSections = static function (ClientPortalRegistry $registry): void {
-            foreach ([new DocumentsSection, new NotificationsSection] as $section) {
+            // phase-06 §7.7 contributes its sections into Phase 5's registry rather than redeclaring a
+            // `client.*` route name (D31). A section the registry does not hold answers 404 and shows no
+            // nav item, which is how the panel stayed honest before this phase shipped.
+            $sections = [
+                new DocumentsSection,
+                new NotificationsSection,
+                new ProjectsSection,
+                new MilestonesSection,
+                new TasksSection,
+            ];
+
+            foreach ($sections as $section) {
                 if (! $registry->has($section->key())) {
                     $registry->register($section);
                 }

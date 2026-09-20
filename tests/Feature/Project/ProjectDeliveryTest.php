@@ -330,6 +330,77 @@ final class ProjectDeliveryTest extends TestCase
         $this->assertLessThan(0, Money::compare($position, (string) $b->refresh()->board_position));
     }
 
+    #[Test]
+    public function the_client_panel_shows_a_project_without_its_money_or_its_hours(): void
+    {
+        $super = $this->createSuperAdmin();
+        $this->actingAs($super);
+
+        [$user, $client] = $this->portalClient();
+
+        $project = app(ProjectService::class)->create(ProjectData::fromArray([
+            'name' => 'Client visible build',
+            'client_id' => $client->getKey(),
+            'project_type' => 'fixed_price',
+            'priority' => 'medium',
+            'budget_amount' => '180000.00',
+            'project_value' => '450000.00',
+        ]), $super);
+
+        $response = $this->actingAs($user)->get(route('client.projects.index'));
+
+        $response->assertOk();
+        $response->assertSee('Client visible build');
+
+        // §9: the money and effort columns are never selected, so they are absent from the body —
+        // this is not a template hiding a value the server already sent.
+        foreach (['450,000', '450000', '180,000', '180000'] as $forbidden) {
+            $response->assertDontSee($forbidden, false);
+        }
+    }
+
+    #[Test]
+    public function one_clients_project_is_a_404_for_another_client(): void
+    {
+        $super = $this->createSuperAdmin();
+        $this->actingAs($super);
+
+        [, $mine] = $this->portalClient('Mine Ltd');
+        [$otherUser] = $this->portalClient('Theirs Ltd');
+
+        $project = app(ProjectService::class)->create(ProjectData::fromArray([
+            'name' => 'Not yours',
+            'client_id' => $mine->getKey(),
+            'project_type' => 'fixed_price',
+            'priority' => 'medium',
+        ]), $super);
+
+        $this->actingAs($otherUser)
+            ->get(route('client.projects.show', $project->getKey()))
+            ->assertNotFound();
+    }
+
+    /**
+     * A client login bound to its own client row, with the portal switched on.
+     *
+     * @return array{0: User, 1: \App\Models\Crm\Client}
+     */
+    private function portalClient(string $name = 'Portal Client Ltd'): array
+    {
+        $user = $this->createUserWithRole('Client', ['must_change_password' => false]);
+
+        $client = app(\App\Services\Crm\ClientService::class)
+            ->create(new \App\DataObjects\Crm\ClientData(name: $name, companyName: $name, email: $user->email));
+
+        $client->forceFill([
+            'user_id' => $user->getKey(),
+            'portal_enabled' => true,
+            'status' => 'active',
+        ])->save();
+
+        return [$user, $client->fresh()];
+    }
+
     private function project(string $name, string $value = '0.00'): Project
     {
         $client = Client::query()->first() ?? $this->client();
