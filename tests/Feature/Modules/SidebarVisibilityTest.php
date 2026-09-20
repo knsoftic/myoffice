@@ -201,6 +201,12 @@ final class SidebarVisibilityTest extends TestCase
                 'Commissions',
                 'Commission Skips',
                 'Referral Visits',
+                // phase-10-12 §8.2. The money register sits in the **Institute** group, beside the
+                // charges it pays off — `student_fee_payments` is an Institute module, and it being
+                // what triggers commission is not a reason to file it under Collaborator. Its parent
+                // "Fees" node appears with it: a group renders once it has a visible child.
+                'Fees',
+                'Fee Receipts',
                 // phase-03 §7-§8: the nine Website CMS entries whose routes now exist.
                 'Website Overview',
                 'Sections',

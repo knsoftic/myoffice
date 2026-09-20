@@ -700,6 +700,17 @@ final class Sidebar
                                 'module' => 'student_fees',
                                 'permission' => 'student_fees.view_any',
                             ],
+                            // phase-10-12 §8.2. The money register — beside the charges it pays off,
+                            // because `student_fee_payments` is an Institute module (its own
+                            // `ModuleGroup`), not a collaborator one. It happens to be what triggers
+                            // commission; that is not where it belongs on a menu.
+                            [
+                                'label' => 'Fee Receipts',
+                                'icon' => 'receipt-percent',
+                                'route' => 'admin.fee-payments.index',
+                                'module' => 'student_fee_payments',
+                                'permission' => 'student_fee_payments.view_any',
+                            ],
                             [
                                 'label' => 'Installments',
                                 'icon' => 'queue-list',

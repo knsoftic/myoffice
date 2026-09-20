@@ -45,6 +45,7 @@ use App\Http\Controllers\Admin\Collaborator\CommissionController;
 use App\Http\Controllers\Admin\Collaborator\CommissionRuleController;
 use App\Http\Controllers\Admin\Collaborator\ReferralVisitController;
 use App\Http\Controllers\Admin\DashboardController;
+use App\Http\Controllers\Admin\Finance\FeePaymentController;
 use App\Http\Controllers\Admin\Hr\AttendanceController;
 use App\Http\Controllers\Admin\Hr\AttendanceCorrectionController;
 use App\Http\Controllers\Admin\Hr\AttendanceSummaryController;
@@ -1293,6 +1294,40 @@ Route::prefix('admin')
             Route::get('referral-visits/report', [ReferralVisitController::class, 'report'])->middleware('can:collaborator_referral_visits.view_reports')->name('referral-visits.report');
             Route::get('referral-visits/export/{format}', [ReferralVisitController::class, 'export'])->middleware('can:collaborator_referral_visits.view_reports')->name('referral-visits.export');
             Route::get('referral-visits/{visit}', [ReferralVisitController::class, 'show'])->whereNumber('visit')->middleware('can:collaborator_referral_visits.view')->name('referral-visits.show');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Fee receipts — phase-10-12 §7.1
+        |----------------------------------------------------------------------
+        |
+        | **Phase 10 owns the receipt; Phase 18 owns the charge.** The screens
+        | that create, edit and cancel a fee charge belong to the institute
+        | phase; what lives here is the money — taking it, showing it back, and
+        | the two ways it goes out again.
+        |
+        | There is no `edit` and no `destroy`, and there never will be (INV-8).
+        | A mis-keyed receipt is voided and re-entered with a fresh idempotency
+        | key: three rows telling the whole story, rather than one row quietly
+        | corrected.
+        |
+        | `export` sits before `{payment}` so the literal wins the match.
+        |
+        */
+        Route::middleware('module:student_fee_payments')->group(static function (): void {
+            Route::get('fee-payments', [FeePaymentController::class, 'index'])->middleware('can:student_fee_payments.view_any')->name('fee-payments.index');
+            Route::get('fee-payments/export/{format}', [FeePaymentController::class, 'export'])->middleware('can:student_fee_payments.export')->name('fee-payments.export');
+            Route::get('fee-payments/{payment}', [FeePaymentController::class, 'show'])->whereNumber('payment')->middleware('can:student_fee_payments.view')->name('fee-payments.show');
+            Route::get('fee-payments/{payment}/receipt', [FeePaymentController::class, 'receipt'])->whereNumber('payment')->middleware('can:student_fee_payments.print')->name('fee-payments.receipt');
+            // Throttled: one request takes money, and a wedged client retrying is the case the
+            // idempotency key already covers — this bounds the cost of it.
+            Route::post('student-fees/{fee}/payments', [FeePaymentController::class, 'store'])->whereNumber('fee')->middleware(['can:student_fee_payments.create', 'throttle:20,1'])->name('fee-payments.store');
+            // Wizard step 4. Read-only, and it writes nothing — asserted by a test that counts rows.
+            Route::get('student-fees/{fee}/payments/preview', [FeePaymentController::class, 'preview'])->whereNumber('fee')->middleware(['can:student_fee_payments.create', 'throttle:60,1'])->name('fee-payments.preview');
+            Route::post('fee-payments/{payment}/void', [FeePaymentController::class, 'void'])->whereNumber('payment')->middleware('can:student_fee_payments.change_status')->name('fee-payments.void');
+            // A refund is a `payment_reversals` row, so it carries that module's create permission
+            // rather than the receipt's.
+            Route::post('fee-payments/{payment}/refund', [FeePaymentController::class, 'refund'])->whereNumber('payment')->middleware('can:payment_reversals.create')->name('fee-payments.refund');
         });
 
         /*
