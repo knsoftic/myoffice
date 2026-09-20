@@ -52,21 +52,32 @@ final class MarketingRouteContractTest extends TestCase
      *
      * @var array<string, array{0: string, 1: string, 2: list<string>}>
      */
+    /**
+     * phase-08-09 §6.4 appended `capture_referral` to every public stack a person can land on, ahead of
+     * `site.cache` so a visitor served a stored page is still captured. The two POST routes and the
+     * authenticated blog preview deliberately do not carry it: a form submission is resolved by the
+     * attribution ladder rather than captured as a fresh visit, and a signed-in reviewer following a
+     * preview link is not a referral.
+     *
+     * `site.careers.apply` is the one POST that carries it, because it lives inside the jobs group and a
+     * POST inherits its group's stack. That is harmless rather than untidy: the middleware acts only on
+     * GET and HEAD, so on a form submission it does nothing at all.
+     */
     private const PUBLIC_ROUTES = [
-        'site.services.index' => ['GET', 'services', ['web', 'site', 'site_module:services', 'site.cache']],
-        'site.services.show' => ['GET', 'services/{service}', ['web', 'site', 'site_module:services', 'site.cache']],
-        'site.portfolio.index' => ['GET', 'portfolio', ['web', 'site', 'site_module:portfolio', 'site.cache']],
-        'site.portfolio.show' => ['GET', 'portfolio/{portfolioItem}', ['web', 'site', 'site_module:portfolio', 'site.cache']],
-        'site.team.index' => ['GET', 'team', ['web', 'site', 'site_module:team', 'site.cache']],
-        'site.blog.index' => ['GET', 'blog', ['web', 'site', 'site_module:blog_posts', 'site.cache']],
-        'site.blog.category' => ['GET', 'blog/category/{blogCategory}', ['web', 'site', 'site_module:blog_posts', 'site.cache']],
-        'site.blog.tag' => ['GET', 'blog/tag/{blogTag}', ['web', 'site', 'site_module:blog_posts', 'site.cache']],
-        'site.blog.show' => ['GET', 'blog/{blogPost}', ['web', 'site', 'site_module:blog_posts']],
+        'site.services.index' => ['GET', 'services', ['web', 'capture_referral', 'site', 'site_module:services', 'site.cache']],
+        'site.services.show' => ['GET', 'services/{service}', ['web', 'capture_referral', 'site', 'site_module:services', 'site.cache']],
+        'site.portfolio.index' => ['GET', 'portfolio', ['web', 'capture_referral', 'site', 'site_module:portfolio', 'site.cache']],
+        'site.portfolio.show' => ['GET', 'portfolio/{portfolioItem}', ['web', 'capture_referral', 'site', 'site_module:portfolio', 'site.cache']],
+        'site.team.index' => ['GET', 'team', ['web', 'capture_referral', 'site', 'site_module:team', 'site.cache']],
+        'site.blog.index' => ['GET', 'blog', ['web', 'capture_referral', 'site', 'site_module:blog_posts', 'site.cache']],
+        'site.blog.category' => ['GET', 'blog/category/{blogCategory}', ['web', 'capture_referral', 'site', 'site_module:blog_posts', 'site.cache']],
+        'site.blog.tag' => ['GET', 'blog/tag/{blogTag}', ['web', 'capture_referral', 'site', 'site_module:blog_posts', 'site.cache']],
+        'site.blog.show' => ['GET', 'blog/{blogPost}', ['web', 'capture_referral', 'site', 'site_module:blog_posts']],
         'site.blog.preview' => ['GET', 'preview/blog/{blogPost}', ['web', 'site', 'auth', 'active']],
-        'site.careers.index' => ['GET', 'careers', ['web', 'site', 'site_module:jobs', 'site.cache']],
-        'site.careers.show' => ['GET', 'careers/{jobOpening}', ['web', 'site', 'site_module:jobs']],
-        'site.careers.apply' => ['POST', 'careers/{jobOpening}/apply', ['web', 'site', 'site_module:jobs', 'throttle:public-apply']],
-        'site.contact.index' => ['GET', 'contact', ['web', 'site']],
+        'site.careers.index' => ['GET', 'careers', ['web', 'capture_referral', 'site', 'site_module:jobs', 'site.cache']],
+        'site.careers.show' => ['GET', 'careers/{jobOpening}', ['web', 'capture_referral', 'site', 'site_module:jobs']],
+        'site.careers.apply' => ['POST', 'careers/{jobOpening}/apply', ['web', 'capture_referral', 'site', 'site_module:jobs', 'throttle:public-apply']],
+        'site.contact.index' => ['GET', 'contact', ['web', 'capture_referral', 'site']],
         'site.contact.store' => ['POST', 'contact', ['web', 'site', 'throttle:public-contact']],
     ];
 

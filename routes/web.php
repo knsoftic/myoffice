@@ -8,6 +8,7 @@ use App\Http\Controllers\Site\ContactController;
 use App\Http\Controllers\Site\HomeController;
 use App\Http\Controllers\Site\PortfolioController;
 use App\Http\Controllers\Site\PreviewController;
+use App\Http\Controllers\Site\ReferralController;
 use App\Http\Controllers\Site\RobotsController;
 use App\Http\Controllers\Site\ServiceController;
 use App\Http\Controllers\Site\SitemapController;
@@ -41,9 +42,14 @@ use Illuminate\Support\Facades\Route;
 */
 
 // The phase-03 §7.6 stacks.
-$pageStack = ['site', 'site.preview', 'site.cache'];
+//
+// phase-08-09 §6.4 puts `capture_referral` **first** on every stack a person can land on, ahead of
+// `site.cache`: an anonymous visitor is served a stored copy of the page, and a capture that ran after
+// the cache middleware would never run at all for exactly the visitors a referral link brings.
+// `$feedStack` is deliberately without it — nobody clicks a partner's flyer into a sitemap.
+$pageStack = ['capture_referral', 'site', 'site.preview', 'site.cache'];
 $feedStack = ['site', 'site.cache'];
-$previewStack = ['site', 'site.preview'];
+$previewStack = ['capture_referral', 'site', 'site.preview'];
 
 Route::get('robots.txt', RobotsController::class)->name('site.robots');
 
@@ -77,19 +83,19 @@ Route::prefix('preview')
 | the contact page (per-request CSRF + SpamGuard token).
 */
 
-Route::middleware(['site', 'site_module:services', 'site.cache'])->group(function (): void {
+Route::middleware(['capture_referral', 'site', 'site_module:services', 'site.cache'])->group(function (): void {
     Route::get('services', [ServiceController::class, 'index'])->name('site.services.index');
     Route::get('services/{service:slug}', [ServiceController::class, 'show'])->name('site.services.show');
 });
 
-Route::middleware(['site', 'site_module:portfolio', 'site.cache'])->group(function (): void {
+Route::middleware(['capture_referral', 'site', 'site_module:portfolio', 'site.cache'])->group(function (): void {
     Route::get('portfolio', [PortfolioController::class, 'index'])->name('site.portfolio.index');
     Route::get('portfolio/{portfolioItem:slug}', [PortfolioController::class, 'show'])->name('site.portfolio.show');
 });
 
-Route::get('team', [TeamController::class, 'index'])->middleware(['site', 'site_module:team', 'site.cache'])->name('site.team.index');
+Route::get('team', [TeamController::class, 'index'])->middleware(['capture_referral', 'site', 'site_module:team', 'site.cache'])->name('site.team.index');
 
-Route::middleware(['site', 'site_module:blog_posts'])->group(function (): void {
+Route::middleware(['capture_referral', 'site', 'site_module:blog_posts'])->group(function (): void {
     Route::get('blog', [BlogController::class, 'index'])->middleware('site.cache')->name('site.blog.index');
     Route::get('blog/category/{blogCategory:slug}', [BlogController::class, 'category'])->middleware('site.cache')->name('site.blog.category');
     Route::get('blog/tag/{blogTag:slug}', [BlogController::class, 'tag'])->middleware('site.cache')->name('site.blog.tag');
@@ -98,13 +104,27 @@ Route::middleware(['site', 'site_module:blog_posts'])->group(function (): void {
 
 Route::get('preview/blog/{blogPost}', [BlogController::class, 'preview'])->whereNumber('blogPost')->middleware(['site', 'auth', 'active'])->name('site.blog.preview');
 
-Route::middleware(['site', 'site_module:jobs'])->group(function (): void {
+Route::middleware(['capture_referral', 'site', 'site_module:jobs'])->group(function (): void {
     Route::get('careers', [CareerController::class, 'index'])->middleware('site.cache')->name('site.careers.index');
     Route::get('careers/{jobOpening:slug}', [CareerController::class, 'show'])->name('site.careers.show');
     Route::post('careers/{jobOpening:slug}/apply', [CareerController::class, 'apply'])->middleware('throttle:public-apply')->name('site.careers.apply');
 });
 
-Route::get('contact', [ContactController::class, 'index'])->middleware('site')->name('site.contact.index');
+Route::get('contact', [ContactController::class, 'index'])->middleware(['capture_referral', 'site'])->name('site.contact.index');
 Route::post('contact', [ContactController::class, 'store'])->middleware(['site', 'throttle:public-contact'])->name('site.contact.store');
+
+/*
+|--------------------------------------------------------------------------
+| phase-08-09 §7.6 — is this referral code real?
+|--------------------------------------------------------------------------
+| Answers {valid, code, collaborator_name?} and nothing else. A dead code and a suspended partner's
+| code answer identically, so the endpoint cannot be used to find out who has been suspended, and the
+| throttle is there because a cheap yes/no over a guessable key space is what an enumeration script
+| wants. No `site` gate: a form that is still reachable while the site is closed must still be able to
+| check a code it is about to submit.
+*/
+Route::post('referral/validate', [ReferralController::class, 'validateCode'])
+    ->middleware('throttle:10,1')
+    ->name('site.referral.validate');
 
 require __DIR__.'/auth.php';

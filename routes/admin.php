@@ -41,6 +41,7 @@ use App\Http\Controllers\Admin\Cms\TechnologyController;
 use App\Http\Controllers\Admin\Cms\TestimonialController;
 use App\Http\Controllers\Admin\Cms\WebsiteOverviewController;
 use App\Http\Controllers\Admin\Collaborator\CollaboratorController;
+use App\Http\Controllers\Admin\Collaborator\ReferralVisitController;
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\Hr\AttendanceController;
 use App\Http\Controllers\Admin\Hr\AttendanceCorrectionController;
@@ -1273,5 +1274,22 @@ Route::prefix('admin')
             Route::post('collaborators/{collaborator}/referral-code', [CollaboratorController::class, 'referralCode'])->whereNumber('collaborator')->middleware(['can:update,collaborator', 'throttle:10,1'])->name('collaborators.referral-code');
             Route::get('collaborators/{collaborator}/referral-links', [CollaboratorController::class, 'referralLinks'])->whereNumber('collaborator')->middleware('can:view,collaborator')->name('collaborators.referral-links');
             Route::get('collaborators/{collaborator}/activity', [CollaboratorController::class, 'activity'])->whereNumber('collaborator')->middleware('can:viewLogs,collaborator')->name('collaborators.activity');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Referral visits — phase-08-09 §7.3
+        |----------------------------------------------------------------------
+        |
+        | Read-only: there is no store, update or destroy, because nobody edits a
+        | click. `report` and `export` sit before `{visit}` for the same reason
+        | the collaborator literals do.
+        |
+        */
+        Route::middleware('module:collaborator_referral_visits')->group(static function (): void {
+            Route::get('referral-visits', [ReferralVisitController::class, 'index'])->middleware('can:collaborator_referral_visits.view_any')->name('referral-visits.index');
+            Route::get('referral-visits/report', [ReferralVisitController::class, 'report'])->middleware('can:collaborator_referral_visits.view_reports')->name('referral-visits.report');
+            Route::get('referral-visits/export/{format}', [ReferralVisitController::class, 'export'])->middleware('can:collaborator_referral_visits.view_reports')->name('referral-visits.export');
+            Route::get('referral-visits/{visit}', [ReferralVisitController::class, 'show'])->whereNumber('visit')->middleware('can:collaborator_referral_visits.view')->name('referral-visits.show');
         });
     });

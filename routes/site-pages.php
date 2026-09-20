@@ -34,6 +34,7 @@ $reserved = implode('|', array_map(
 
 Route::get('{slug}', PageController::class)
     ->where('slug', ($reserved === '' ? '' : '(?!(?:'.$reserved.')$)').'[a-z0-9](?:[a-z0-9-]*[a-z0-9])?')
-    // phase-03 §7.6 stack.
-    ->middleware(['site', 'site.preview', 'site.cache'])
+    // phase-03 §7.6 stack, plus phase-08-09 §6.4's capture: /{slug} is the most likely landing page a
+    // partner puts on a flyer, and it must not be the one stack that forgets to notice `?ref=`.
+    ->middleware(['capture_referral', 'site', 'site.preview', 'site.cache'])
     ->name('site.page');

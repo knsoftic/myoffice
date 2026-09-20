@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Cms\Marketing\Http;
 
+use App\Enums\CollaborationType;
+use App\Enums\CollaboratorStatus;
 use App\Models\Cms\ContactInquiry;
 use App\Models\Cms\JobApplication;
+use App\Models\Collaborator\Collaborator;
 use App\Services\Cms\JobApplicationService;
 use App\Support\SettingsRepository;
 use FilesystemIterator;
@@ -216,9 +219,23 @@ final class MarketingReviewerIsolationTest extends TestCase
         $collaborator = $this->createUserWithRole('Collaborator');
         $reviewer = $this->createUserWithPermissions(['contact_inquiries.view']);
 
+        // phase-08-09 §2.5a promoted `contact_inquiries.collaborator_id` to a real foreign key, so the
+        // snapshot has to name an actual partner record. It always should have: a collaborator is not a
+        // user (D2), and this test previously stored a `users.id` in the column — which only worked
+        // because the constraint Phase 4 deferred did not exist yet (phase-06 R-9).
+        $partner = new Collaborator;
+        $partner->forceFill([
+            'collaborator_code' => 'COL-1001',
+            'referral_code' => 'COL-1001',
+            'user_id' => $collaborator->getKey(),
+            'name' => 'Snapshot Partner',
+            'collaboration_type' => CollaborationType::Freelancer->value,
+            'status' => CollaboratorStatus::Active->value,
+        ])->save();
+
         $inquiry = $this->makeContactInquiry([
             'email' => 'referred-64@example.com',
-            'collaborator_id' => (int) $collaborator->getKey(),
+            'collaborator_id' => (int) $partner->getKey(),
             'referral_code' => 'COL-1001',
         ]);
 

@@ -105,6 +105,28 @@ final class CollaboratorCodeService
     }
 
     /**
+     * The collaborator a referral code names, or null.
+     *
+     * Normalised first, so `col-1024` and `COL--1024` find the same partner as `COL-1024`. Trashed
+     * records are excluded: a removed partner's old flyer must not keep attributing.
+     *
+     * The spine's `ReferralService::resolveCode()` is the published name for this question (§6.4), and
+     * when Phase 10 lands it delegates here rather than writing a second query — `collaborators` is this
+     * phase's table, and two lookups that could disagree about who a code names is exactly the kind of
+     * thing a commission dispute turns on.
+     */
+    public function resolveCode(string $code): ?Collaborator
+    {
+        $code = $this->normalizeReferralCode($code);
+
+        if ($code === '') {
+            return null;
+        }
+
+        return Collaborator::query()->where('referral_code', $code)->first();
+    }
+
+    /**
      * Has anything referenced this collaborator yet? Once something has, the referral code is frozen
      * (INV-C2): every attribution row snapshotted it, and moving it now would make those rows name
      * something that no longer exists.

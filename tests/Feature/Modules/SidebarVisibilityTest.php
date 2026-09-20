@@ -195,6 +195,7 @@ final class SidebarVisibilityTest extends TestCase
                 // Visits` stay hidden behind gate 2 until the phase that registers their routes.
                 'Collaborators',
                 'Applications',
+                'Referral Visits',
                 // phase-03 §7-§8: the nine Website CMS entries whose routes now exist.
                 'Website Overview',
                 'Sections',

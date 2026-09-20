@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\CachePublicResponse;
+use App\Http\Middleware\CaptureReferral;
 use App\Http\Middleware\EnsureClientContext;
 use App\Http\Middleware\EnsureModuleEnabled;
 use App\Http\Middleware\EnsurePanelAccess;
@@ -106,6 +107,11 @@ return Application::configure(basePath: dirname(__DIR__))
             // phase-03 §6.7 full-page cache and §6.12 preview flag (CachePublicResponse skips a preview).
             'site.cache' => CachePublicResponse::class,
             'site.preview' => ResolvePreviewMode::class,
+            // phase-08-09 §6.4 / §7.6. Attached to the PUBLIC stacks in routes/web.php and
+            // routes/site-pages.php and never to a panel group: a signed-in member of staff following a
+            // partner's link is not a referral, and recording one would file a visit under their own
+            // user id for the resolver to argue with later. It is a no-op without the query parameter.
+            'capture_referral' => CaptureReferral::class,
             'role' => RoleMiddleware::class,
             'permission' => PermissionMiddleware::class,
             'role_or_permission' => RoleOrPermissionMiddleware::class,

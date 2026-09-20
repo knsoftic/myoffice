@@ -378,7 +378,14 @@ registries, services, policies, routes and screens still to come**
 | [x] | §6.6 `CollaboratorActivityService`: one audit store (D13), filtered by the indexed `collaborator_id` and **not** by causer — the rows a partner most wants to see are written by the engine with a null causer. The feed is an allowlist filtered **twice**, at write and at read, and `reason` lives in its own column so a staff sentence about a collaborator is structurally unreachable from that collaborator's screen |
 | [x] | §6 proved on **77 assertions** in a rolled-back transaction: the four normalisation cases, the four format refusals, the counter, pending-by-default, an approver creating an active record, a vanity code normalised and then refused to a second taker, the code freezing the moment a visit names it, both URL shapes, all five transition edges, a suspension ending the live session and locking the login, reinstatement, a rejection with no reason refused, and the allowlist dropping a key that was never meant to travel |
 | [ ] | §6.2 `CollaboratorPayoutAccountService` and §6.6 `CollaboratorPortalMetricsService` — both write or read **spine** tables that ship with Phase 10. Deferred to that release rather than written untested against a table that does not exist (§1.4 [D-P8-1]) |
-| [ ] | §6.3-§6.5 the Phase 9 referral resolver, tracking service and link service |
+| [x] | §6.4 `ReferralTrackingService`: the click record and the carrier. A refused code is a **named outcome, not a missing row** — `invalid_code`, `collaborator_not_eligible`, `self_referral`, `bot_filtered` — one row per visitor-code pair with `visits_count` growing, and a conversion stamped exactly once |
+| [x] | §6.4 `ReferralLinkService` + the `CaptureReferral` middleware, on every public stack a person can land on and on no panel group. The cookie is encrypted, `httpOnly`, `sameSite=lax`, and carries a **visit token, never a code** (INV-R2) |
+| [x] | §6.3 `ReferralAttributionResolver`: all six ranks, the five modifiers, losers kept with their reasons, the `referral.decided` payload, and effective dating floored at the click and capped at today |
+| [x] | §7.6 `POST /referral/validate` (throttled 10/min) and `<x-site.referral-field>`. A dead code and a suspended partner's code answer **identically**, so the endpoint cannot be used to find out who has been suspended |
+| [x] | §7.3 / §8.6 the visit register, the conversion report and the dead-code panel — read-only, with the IP masked to a /24 unless the viewer holds `collaborator_referral_visits.view_logs` |
+| [x] | §6 proved on **58 assertions** in a rolled-back transaction, and the screens checked in a browser against the dev database with all four capture paths walked through real HTTP |
+| [x] | Integration gate `tests/Feature/Collaborator/ReferralCaptureTest.php` — **18 tests**: the middleware, the cookie shape, a dead code kept as evidence, one visit per partner, a crawler filtered, the public validator's three-key answer, the ladder's ranks 1-6, a forged token, an expired visit, effective dating, the audit payload carrying no money, and the register's IP masking |
+| [ ] | §6.5 linking and re-linking, and the change-attribution wizard (§8.8) — both write `collaborator_referrals`, which is the **spine's** table and ships with Phase 10 |
 | [x] | §7.1 routes: 18 admin routes — the list, the approval queue, create / edit / soft delete / restore, approve / reject / status, login provisioning, the throttled referral-code change, the referral-links screen, the activity trail, the throttled picker and the CSV export |
 | [x] | §9 `CollaboratorPolicy`: missing ability → 403; holding it but not reaching the row → **404** (`denyAsNotFound`); `delete` additionally refused while commission or a payout is in flight; `forceDelete` refused outright — **and repeated as a model `deleting` hook**, because `Gate::before` allows a Super Admin everything and never reaches the policy at all |
 | [x] | §8 screens: 7 Blade views — the filtered list, the applications queue with its stale-application flag, the record with its code-lock state, the shared create / edit form, the referral-links screen with a live preview, and the audit trail |
@@ -414,6 +421,70 @@ registries, services, policies, routes and screens still to come**
 ---
 
 ## 6. Change Log
+
+### 2026-09-20 — Phase 9: the click, the carrier, and the ladder that decides
+
+**A refused code is still written down.** `invalid_code`, `collaborator_not_eligible`, `self_referral`
+and `bot_filtered` are named outcomes on a kept row rather than a missing one, because "forty-one people
+this month used a code that no longer exists" is something a business acts on, and a gap in a table
+cannot tell it. The conversion report's dead-code panel is that fact made visible — it is how a partner
+who printed an old flyer actually gets found.
+
+**The browser never carries a referral code.** The session, the cookie and the hidden form field all
+carry the same opaque **visit token**, and the server re-resolves the collaborator from the row it names
+on every read (INV-R2). A visitor who edits the value can at worst point at a visit that does not exist;
+they can never name a partner they never came through, which is exactly what a code in a cookie would
+let them do. The cookie is encrypted, `httpOnly` and `sameSite=lax`, and the test asserts the code does
+not appear in it.
+
+**Three carriers, deliberately.** The session survives a form post, the cookie survives the session
+expiring between the click and the admission a week later, and the hidden field survives a visitor who
+blocks cookies. They agree because all three hold the same token.
+
+**`capture_referral` runs before `site.cache`.** An anonymous visitor is served a stored copy of the
+page, so a capture placed after the cache middleware would never run at all — for precisely the
+visitors a referral link brings. It is attached to every public stack a person can land on (including
+`/{slug}`, the most likely page on a flyer) and to **no** panel group: a signed-in member of staff
+following a partner's link is not a referral.
+
+**The ladder, and what it keeps.** Six ranks, first eligible wins: a staff pick, a typed code, then the
+session, the cookie, the hidden field and the raw `?ref=`. Staff choosing "no collaborator" is rank 1
+with a **null winner** — a decision, not an absence — and no referral row is created at all. Every
+lower rank that named a *different* partner is kept as a loser with its reason, because the question
+this system will actually be asked is never "who won"; it is "why did my code not win", six weeks
+later, by somebody whose commission depended on the answer.
+
+**Effective dating is floored at the click.** A back-dated admission credits the partner from the
+admission date, never from before their link was used, and never from the future. Both directions are
+asserted.
+
+**Two defects the work found.**
+
+- **`uq_crv_token` is unique, and the first draft ignored that.** A visitor arriving through a *second*
+  partner's link reused the token they already carried, which meant a 1062 that `capture()`'s own
+  try/catch swallowed — so the second partner's click silently vanished. Found by walking four real
+  HTTP requests with curl and reading the table. A different code now mints a new token, and the older
+  visit stays as evidence for `first_touch` attribution to find.
+- **Staff "no collaborator" was being overruled by a cookie.** The flag was resolved *after* the lower
+  ranks had already produced a winner, so a captured code quietly won anyway. It is rank 1 and is now
+  resolved as one. Found by the probe.
+
+**Two earlier phases' contracts moved, deliberately.** Phase 3's and Phase 4's route manifests pin the
+exact middleware stack of every public route — which is the point of them — so adding `capture_referral`
+drifted sixteen rows. They are updated with the reason. `site.careers.apply` is the one POST that
+carries it, because it lives inside the jobs group and a POST inherits its group's stack; that is
+harmless, because the middleware acts only on GET and HEAD.
+
+**And one test that was passing for the wrong reason.** `MarketingReviewerIsolationTest`'s
+contract-64 case stored a `users.id` in `contact_inquiries.collaborator_id`. A collaborator is not a
+user (D2), and it only worked because the foreign key Phase 4 deferred did not exist yet — Phase 6's R-9
+named that exposure out loud. The promotion in this release turned it into a 1452, and the fixture now
+names a real partner record.
+
+**Verified:** 58 probe assertions, 38 tests in the two collaborator gates, and 188 across Modules,
+Views, Platform and the smoke test; the CMS and marketing route suites green at 121 after the manifest
+updates.
+
 
 ### 2026-09-20 — Phase 8: the admin screens, and a guarantee that had an exception in it
 
@@ -1236,6 +1307,10 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-20 | Phase 8 integration gate | `tests/Feature/Collaborator` | PASS — **20 tests / 77 assertions**: every screen's permission, module gating denying a Super Admin, 404-not-403 for a row out of reach, the picker's exact five columns with no contact detail in the body, create → approve → login with `must_change_password`, a rejection needing a reason, INV-C4 across all four statuses **and no `commission_eligible` column**, a suspension ending the live session, the closed §6.2.2 table, INV-C2's lock, a taken code refused without naming its holder, and the activity allowlist |
 | 2026-09-20 | Phase 8 collaborator screens, in a browser | three partners seeded into `my_office`, every screen opened, the edit form submitted through the UI | PASS — the list, the queue, the record, the two forms, the referral links and the audit trail; the skill set replaced rather than grew, the duplicate collapsed, and the picker returned five fields over `fetch`. Found 3 real defects (`forceDelete` unreachable for a Super Admin, `collaborator_id` never stamped by the spatie path, the preview URL built from a different base), all fixed |
 | 2026-09-20 | Phase 8 screen regression | `tests/Feature/{Modules,Views,Audit,Rbac,Panels}` | PASS — **313 tests**; `SidebarVisibilityTest` extended with the two new labels, the other five collaborator entries still hidden behind gate 2 |
+| 2026-09-20 | Phase 9 §6.3 / §6.4 services | probe in a rolled-back transaction | PASS — **58/58**: all four classification outcomes, one row per visitor-code pair, a different partner minting a new token, tracking switched off writing nothing, a conversion stamped once, all six ladder ranks with the right channel and source, a staff pick keeping two losers, staff "nobody" beating a captured code, a suspended partner refused and a pending one allowed with a confirmation, a forged token naming nobody, an expired visit stamping itself, effective dating floored at the click and capped at today, and the audit payload carrying no money anywhere. Found 2 real bugs (the unique-token collision, staff "nobody" resolved too late), both fixed |
+| 2026-09-20 | Phase 9 capture, over real HTTP | 4 curl requests against the dev site, then the rows read back | PASS — `ref_attr` set encrypted / httpOnly / sameSite=lax with a 30-day life; `captured` then `visits_count = 2` on a second page; `invalid_code` for a dead code; `collaborator_not_eligible` naming the suspended partner; `bot_filtered` for a crawler. The register and the conversion report were then read in a browser |
+| 2026-09-20 | Phase 9 integration gate | `tests/Feature/Collaborator/ReferralCaptureTest` | PASS — **18 tests**; with Phase 8's gate, `tests/Feature/Collaborator` is **38 tests / 145 assertions** |
+| 2026-09-20 | Phase 8/9 public-route regression | `tests/Feature/Cms` + `{Modules,Views,Platform,SmokeTest}` | PASS — 16 manifest rows and 12 marketing contract rows updated for `capture_referral` with the reason recorded; one Phase 4 fixture corrected (it stored a `users.id` in `contact_inquiries.collaborator_id`, which the new foreign key exposed) |
 
 ---
 

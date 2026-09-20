@@ -819,7 +819,7 @@ return [
     [
         'route' => 'site.home',
         'methods' => ['GET', 'HEAD'],
-        'middleware' => ['web', 'site', 'site.preview', 'site.cache'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site.preview', 'site.cache'],
         'permission' => null,
         'panel' => 'public',
         'state_changing' => false,
@@ -829,7 +829,7 @@ return [
     [
         'route' => 'site.page',
         'methods' => ['GET', 'HEAD'],
-        'middleware' => ['web', 'site', 'site.preview', 'site.cache'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site.preview', 'site.cache'],
         'permission' => null,
         'panel' => 'public',
         'state_changing' => false,
@@ -839,7 +839,7 @@ return [
     [
         'route' => 'site.preview.page',
         'methods' => ['GET', 'HEAD'],
-        'middleware' => ['web', 'site', 'site.preview'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site.preview'],
         'permission' => null,
         'panel' => 'public',
         'state_changing' => false,
@@ -849,7 +849,7 @@ return [
     [
         'route' => 'site.preview.section',
         'methods' => ['GET', 'HEAD'],
-        'middleware' => ['web', 'site', 'site.preview'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site.preview'],
         'permission' => null,
         'panel' => 'public',
         'state_changing' => false,
@@ -2428,7 +2428,7 @@ return [
     [
         'route' => 'site.blog.category',
         'methods' => ['GET', 'HEAD'],
-        'middleware' => ['web', 'site', 'site_module:blog_posts', 'site.cache'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:blog_posts', 'site.cache'],
         'permission' => null,
         'panel' => 'public',
         'state_changing' => false,
@@ -2438,7 +2438,7 @@ return [
     [
         'route' => 'site.blog.index',
         'methods' => ['GET', 'HEAD'],
-        'middleware' => ['web', 'site', 'site_module:blog_posts', 'site.cache'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:blog_posts', 'site.cache'],
         'permission' => null,
         'panel' => 'public',
         'state_changing' => false,
@@ -2458,7 +2458,7 @@ return [
     [
         'route' => 'site.blog.show',
         'methods' => ['GET', 'HEAD'],
-        'middleware' => ['web', 'site', 'site_module:blog_posts'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:blog_posts'],
         'permission' => null,
         'panel' => 'public',
         'state_changing' => false,
@@ -2468,7 +2468,7 @@ return [
     [
         'route' => 'site.blog.tag',
         'methods' => ['GET', 'HEAD'],
-        'middleware' => ['web', 'site', 'site_module:blog_posts', 'site.cache'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:blog_posts', 'site.cache'],
         'permission' => null,
         'panel' => 'public',
         'state_changing' => false,
@@ -2478,7 +2478,7 @@ return [
     [
         'route' => 'site.careers.apply',
         'methods' => ['POST'],
-        'middleware' => ['web', 'site', 'site_module:jobs', 'throttle:public-apply'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:jobs', 'throttle:public-apply'],
         'permission' => null,
         'panel' => 'public',
         'state_changing' => true,
@@ -2488,7 +2488,7 @@ return [
     [
         'route' => 'site.careers.index',
         'methods' => ['GET', 'HEAD'],
-        'middleware' => ['web', 'site', 'site_module:jobs', 'site.cache'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:jobs', 'site.cache'],
         'permission' => null,
         'panel' => 'public',
         'state_changing' => false,
@@ -2498,7 +2498,7 @@ return [
     [
         'route' => 'site.careers.show',
         'methods' => ['GET', 'HEAD'],
-        'middleware' => ['web', 'site', 'site_module:jobs'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:jobs'],
         'permission' => null,
         'panel' => 'public',
         'state_changing' => false,
@@ -2508,7 +2508,7 @@ return [
     [
         'route' => 'site.contact.index',
         'methods' => ['GET', 'HEAD'],
-        'middleware' => ['web', 'site'],
+        'middleware' => ['web', 'capture_referral', 'site'],
         'permission' => null,
         'panel' => 'public',
         'state_changing' => false,
@@ -2528,7 +2528,7 @@ return [
     [
         'route' => 'site.portfolio.index',
         'methods' => ['GET', 'HEAD'],
-        'middleware' => ['web', 'site', 'site_module:portfolio', 'site.cache'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:portfolio', 'site.cache'],
         'permission' => null,
         'panel' => 'public',
         'state_changing' => false,
@@ -2538,7 +2538,7 @@ return [
     [
         'route' => 'site.portfolio.show',
         'methods' => ['GET', 'HEAD'],
-        'middleware' => ['web', 'site', 'site_module:portfolio', 'site.cache'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:portfolio', 'site.cache'],
         'permission' => null,
         'panel' => 'public',
         'state_changing' => false,
@@ -2548,7 +2548,7 @@ return [
     [
         'route' => 'site.services.index',
         'methods' => ['GET', 'HEAD'],
-        'middleware' => ['web', 'site', 'site_module:services', 'site.cache'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:services', 'site.cache'],
         'permission' => null,
         'panel' => 'public',
         'state_changing' => false,
@@ -2558,7 +2558,7 @@ return [
     [
         'route' => 'site.services.show',
         'methods' => ['GET', 'HEAD'],
-        'middleware' => ['web', 'site', 'site_module:services', 'site.cache'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:services', 'site.cache'],
         'permission' => null,
         'panel' => 'public',
         'state_changing' => false,
@@ -2568,7 +2568,7 @@ return [
     [
         'route' => 'site.team.index',
         'methods' => ['GET', 'HEAD'],
-        'middleware' => ['web', 'site', 'site_module:team', 'site.cache'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:team', 'site.cache'],
         'permission' => null,
         'panel' => 'public',
         'state_changing' => false,
