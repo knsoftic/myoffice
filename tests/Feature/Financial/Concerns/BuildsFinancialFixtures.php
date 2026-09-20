@@ -1,0 +1,279 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature\Financial\Concerns;
+
+use App\DataObjects\Collaborator\RuleData;
+use App\DataObjects\Finance\PaymentResult;
+use App\DataObjects\Finance\RecordPaymentData;
+use App\Enums\CollaborationType;
+use App\Enums\CollaboratorStatus;
+use App\Enums\CommissionCalculationType;
+use App\Enums\CommissionScope;
+use App\Enums\PaymentMethod;
+use App\Enums\ReferralSource;
+use App\Enums\ReferralSubject;
+use App\Enums\StudentFeeStatus;
+use App\Enums\StudentFeeType;
+use App\Models\Collaborator\Collaborator;
+use App\Models\Collaborator\CollaboratorCommissionLedgerEntry;
+use App\Models\Collaborator\CollaboratorWallet;
+use App\Models\Institute\StudentFee;
+use App\Models\Institute\StudentFeeInstallment;
+use App\Models\Institute\StudentFeePayment;
+use App\Services\Collaborator\CommissionRuleService;
+use App\Services\Collaborator\ReferralService;
+use App\Services\Finance\PaymentService;
+use App\Support\Money;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+
+/**
+ * Fixtures and the shared assertion for the financial acceptance suite (phase-10-12 §11).
+ *
+ * **`assertWalletMatchesLedger()` is the helper every money test ends with.** The contract has it call
+ * `CommissionReconciliationService`, which Phase 12 ships; until then it runs the same canonical SQL of
+ * spine §6.5.1 inline. When the service arrives this body becomes a call to it and every test in the
+ * suite gains the other seven checks for free — which is the point of every test ending in the same
+ * helper rather than in its own bespoke arithmetic.
+ */
+trait BuildsFinancialFixtures
+{
+    private int $fixtureSequence = 0;
+
+    /**
+     * An active partner with a student commission rule in force.
+     */
+    protected function partner(
+        string $rate = '10.0000',
+        ?string $fixedAmount = null,
+        array $rule = [],
+    ): Collaborator {
+        $this->fixtureSequence++;
+        $suffix = str_pad((string) $this->fixtureSequence, 4, '0', STR_PAD_LEFT);
+
+        $collaborator = new Collaborator;
+        $collaborator->forceFill([
+            'collaborator_code' => 'COL-T'.$suffix,
+            'referral_code' => 'acc'.$suffix,
+            'name' => 'Acceptance Partner '.$suffix,
+            'collaboration_type' => CollaborationType::ReferralPartner->value,
+            'status' => CollaboratorStatus::Active->value,
+        ])->save();
+
+        $collaborator->refresh();
+
+        app(CommissionRuleService::class)->createVersion(
+            $collaborator,
+            $rule['scope'] ?? CommissionScope::Student,
+            new RuleData(
+                scope: $rule['scope'] ?? CommissionScope::Student,
+                calculationType: $fixedAmount === null
+                    ? CommissionCalculationType::Percentage
+                    : CommissionCalculationType::Fixed,
+                effectiveFrom: Carbon::parse($rule['from'] ?? '2020-01-01'),
+                rate: $fixedAmount === null ? $rate : null,
+                fixedAmount: $fixedAmount,
+                release: $rule['release'] ?? null,
+                baseOverride: $rule['base'] ?? null,
+                isEnabled: $rule['enabled'] ?? true,
+                minPaymentAmount: $rule['min'] ?? null,
+                maxCommissionAmount: $rule['max'] ?? null,
+                appliesToFeeTypes: $rule['fee_types'] ?? null,
+            ),
+            'Acceptance fixture',
+        );
+
+        return $collaborator;
+    }
+
+    /**
+     * A fee charge, optionally credited to a partner from a given date.
+     */
+    protected function charge(
+        ?Collaborator $collaborator = null,
+        string $gross = '30000.00',
+        array $attributes = [],
+    ): StudentFee {
+        $this->fixtureSequence++;
+        $studentId = $attributes['student_id'] ?? (900000 + $this->fixtureSequence);
+
+        if ($collaborator !== null) {
+            app(ReferralService::class)->attachSubject(
+                ReferralSubject::Student,
+                (int) $studentId,
+                $collaborator,
+                ReferralSource::ManualSelection,
+                null,
+                Carbon::parse($attributes['referred_on'] ?? '2020-01-01'),
+            );
+        }
+
+        $discount = $attributes['discount_amount'] ?? '0.00';
+        $net = Money::sub(Money::of($gross), Money::of($discount));
+
+        $fee = new StudentFee;
+        $fee->forceFill(array_merge([
+            'fee_number' => 'FS-T'.str_pad((string) $this->fixtureSequence, 5, '0', STR_PAD_LEFT),
+            'student_id' => $studentId,
+            'fee_type' => StudentFeeType::CourseFee->value,
+            'gross_amount' => Money::of($gross),
+            'discount_amount' => Money::of($discount),
+            'net_amount' => $net,
+            'balance_amount' => $net,
+            'status' => StudentFeeStatus::Pending->value,
+        ], array_diff_key($attributes, array_flip(['student_id', 'referred_on', 'discount_amount']))));
+        $fee->save();
+
+        return $fee->refresh();
+    }
+
+    /**
+     * An installment line on a charge.
+     */
+    protected function installment(StudentFee $fee, int $number, string $amount, string $due = '2026-03-01'): StudentFeeInstallment
+    {
+        $line = new StudentFeeInstallment;
+        $line->forceFill([
+            'student_fee_id' => $fee->getKey(),
+            'installment_no' => $number,
+            'amount' => Money::of($amount),
+            'due_date' => $due,
+        ])->save();
+
+        return $line->refresh();
+    }
+
+    /**
+     * Take money — through the service, the way every real caller does.
+     */
+    protected function receive(StudentFee $fee, string $amount, array $options = []): PaymentResult
+    {
+        $this->fixtureSequence++;
+
+        return app(PaymentService::class)->recordStudentFeePayment($fee, new RecordPaymentData(
+            amount: $amount,
+            method: $options['method'] ?? PaymentMethod::Cash,
+            paidOn: Carbon::parse($options['on'] ?? '2026-03-10'),
+            installmentId: $options['installment'] ?? null,
+            idempotencyKey: $options['key'] ?? 'acc-'.$this->fixtureSequence,
+            confirmDuplicate: $options['confirm_duplicate'] ?? true,
+        ));
+    }
+
+    protected function entryFor(StudentFeePayment $payment): ?CollaboratorCommissionLedgerEntry
+    {
+        return CollaboratorCommissionLedgerEntry::query()
+            ->where('student_fee_payment_id', $payment->getKey())
+            ->earnings()
+            ->first();
+    }
+
+    protected function walletOf(Collaborator $collaborator): ?CollaboratorWallet
+    {
+        return CollaboratorWallet::query()->where('collaborator_id', $collaborator->getKey())->first();
+    }
+
+    /**
+     * Write a setting the way the system context does — every commission key is registry-declared and
+     * therefore refused by the ordinary low-level setter.
+     */
+    protected function setting(string $key, mixed $value): void
+    {
+        settings_repo()->asSystem(fn ($settings) => $settings->set($key, $value));
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | The assertion every money test ends with (phase-10-12 §11)
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * The wallet cache equals the ledger, and the §6.5.2 closed identity holds.
+     *
+     * Spine §6.5.1's canonical SQL, run here rather than re-derived per test: a test that computed the
+     * expected balance its own way would be checking the cache against a second opinion instead of
+     * against the ledger.
+     */
+    protected function assertWalletMatchesLedger(Collaborator $collaborator): void
+    {
+        $wallet = $this->walletOf($collaborator);
+
+        if ($wallet === null) {
+            $this->assertSame(
+                0,
+                CollaboratorCommissionLedgerEntry::query()->where('collaborator_id', $collaborator->getKey())->count(),
+                'There is no wallet, so there must be no ledger entries either.'
+            );
+
+            return;
+        }
+
+        $sum = static fn (array $statuses): string => Money::of((string) (
+            CollaboratorCommissionLedgerEntry::query()
+                ->where('collaborator_id', $wallet->collaborator_id)
+                ->whereIn('status', $statuses)
+                ->sum('signed_amount') ?: '0.00'
+        ));
+
+        $pending = $sum(['pending', 'approved']);
+        $payable = $sum(['available', 'paid']);
+
+        $lifetime = Money::of((string) (
+            CollaboratorCommissionLedgerEntry::query()
+                ->where('collaborator_id', $wallet->collaborator_id)
+                ->whereNot('status', 'cancelled')
+                ->sum('signed_amount') ?: '0.00'
+        ));
+
+        $reserved = Money::of((string) (
+            DB::table('collaborator_payout_allocations as a')
+                ->join('collaborator_payouts as p', 'p.id', '=', 'a.payout_id')
+                ->where('a.collaborator_id', $wallet->collaborator_id)
+                ->where('a.is_released', 0)
+                ->whereIn('p.status', ['requested', 'pending', 'approved'])
+                ->sum('a.amount') ?: '0.00'
+        ));
+
+        $paid = Money::of((string) (
+            DB::table('collaborator_payout_allocations as a')
+                ->join('collaborator_payouts as p', 'p.id', '=', 'a.payout_id')
+                ->where('a.collaborator_id', $wallet->collaborator_id)
+                ->where('a.is_released', 0)
+                ->where('p.status', 'paid')
+                ->sum('a.amount') ?: '0.00'
+        ));
+
+        $this->assertSame($pending, Money::of((string) $wallet->pending_balance),
+            'R1: the wallet\'s pending balance must equal the ledger\'s.');
+
+        $this->assertSame(
+            Money::sub(Money::sub($payable, $reserved), $paid),
+            Money::of((string) $wallet->available_balance),
+            'R1: available must equal payable minus reserved minus paid.'
+        );
+
+        $this->assertSame($lifetime, Money::of((string) $wallet->lifetime_earned),
+            'R1: lifetime earned must equal the ledger, excluding cancelled rows.');
+
+        $this->assertSame(
+            $lifetime,
+            Money::sum(
+                (string) $wallet->pending_balance,
+                (string) $wallet->available_balance,
+                (string) $wallet->reserved_balance,
+                (string) $wallet->paid_balance,
+            ),
+            'R2, the closed identity: lifetime = pending + available + reserved + paid.'
+        );
+
+        $this->assertSame(
+            0,
+            CollaboratorCommissionLedgerEntry::query()->where('amount', '<=', 0)->count(),
+            'INV-2: a zero-amount ledger row must never exist — a guard that produced nothing writes a '
+            .'skip reason on the payment instead.'
+        );
+    }
+}
