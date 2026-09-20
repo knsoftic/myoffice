@@ -2790,6 +2790,169 @@ final class SettingsRegistry
                 'span' => 12,
                 'sort' => 150,
             ],
+
+            /*
+            |------------------------------------------------------------------
+            | phase-08-09 §5 — the sixteen keys the collaborator record and the
+            | referral machinery need. No new group, and no Phase 2 or spine key
+            | is redefined: the thirteen above and the spine's ten are used as
+            | they are defined.
+            |------------------------------------------------------------------
+            */
+
+            'collaborator_code_prefix' => [
+                'label' => 'Collaborator ID prefix',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:12'],
+                'default' => 'COL-',
+                'help' => 'The first collaborator is COL-1001.',
+                'span' => 4,
+                'sort' => 160,
+            ],
+            'collaborator_code_next_number' => [
+                'label' => 'Next collaborator number',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['nullable', 'integer', 'min:1'],
+                'default' => 1001,
+                'help' => 'Advanced only by the numbering service, under a row lock, never by this form (D62).',
+                'readonly' => true,
+                'span' => 4,
+                'sort' => 170,
+            ],
+            'referral_code_editable' => [
+                'label' => 'Allow a vanity referral code',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'A code can still only be changed while nothing references it (INV-C2).',
+                'span' => 4,
+                'sort' => 180,
+            ],
+            'referral_query_param' => [
+                'label' => 'Referral URL parameter',
+                'type' => self::TYPE_TEXT,
+                // It goes straight into a query string, so it has to be a bare identifier.
+                'rules' => ['required', 'string', 'regex:/^[A-Za-z][A-Za-z0-9_]{0,15}$/'],
+                'default' => 'ref',
+                'help' => 'The ?ref= in /admission?ref=COL-1001.',
+                'span' => 4,
+                'sort' => 190,
+            ],
+            'referral_landing_path' => [
+                'label' => 'Student referral landing page',
+                'type' => self::TYPE_TEXT,
+                // A path on this site, never an absolute URL: a referral link that leaves the site is
+                // an open redirect with the collaborator's name on it.
+                'rules' => ['required', 'string', 'max:191', 'regex:/^\\/(?!\\/)[A-Za-z0-9\\-._~\\/]*$/'],
+                'default' => '/admission',
+                'span' => 4,
+                'sort' => 200,
+            ],
+            'referral_inquiry_landing_path' => [
+                'label' => 'Client inquiry landing page',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['required', 'string', 'max:191', 'regex:/^\\/(?!\\/)[A-Za-z0-9\\-._~\\/]*$/'],
+                'default' => '/contact',
+                'help' => 'Where a software-project referral link lands.',
+                'span' => 4,
+                'sort' => 210,
+            ],
+            'referral_cookie_days' => [
+                'label' => 'Attribution window',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:3650'],
+                'default' => 30,
+                'suffix' => 'days',
+                'help' => 'How long a click can still win an attribution. Also sets a visit\'s expiry.',
+                'span' => 4,
+                'sort' => 220,
+            ],
+            'referral_attribution_model' => [
+                'label' => 'Which visit wins',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string', 'in:first_touch,last_touch'],
+                'default' => 'last_touch',
+                'options' => [
+                    'first_touch' => 'First touch — the partner who introduced them',
+                    'last_touch' => 'Last touch — the partner who closed them',
+                ],
+                'help' => 'Used only when one visitor arrived through several partners.',
+                'span' => 4,
+                'sort' => 230,
+            ],
+            'referral_visit_tracking_enabled' => [
+                'label' => 'Record referral clicks',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Off keeps attribution working; it only stops the click register filling up.',
+                'span' => 4,
+                'sort' => 240,
+            ],
+            'referral_visit_retention_days' => [
+                'label' => 'Keep referral clicks for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:30', 'max:3650'],
+                'default' => 365,
+                'suffix' => 'days',
+                'help' => 'A click that converted, or that anything still points at, is never pruned.',
+                'span' => 4,
+                'sort' => 250,
+            ],
+            'referral_override_reason_required' => [
+                'label' => 'Require a reason to override a captured code',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'When staff pick a different partner than the link named.',
+                'span' => 6,
+                'sort' => 260,
+            ],
+            'referral_self_attribution_blocked' => [
+                'label' => 'Block self-referral',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'A partner\'s own logged-in visit never earns them commission.',
+                'span' => 6,
+                'sort' => 270,
+            ],
+            'referral_public_name_visible' => [
+                'label' => 'Show the partner\'s name on the public form',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Shows "Referred by Ali Traders" once the code validates.',
+                'span' => 6,
+                'sort' => 280,
+            ],
+            'pending_application_alert_days' => [
+                'label' => 'Flag a waiting application after',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:365'],
+                'default' => 3,
+                'suffix' => 'days',
+                'span' => 6,
+                'sort' => 290,
+            ],
+            'payout_account_verification_required' => [
+                'label' => 'Pay only to a verified account',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Phase 8 owns the verification screen; the payout guard itself is the spine\'s.',
+                'span' => 6,
+                'sort' => 300,
+            ],
+            'seed_commission_rules_on_approval' => [
+                'label' => 'Create the first commission rules at approval',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Uses the default type and rate above. Skipped while the commission module is off.',
+                'span' => 6,
+                'sort' => 310,
+            ],
         ];
     }
 

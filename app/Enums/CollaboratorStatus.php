@@ -94,4 +94,35 @@ enum CollaboratorStatus: string
     {
         return $this === self::Pending || $this === self::Inactive;
     }
+
+    /**
+     * §6.2.2's transition table, and nothing else is legal.
+     *
+     * Four states, closed on purpose: a status somebody can set freely is a status that eventually means
+     * nothing, and this one decides whether money is earned (INV-C4).
+     *
+     * `pending` is a one-way door — it is where a record starts, and nothing ever returns to it. The two
+     * ways out are approval and rejection, and rejection lands on `inactive` rather than inventing a
+     * fifth state, because §34 names four.
+     *
+     * Reinstating from `inactive` or `suspended` **backfills no commission**: an admin with
+     * `collaborator_commissions.approve` runs `commissions:evaluate` explicitly, and the spine's
+     * `uq_cle_source` makes that safe exactly once.
+     *
+     * @return list<self>
+     */
+    public function allowedTransitions(): array
+    {
+        return match ($this) {
+            self::Pending => [self::Active, self::Inactive],
+            self::Active => [self::Inactive, self::Suspended],
+            self::Inactive => [self::Active],
+            self::Suspended => [self::Active, self::Inactive],
+        };
+    }
+
+    public function canTransitionTo(self $target): bool
+    {
+        return in_array($target, $this->allowedTransitions(), true);
+    }
 }

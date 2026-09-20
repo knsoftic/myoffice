@@ -143,6 +143,26 @@ class Collaborator extends Model
         return 'collaborators';
     }
 
+    /**
+     * The default is `$fillable`, which would log the profile and miss everything that matters. The four
+     * columns below are not fillable **because** they each have their own service method, and they are
+     * exactly the ones a commission dispute asks about: the public code, the state that decides whether
+     * money is earned, the reason it changed, and who got a login.
+     *
+     * `collaborator_code` is absent because it cannot change (INV-C1), and `notes` is absent because it
+     * is internal and is never shown in the partner's own feed.
+     *
+     * @return array<int, string>
+     */
+    protected function activityLogAttributes(): array
+    {
+        return [
+            'name', 'company_name', 'photo_path', 'email', 'phone', 'whatsapp', 'country', 'address',
+            'collaboration_type', 'joining_date',
+            'referral_code', 'status', 'status_reason', 'user_id', 'approved_at', 'approved_by',
+        ];
+    }
+
     /*
     |--------------------------------------------------------------------------
     | Questions the rest of the phase asks

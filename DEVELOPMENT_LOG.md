@@ -369,8 +369,16 @@ registries, services, policies, routes and screens still to come**
 | [x] | §2.5a and [D-P6-1]: the nine deferred FK columns earlier phases shipped unconstrained are now real foreign keys — `activity_log.collaborator_id`, `contact_inquiries.collaborator_id`, five Phase 6 columns (`projects`, `project_members`, `tasks`, `time_entries`, `time_entry_segments`, all **RESTRICT**), and the two `referral_visit_id` columns on `contact_inquiries` and `leads`. Pre-existing orphans are nulled by a **reported** pre-pass and never deleted, because a silent repair of attribution data is what INV-R1 forbids |
 | [x] | §2 object list verified against `information_schema` on both databases: **40/40** — 4 tables, the §2.1 column list exactly (and no `branch_id`, [D-P8-2]), 5 named unique indexes, 2 CHECKs the server actually kept, 9 FKs with the right delete rules, every clock column `DATETIME` and **0** columns silently carrying `ON UPDATE CURRENT_TIMESTAMP` (D67), and no `deleted_at` on the three append-only tables (D19) |
 | [x] | Models: `Collaborator`, `CollaboratorSkill`, `CollaboratorReferralVisit`. Proved on **45 assertions** in a rolled-back transaction: INV-C1 and INV-C2 both refusing a bare save, the four unique guards, INV-C4 (only `active` and untrashed earns; a soft delete stops it), `canLogin()`, the derived skill slug making a re-submitted form idempotent, the services pivot attaching and detaching, an expired / bot / dead-code / already-spent visit never attributing **and the query scope agreeing with the loaded row every time**, both CHECKs biting, and the RESTRICT wall refusing to force-delete a partner who has a visit |
-| [ ] | §4 PermissionRegistry (2 new slugs + the §4.3 portal set), §5 SettingsRegistry (`collaborator` group), seeders |
-| [ ] | §6 services: `CollaboratorCodeService`, `CollaboratorService`, `CollaboratorOnboardingService`, `CollaboratorPayoutAccountService`, `CollaboratorPortalMetricsService`, `CollaboratorActivityService` |
+| [x] | §4 PermissionRegistry: 2 new slugs (`collaborator_payout_accounts`, `collaborator_referral_visits`), `approve` / `reject` / `view_logs` added to `collaborators`, `create` / `edit` / `change_status` / `view_logs` to `collaborator_referrals`, and 6 new `collaborator_portal.*` — **101 modules / 994 permissions**. Nothing was removed: `assign` and `upload` on `collaborators` stay because taking an ability away revokes a permission an administrator already granted (D65) |
+| [x] | §5 SettingsRegistry: the 16 new `collaborator.*` keys, no new group and no Phase 2 or spine key redefined — **309 settings in 17 groups**. `collaborator_code_next_number` is `readonly` (D62): a settings form posts every field, and a stale counter would re-issue a code somebody already quotes |
+| [x] | §4.3 role grants, idempotent: **Accountant** gains `collaborator_payout_accounts.*` (whoever pays a partner registers where the money goes); **Sales Executive** and **Receptionist** gain `collaborators.view_any` + `.view` + `collaborator_referrals.create` and deliberately **no** `view_financial`; the **Collaborator** role picks up the six new portal permissions through the existing "everything except `payout_request`" rule |
+| [x] | D65 convergence on the dev database, twice: first run **+2 modules, +16 settings, +37 grants, 0 changed, 0 revoked**; second run **0 / 0 / 0**. Backed up first |
+| [x] | §6.1 `CollaboratorCodeService`: the one normaliser (`col-1024`, ` COL-1024 ` and `COL--1024` are one code), the `%04d` counter through **Phase 5's** `DocumentNumberService` (D27 — no second `FOR UPDATE` counter exists), `assertAvailable()` whose message names nothing about the holder, INV-C2's lock walked over all three referencing tables with a `hasTable()` guard each, and `referralUrl()` appending to an existing query string instead of overwriting it |
+| [x] | §6.2 `CollaboratorService` and `CollaboratorOnboardingService`: create / update / `syncSkills` / `syncServices` / soft delete with a mandatory reason; §6.2.2's transition table on the enum (`allowedTransitions()`), approval, rejection landing on `inactive` rather than inventing a fifth status, and login provisioning **through Phase 1's `UserService`** so there is one place a user is created |
+| [x] | §6.6 `CollaboratorActivityService`: one audit store (D13), filtered by the indexed `collaborator_id` and **not** by causer — the rows a partner most wants to see are written by the engine with a null causer. The feed is an allowlist filtered **twice**, at write and at read, and `reason` lives in its own column so a staff sentence about a collaborator is structurally unreachable from that collaborator's screen |
+| [x] | §6 proved on **77 assertions** in a rolled-back transaction: the four normalisation cases, the four format refusals, the counter, pending-by-default, an approver creating an active record, a vanity code normalised and then refused to a second taker, the code freezing the moment a visit names it, both URL shapes, all five transition edges, a suspension ending the live session and locking the login, reinstatement, a rejection with no reason refused, and the allowlist dropping a key that was never meant to travel |
+| [ ] | §6.2 `CollaboratorPayoutAccountService` and §6.6 `CollaboratorPortalMetricsService` — both write or read **spine** tables that ship with Phase 10. Deferred to that release rather than written untested against a table that does not exist (§1.4 [D-P8-1]) |
+| [ ] | §6.3-§6.5 the Phase 9 referral resolver, tracking service and link service |
 | [ ] | §7 routes, §8 screens (admin CRUD, approval queue, the tabbed profile, payout accounts, the collaborator panel shell and dashboard), §9 isolation, §10 events and jobs, §11 acceptance suite |
 
 > **Release note** — note: the financial spine's migration set (spine §1.3, 15 tables) is applied in the same release, immediately after Phase 8's own migrations; the spine-dependent screens stay hidden behind their module switches until then, and `collaborators:backfill-wallets` + `collaborators:seed-initial-rules` run once afterwards (phase-08-09 §1.4 [D-P8-1]).
@@ -399,6 +407,65 @@ registries, services, policies, routes and screens still to come**
 ---
 
 ## 6. Change Log
+
+### 2026-09-20 — Phase 8: the registries, the role grants, and the first four services
+
+**Two module slugs and 37 new grants, all additive.** `collaborator_payout_accounts` exists as its own
+module because §55 asks for sensitive payout data to be protected: an Accountant who may approve a
+payout should not thereby get to manage *where the money goes*. It deliberately carries **no
+`view_financial`** — no ability anywhere reveals `details_encrypted`, so there is nothing to unmask
+(INV-C6). `collaborator_referral_visits` is separate from `collaborator_referrals` because those rows
+carry IP addresses and user agents, which a Sales Executive who may link a referral has no business
+reading.
+
+`collaborators` gained `approve` / `reject` / `view_logs` and `collaborator_referrals` gained `create` /
+`edit` / `change_status` / `view_logs`. **Nothing was removed.** `assign` and `upload` on `collaborators`
+are not in §4.2's list, but they were registered in Phase 1 and taking them away would revoke a
+permission an administrator has already granted — D65's rule, which is why the seeders converge rather
+than `syncPermissions`.
+
+**Sixteen settings, one readonly.** `collaborator_code_next_number` carries `readonly => true` (D62) for
+the reason every other counter does: a settings form posts every field, so an admin saving an unrelated
+key with a stale counter would re-issue a collaborator ID that is already quoted in a commission
+dispute. Only `DocumentNumberService` moves it, under a row lock.
+
+**D65 convergence proved on the dev database, twice.** First run: +2 modules, +16 settings, +37 grants,
+**0 values changed, 0 modules toggled, 0 grants revoked**. Second run: 0 / 0 / 0.
+
+**Four services, and one deliberate deferral.**
+
+- `CollaboratorCodeService` — the **one** normaliser. A partner reading a code off a printed flyer types
+  `COL--1024`; treating that as a different code would lose the attribution, so normalisation collapses
+  repeated hyphens, strips inner spaces and upper-cases, and every caller goes through it. INV-C2's lock
+  walks all three referencing tables with a `hasTable()` guard each — a code must not be declared free
+  merely because the spine table that would hold its evidence has not been built yet.
+- `CollaboratorService` — create, edit, the skill set, the services pivot, soft delete. Four columns are
+  unreachable from here on purpose: `collaborator_code`, `referral_code`, `status` and `user_id` each
+  have their own method, their own permission and their own audit row.
+- `CollaboratorOnboardingService` — §6.2.2's transition table now lives on the enum. **A suspension has
+  to reach the session, not only the row**: a suspended partner whose browser still held a valid session
+  would keep reading their own dashboard until it expired, so the suspension mirrors onto `users.status`
+  (Phase 1's `active` middleware is the single enforcement point) *and* deletes the user's `sessions`
+  rows. Login provisioning goes through Phase 1's `UserService` rather than a second `new User` — with
+  the actor deliberately **not** passed, because `UserService` would otherwise refuse the role grant
+  unless the approver personally held every `collaborator_portal.*` permission, and approving a partner
+  is authorised by `collaborators.approve`, not by being able to do a collaborator's job.
+- `CollaboratorActivityService` — §60 as a filtered view over `activity_log` (D13), keyed on
+  `collaborator_id` rather than the causer, because commission-created and payout-paid rows are written
+  by the engine with a **null** causer and scoping by causer would silently drop exactly those. The
+  property allowlist is applied **twice**, at write and at read: rows written before an allowlist
+  tightened must not start leaking because the write-time filter was the only one. `reason` goes in its
+  own column, so a staff sentence about a collaborator ("suspended after repeated disputes") is
+  structurally unreachable from that collaborator's own screen rather than filtered case by case.
+
+**Deferred, and logged as owed:** `CollaboratorPayoutAccountService` and `CollaboratorPortalMetricsService`.
+Both write or read **spine** tables that ship with Phase 10 (§1.4 [D-P8-1]). Writing them now would mean
+committing code that cannot be run, let alone probed, against a table that does not exist — so they wait
+for that release instead.
+
+**Verified:** 77 service assertions in a rolled-back transaction, and 700 tests / 15,346 assertions
+across the five suites the registry changes touch.
+
 
 ### 2026-09-20 — Phase 8/9 foundation: the collaborator record, and nine deferred foreign keys
 
@@ -1115,6 +1182,10 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-20 | Phase 8/9 migration round trip | `migrate` → `rollback --step=7` → `migrate` on both databases | PASS — nothing left behind, object list 40/40 again afterwards |
 | 2026-09-20 | Phase 8/9 model behaviour | probe in a rolled-back transaction | PASS — **45/45**: INV-C1 and INV-C2 refusing a bare save, the four unique guards (and `uq_col_email` still tolerating many NULLs), INV-C4 across all four statuses plus the soft delete, the derived skill slug making a re-submitted form idempotent, the services pivot attaching / re-syncing / detaching, an expired, bot, dead-code and already-spent visit each refusing to attribute **with the query scope agreeing every time**, both CHECKs biting, and the RESTRICT wall refusing to force-delete a partner who has a visit. Found 2 real bugs (the pivot's phantom `updated_at`, and the scope disagreeing with the row check), both fixed |
 | 2026-09-20 | Phase 8/9 regression on the constrained tables | `tests/Feature/{Audit,Project,Crm,Modules}` | PASS — **126 tests / 861 assertions** |
+| 2026-09-20 | Phase 8 §4 / §5 registries | seeders on `my_office_test`, then rows read back | PASS — **101 modules / 994 permissions / 309 settings in 17 groups**; both new modules carry `depends_on = ["collaborators"]`, `collaborator_code_next_number` is readonly (D62), and all 16 `collaborator.*` keys landed with the contract's defaults |
+| 2026-09-20 | Phase 8 seed convergence (D65) | backup, then Module / Permission / Role / Setting seeders on `my_office`, before/after snapshot compared in PHP | PASS — run 1: **+2 modules, +16 settings, +37 grants, 0 values changed, 0 modules toggled, 0 grants revoked**; run 2: **0 / 0 / 0** |
+| 2026-09-20 | Phase 8 §6 services | probe in a rolled-back transaction | PASS — **77/77**: the four normalisation cases and four format refusals, the `%04d` counter never repeating, pending-by-default, an approver creating an active record directly, a vanity code normalised then refused to a second taker **without naming the holder**, INV-C2 freezing the code the moment a visit references it, a campaign query string kept rather than overwritten, all five §6.2.2 transition edges, a suspension locking the login and ending the live session, reinstatement needing no reason, a rejection landing on `inactive` with a mandatory reason, and the activity allowlist dropping a key at write time while `reason` stays in its own column |
+| 2026-09-20 | Phase 8 registry regression | `tests/Feature/{Rbac,Settings,Modules,Audit,Account}` | PASS — **700 tests / 15,346 assertions** |
 
 ---
 

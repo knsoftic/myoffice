@@ -502,7 +502,11 @@ final class PermissionRegistry
                 'icon' => 'user-group',
                 'is_core' => false,
                 'sort' => 410,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::ASSIGN, self::FILES, self::MONEY, self::REPORTS, self::RESTORE),
+                // phase-08-09 §4.2 adds APPROVE (onboarding a `pending` application, §34) and LOGS
+                // (§60's per-collaborator feed). ASSIGN and FILES were registered in Phase 1 and stay:
+                // taking an ability away would revoke a permission an administrator has already granted
+                // (D65). `delete` is soft only — `forceDelete` is refused outright by the policy (INV-C5).
+                'abilities' => self::merge(self::CRUD_FULL, self::APPROVE, self::STATUS, self::ASSIGN, self::FILES, self::MONEY, self::REPORTS, self::RESTORE, self::LOGS),
             ],
             'collaborator_commission_settings' => [
                 'name' => 'Collaborator Commission Settings',
@@ -538,13 +542,42 @@ final class PermissionRegistry
                 'sort' => 450,
                 'abilities' => self::merge(self::CRUD, self::APPROVE, self::STATUS, self::MONEY, self::FILES, self::REPORTS, self::RESTORE),
             ],
+            // phase-08-09 §4.2. `create` is the manual link a receptionist makes at admission; `edit`
+            // is the change-attribution right (§37), which supersedes and never mutates (INV-R4). There
+            // is deliberately no `delete`: an attribution is evidence (D19).
             'collaborator_referrals' => [
                 'name' => 'Collaborator Referrals',
                 'group' => ModuleGroup::Collaborator,
                 'icon' => 'share',
                 'is_core' => false,
                 'sort' => 460,
-                'abilities' => self::merge(self::READ, self::REPORTS),
+                'abilities' => self::merge(self::READ, [Ability::Create, Ability::Edit], self::STATUS, self::REPORTS, self::LOGS),
+            ],
+
+            // phase-08-09 §4.1. §55 asks for sensitive payout data to be protected, so an encrypted bank
+            // destination gets its own gate rather than riding on `collaborator_payouts.view` — an
+            // Accountant who may approve a payout does not thereby get to manage where money goes.
+            // `change_status` means verify / disable. **There is deliberately no `view_financial`**:
+            // no ability anywhere reveals `details_encrypted`, so there is nothing to unmask (INV-C6).
+            'collaborator_payout_accounts' => [
+                'name' => 'Collaborator Payout Accounts',
+                'group' => ModuleGroup::Collaborator,
+                'icon' => 'credit-card',
+                'is_core' => false,
+                'sort' => 455,
+                'abilities' => self::merge(self::READ, [Ability::Create, Ability::Edit, Ability::Delete], self::STATUS, self::LOGS),
+            ],
+
+            // phase-08-09 §4.1. §38 click tracking — read-only by design, because nobody edits a click.
+            // Separate from `collaborator_referrals` because these rows carry IP addresses and user
+            // agents, which a Sales Executive who may link a referral has no business reading.
+            'collaborator_referral_visits' => [
+                'name' => 'Collaborator Referral Visits',
+                'group' => ModuleGroup::Collaborator,
+                'icon' => 'cursor-arrow-rays',
+                'is_core' => false,
+                'sort' => 465,
+                'abilities' => self::merge(self::READ, self::REPORTS, self::LOGS),
             ],
 
             /*
@@ -1036,6 +1069,19 @@ final class PermissionRegistry
                     'statement_download',
                     // phase-06 §4.3 — start a timer and log time on an assigned task, and see own hours.
                     'time_tracking',
+                    // phase-08-09 §4.3, under Phase 1 §4's licence to add "the read abilities each panel
+                    // needs". §59's list does not name these six, but §3 and §36 require the surfaces.
+                    'profile',
+                    'referrals',
+                    'leads',
+                    'activity_log',
+                    'notifications',
+                    // Registering where one's own money should land is not the same right as asking for
+                    // it: the spine gates `collaborator.payout-accounts.*` with `payout_request`, which
+                    // the Collaborator role deliberately does not hold, so without this a collaborator
+                    // could not add a bank account at all. The spine's routes keep their existing gate
+                    // until Phase 12 adopts this one (§12.2 Q2).
+                    'payout_accounts',
                 ],
             ],
             'student_portal' => [
@@ -1202,6 +1248,11 @@ final class PermissionRegistry
         'collaborator_wallets' => ['collaborators', 'collaborator_commissions'],
         'collaborator_payouts' => ['collaborators', 'collaborator_wallets'],
         'collaborator_referrals' => ['collaborators'],
+        // Both of phase-08-09 §4.1's modules hang off `collaborators` and nothing else: their rows point
+        // at a collaborator, and at no other module's rows. A payout account is a destination — the
+        // payout points at it, not the other way round — so it is not a dependant of `collaborator_payouts`.
+        'collaborator_payout_accounts' => ['collaborators'],
+        'collaborator_referral_visits' => ['collaborators'],
 
         // Institute — phase-14 … phase-21.
         'courses' => ['course_categories'],

@@ -363,6 +363,10 @@ class RoleSeeder extends Seeder
                     // seo.edit, no publish.
                     PermissionRegistry::permissionNamesFor(['website_cta_blocks', 'faqs']),
                     PermissionRegistry::permissionNamesFor('website_media', [Ability::ViewAny, Ability::View, Ability::Upload]),
+                    // phase-08-09 §4.3: whoever pays a partner registers and verifies where the money
+                    // goes. No ability on this module reveals the encrypted details — only the last four
+                    // digits are ever rendered (INV-C6).
+                    PermissionRegistry::permissionNamesFor('collaborator_payout_accounts'),
                 ),
             ],
             [
@@ -380,6 +384,11 @@ class RoleSeeder extends Seeder
                     PermissionRegistry::permissionNamesFor(['course_inquiries', 'demo_classes', 'meetings']),
                     // phase-04 §9.1.2: its own assigned inquiries, and it may hand one on.
                     PermissionRegistry::permissionNamesFor('contact_inquiries', [Ability::View, Ability::Assign]),
+                    // phase-08-09 §4.3: enough to pick the right partner when entering a lead, and
+                    // deliberately **not** `collaborators.view_financial` — what a partner earns is
+                    // nobody's business on the sales floor.
+                    PermissionRegistry::permissionNamesFor('collaborators', self::READ),
+                    PermissionRegistry::permissionNamesFor('collaborator_referrals', [Ability::Create]),
                 ),
             ],
             [
@@ -397,6 +406,10 @@ class RoleSeeder extends Seeder
                     PermissionRegistry::permissionNamesFor('student_fees', self::READ_CREATE),
                     // phase-04 §9.1.2: view the inquiries assigned to the front desk.
                     PermissionRegistry::permissionNamesFor('contact_inquiries', [Ability::View]),
+                    // phase-08-09 §4.3: the front desk picks the referring partner at admission, and
+                    // that manual pick outranks every captured code (INV-R3). No `view_financial`.
+                    PermissionRegistry::permissionNamesFor('collaborators', self::READ),
+                    PermissionRegistry::permissionNamesFor('collaborator_referrals', [Ability::Create]),
                 ),
             ],
             [
