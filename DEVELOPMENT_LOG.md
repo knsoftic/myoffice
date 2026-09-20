@@ -359,6 +359,20 @@ cases FT-HR-01 … FT-HR-62 and §10's jobs and notifications are still owed**
 | [ ] | §7.1 employee documents (upload / download / expiry screen), §8.2's 5-step create wizard, §8.21 dashboard widgets, the attendance and employee importers |
 ### [ ] PHASE 8 — Collaborator management (profiles, panel shell, commission settings)
 
+Contract: [`docs/phases/phase-08-09.md`](docs/phases/phase-08-09.md) · **foundation built 2026-09-20;
+registries, services, policies, routes and screens still to come**
+
+| | Item |
+|---|---|
+| [x] | Enums: all 8 of §3 / 51 cases across both phases — `CollaboratorStatus`, `CollaborationType`, `PayoutAccountStatus`, `CollaboratorActivityEvent` (with the `visibleProperties()` allowlist, so a partner's feed can never leak an internal note), `ReferralVisitOutcome`, `ReferralCandidateChannel` (with `rank()` and `ladder()` for §6.3's precedence), `ReferralConversionSubject`, `ReferralAttributionModel`. Every `label()` / `color()` arm walked |
+| [x] | Schema: 7 migrations / 4 tables, applied to `my_office_test` **and** `my_office`; `rollback --step=7` leaves nothing behind and re-migrate is clean. The `collaborator_service` pivot and all nine FK promotions are `Schema::hasTable()`-guarded and log loudly when they skip, so `migrate` and `migrate:fresh` are legal in any order ([D-FS-1]) |
+| [x] | §2.5a and [D-P6-1]: the nine deferred FK columns earlier phases shipped unconstrained are now real foreign keys — `activity_log.collaborator_id`, `contact_inquiries.collaborator_id`, five Phase 6 columns (`projects`, `project_members`, `tasks`, `time_entries`, `time_entry_segments`, all **RESTRICT**), and the two `referral_visit_id` columns on `contact_inquiries` and `leads`. Pre-existing orphans are nulled by a **reported** pre-pass and never deleted, because a silent repair of attribution data is what INV-R1 forbids |
+| [x] | §2 object list verified against `information_schema` on both databases: **40/40** — 4 tables, the §2.1 column list exactly (and no `branch_id`, [D-P8-2]), 5 named unique indexes, 2 CHECKs the server actually kept, 9 FKs with the right delete rules, every clock column `DATETIME` and **0** columns silently carrying `ON UPDATE CURRENT_TIMESTAMP` (D67), and no `deleted_at` on the three append-only tables (D19) |
+| [x] | Models: `Collaborator`, `CollaboratorSkill`, `CollaboratorReferralVisit`. Proved on **45 assertions** in a rolled-back transaction: INV-C1 and INV-C2 both refusing a bare save, the four unique guards, INV-C4 (only `active` and untrashed earns; a soft delete stops it), `canLogin()`, the derived skill slug making a re-submitted form idempotent, the services pivot attaching and detaching, an expired / bot / dead-code / already-spent visit never attributing **and the query scope agreeing with the loaded row every time**, both CHECKs biting, and the RESTRICT wall refusing to force-delete a partner who has a visit |
+| [ ] | §4 PermissionRegistry (2 new slugs + the §4.3 portal set), §5 SettingsRegistry (`collaborator` group), seeders |
+| [ ] | §6 services: `CollaboratorCodeService`, `CollaboratorService`, `CollaboratorOnboardingService`, `CollaboratorPayoutAccountService`, `CollaboratorPortalMetricsService`, `CollaboratorActivityService` |
+| [ ] | §7 routes, §8 screens (admin CRUD, approval queue, the tabbed profile, payout accounts, the collaborator panel shell and dashboard), §9 isolation, §10 events and jobs, §11 acceptance suite |
+
 > **Release note** — note: the financial spine's migration set (spine §1.3, 15 tables) is applied in the same release, immediately after Phase 8's own migrations; the spine-dependent screens stay hidden behind their module switches until then, and `collaborators:backfill-wallets` + `collaborators:seed-initial-rules` run once afterwards (phase-08-09 §1.4 [D-P8-1]).
 
 ### [ ] PHASE 9 — Referral codes, referral URLs, referral tracking
@@ -385,6 +399,54 @@ cases FT-HR-01 … FT-HR-62 and §10's jobs and notifications are still owed**
 ---
 
 ## 6. Change Log
+
+### 2026-09-20 — Phase 8/9 foundation: the collaborator record, and nine deferred foreign keys
+
+**Eight enums, 51 cases.** `CollaboratorStatus` is the whole of eligibility — there is no
+`commission_eligible` column anywhere (INV-C4), because a second expression of the same fact is a second
+thing that can be wrong. `CollaboratorActivityEvent` carries a `visibleProperties()` allowlist rather
+than a blocklist, so a partner's own feed shows what it was told to show and an internal note added
+later cannot leak by default. `ReferralCandidateChannel::referralSource()` returns a **string**, not the
+spine's `ReferralSource` enum, because the spine ships in Phase 10 — the value is right and the type
+tightens later, rather than this phase inventing a duplicate enum it would have to delete.
+
+**Four tables, and nine foreign keys that were owed.** `collaborators` (no `branch_id` — a referral
+partner introduces a student to whichever branch suits the student, [D-P8-2]), `collaborator_skills`,
+`collaborator_service`, and Phase 9's `collaborator_referral_visits`. The interesting half is §2.5a and
+[D-P6-1]: **nine columns that earlier phases shipped unconstrained**, because `collaborators` did not
+exist yet — Phase 4's `contact_inquiries.collaborator_id`, Phase 6's five, Phase 1's `activity_log`, and
+the two `referral_visit_id` columns. Phase 6's R-9 named the exposure out loud: until today a typo could
+write `collaborator_id = 999`. All nine are now real constraints, and the five Phase 6 ones are
+**RESTRICT** — a partner with delivery history must not vanish, and a cascade would take somebody's time
+entries with them.
+
+**Pre-existing orphans are nulled by a reported pre-pass, never deleted.** MariaDB refuses a foreign key
+over a dangling value, so the promotion has to do something about one. These columns are display
+snapshots under **D37**, re-derivable from the attribution rows, so nulling a dangling pointer loses no
+fact — but every migration prints and logs the count, because a silent repair of attribution data is
+exactly what INV-R1 forbids.
+
+**Two defects found by writing the probe rather than by reading the code.**
+
+- `Collaborator::services()` used `withTimestamps('created_at', null)`. Laravel takes the *updated_at*
+  column name from the **parent** model when the second argument is null, so it would have added
+  `updated_at` to the pivot columns and then written it — to a pivot that deliberately has no such
+  column (§2.3: "the row has nothing to update"). Every `attach()` would have been a SQL error. The
+  relation is now `withPivot('created_at')` and the service supplies the stamp.
+- `CollaboratorReferralVisit::isAttributable()` and `scopeAttributable()` were two independent
+  statements of the same rule — the row check asked the enum, the query hardcoded `Captured`. They agree
+  today and would have drifted the first time a case was added. Both now read
+  `ReferralVisitOutcome::attributableCases()`, and the probe asserts they agree on all four negative
+  cases (expired, crawler, dead code, already spent).
+
+**Verified:** §2 object list **40/40** against `information_schema` on both databases; model behaviour
+**45/45** in a rolled-back transaction; `rollback --step=7` clean and re-migrate clean; the four suites
+the new constraints touch (Audit, Project, Crm, Modules) green at 126 tests.
+
+**What is not here yet:** the registries, the six services, the policies, the routes and every screen.
+This commit creates the *subject* of money and the *evidence* of attribution — not one line of it
+inserts a ledger row, a wallet balance or a payout.
+
 
 ### 2026-09-20 — Phase 7 follow-up: the display formats, and the five-hour attendance bug behind them
 
@@ -1048,6 +1110,11 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-20 | Phase 7 shift window is business time (D69) | `tests/Feature/Hr` after the fix | PASS — **31 tests**; the new case asserts a 09:00 business punch is 0 late minutes and renders `09:00`, and a 09:45 punch is 30 late minutes and `Late` |
 | 2026-09-20 | Phase 7 attendance register, in a browser | dev month re-seeded, `/admin/attendance?date=2026-08-05` read in the browser | PASS — `09:40 – 17:10 · 25m · Late` for the late employee and `09:02 – 17:10 · Present` for the other two; before the fix the same rows read `14:40 – 22:10` and marked everybody late |
 | 2026-09-20 | Full suite after the format + timezone fixes | `./vendor/bin/phpunit` in two slices (live progress) | PASS — **1,577 tests / 64,965 assertions**: 1,121 / 39,744 in 7 m 41 s and 456 / 25,221 in 16 m 42 s |
+| 2026-09-20 | Phase 8/9 enum walk | every case's `label()`, `color()` and helper called | PASS — **8 enums / 51 cases**, including `CollaboratorActivityEvent::filterProperties()` dropping everything outside its allowlist |
+| 2026-09-20 | Phase 8/9 §2 object list | `information_schema` counted in PHP, on `my_office_test` **and** `my_office` | PASS — **40/40** each: 4 tables, the §2.1 column list exactly and no `branch_id` ([D-P8-2]), `uq_col_code` / `uq_col_referral_code` / `uq_col_user` / `uq_col_email` / `uq_cskill`, the `(collaborator_id, service_id)` composite PK, `chk_crv_dates` and `chk_crv_visits` kept by the server, 9 FKs with the contract's delete rules, every clock column `DATETIME` and **0** carrying `ON UPDATE CURRENT_TIMESTAMP` (D67), no `deleted_at` on the three append-only tables (D19) |
+| 2026-09-20 | Phase 8/9 migration round trip | `migrate` → `rollback --step=7` → `migrate` on both databases | PASS — nothing left behind, object list 40/40 again afterwards |
+| 2026-09-20 | Phase 8/9 model behaviour | probe in a rolled-back transaction | PASS — **45/45**: INV-C1 and INV-C2 refusing a bare save, the four unique guards (and `uq_col_email` still tolerating many NULLs), INV-C4 across all four statuses plus the soft delete, the derived skill slug making a re-submitted form idempotent, the services pivot attaching / re-syncing / detaching, an expired, bot, dead-code and already-spent visit each refusing to attribute **with the query scope agreeing every time**, both CHECKs biting, and the RESTRICT wall refusing to force-delete a partner who has a visit. Found 2 real bugs (the pivot's phantom `updated_at`, and the scope disagreeing with the row check), both fixed |
+| 2026-09-20 | Phase 8/9 regression on the constrained tables | `tests/Feature/{Audit,Project,Crm,Modules}` | PASS — **126 tests / 861 assertions** |
 
 ---
 
