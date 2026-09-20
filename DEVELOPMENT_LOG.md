@@ -1311,6 +1311,7 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-20 | Phase 9 capture, over real HTTP | 4 curl requests against the dev site, then the rows read back | PASS — `ref_attr` set encrypted / httpOnly / sameSite=lax with a 30-day life; `captured` then `visits_count = 2` on a second page; `invalid_code` for a dead code; `collaborator_not_eligible` naming the suspended partner; `bot_filtered` for a crawler. The register and the conversion report were then read in a browser |
 | 2026-09-20 | Phase 9 integration gate | `tests/Feature/Collaborator/ReferralCaptureTest` | PASS — **18 tests**; with Phase 8's gate, `tests/Feature/Collaborator` is **38 tests / 145 assertions** |
 | 2026-09-20 | Phase 8/9 public-route regression | `tests/Feature/Cms` + `{Modules,Views,Platform,SmokeTest}` | PASS — 16 manifest rows and 12 marketing contract rows updated for `capture_referral` with the reason recorded; one Phase 4 fixture corrected (it stored a `users.id` in `contact_inquiries.collaborator_id`, which the new foreign key exposed) |
+| 2026-09-20 | Full suite after phases 8 and 9 | `./vendor/bin/phpunit` in two slices | PASS — **1,615 tests / 66,198 assertions**: 1,213 / 41,704 in 4 m 49 s and 402 / 24,494 in 12 m 34 s |
 
 ---
 
