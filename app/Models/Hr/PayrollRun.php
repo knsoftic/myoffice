@@ -14,6 +14,7 @@ use App\Services\Hr\Exceptions\ImmutablePayrollAttributeException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
 
 /**
  * One payroll run (phase-07 §2.23, requirement §28).
@@ -150,10 +151,17 @@ class PayrollRun extends Model
 
     /**
      * A human label for the period, for a message that has to name it.
+     *
+     * Built from the year and the month rather than from `period_start`, so a screen that selected only
+     * the columns it needs still reads "August 2026" instead of falling back to "2026-08".
      */
     public function periodLabel(): string
     {
-        return $this->period_start?->format('F Y') ?? sprintf('%04d-%02d', $this->period_year, $this->period_month);
+        if ($this->period_year === null || $this->period_month === null) {
+            return '—';
+        }
+
+        return Carbon::create((int) $this->period_year, (int) $this->period_month, 1)->format('F Y');
     }
 
     public function branch(): BelongsTo

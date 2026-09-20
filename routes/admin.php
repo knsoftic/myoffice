@@ -56,6 +56,10 @@ use App\Http\Controllers\Admin\Hr\PayrollRunController;
 use App\Http\Controllers\Admin\Hr\PayrollRunItemController;
 use App\Http\Controllers\Admin\Hr\PayslipController;
 use App\Http\Controllers\Admin\Hr\SalaryComponentController;
+use App\Http\Controllers\Admin\Hr\SelfService\AttendanceController as MyAttendanceController;
+use App\Http\Controllers\Admin\Hr\SelfService\LeaveController as MyLeaveController;
+use App\Http\Controllers\Admin\Hr\SelfService\PayslipController as MyPayslipController;
+use App\Http\Controllers\Admin\Hr\SelfService\ProfileController as MyProfileController;
 use App\Http\Controllers\Admin\Hr\SalaryStructureController;
 use App\Http\Controllers\Admin\Hr\WorkShiftController;
 use App\Http\Controllers\Admin\LeadActivityController;
@@ -1026,6 +1030,38 @@ Route::prefix('admin')
             Route::post('employees/{employee}/user', [EmployeeController::class, 'linkUser'])->whereNumber('employee')->middleware('can:update,employee')->name('employees.user.link');
             Route::delete('employees/{employee}/user', [EmployeeController::class, 'unlinkUser'])->whereNumber('employee')->middleware('can:update,employee')->name('employees.user.unlink');
             Route::get('employees/{employee}/print', [EmployeeController::class, 'print'])->whereNumber('employee')->middleware('can:print,employee')->name('employees.print');
+        });
+
+
+        /*
+        |------------------------------------------------------------------
+        | phase-07 §7.7 — Employee self-service (/admin/my/*)
+        |------------------------------------------------------------------
+        | Every one of these resolves auth()->user()->employee and queries only through its relations. No
+        | id from the request ever reaches a where, and a user with no employee record gets a 404 rather
+        | than a 403 — a 403 would confirm that the area exists and that they are simply not staff.
+        |
+        | Punching is throttled: a button somebody leans on should cost one 429, not sixty rows.
+        */
+        Route::middleware('module:employee_self_service')->prefix('my')->name('my.')->group(static function (): void {
+            Route::get('hr-profile', [MyProfileController::class, 'show'])->middleware('can:employee_self_service.view')->name('profile');
+
+            Route::get('attendance', [MyAttendanceController::class, 'index'])->middleware('can:employee_self_service.view')->name('attendance.index');
+            Route::post('attendance/check-in', [MyAttendanceController::class, 'checkIn'])->middleware(['can:employee_self_service.create', 'throttle:10,1'])->name('attendance.check-in');
+            Route::post('attendance/check-out', [MyAttendanceController::class, 'checkOut'])->middleware(['can:employee_self_service.create', 'throttle:10,1'])->name('attendance.check-out');
+            Route::post('attendance/corrections', [MyAttendanceController::class, 'requestCorrection'])->middleware('can:employee_self_service.create')->name('attendance.corrections.store');
+
+            Route::get('leave', [MyLeaveController::class, 'index'])->middleware('can:employee_self_service.view')->name('leave.index');
+            Route::get('leave/create', [MyLeaveController::class, 'create'])->middleware('can:employee_self_service.create')->name('leave.create');
+            Route::post('leave', [MyLeaveController::class, 'store'])->middleware('can:employee_self_service.create')->name('leave.store');
+            Route::get('leave/{leaveRequest}', [MyLeaveController::class, 'show'])->whereNumber('leaveRequest')->middleware('can:employee_self_service.view')->name('leave.show');
+            Route::post('leave/{leaveRequest}/cancel', [MyLeaveController::class, 'cancel'])->whereNumber('leaveRequest')->middleware('can:employee_self_service.create')->name('leave.cancel');
+
+            Route::get('payslips', [MyPayslipController::class, 'index'])->middleware('can:employee_self_service.view_financial')->name('payslips.index');
+            Route::get('payslips/{item}', [MyPayslipController::class, 'show'])->whereNumber('item')->middleware('can:employee_self_service.view_financial')->name('payslips.show');
+            Route::get('payslips/{item}/print', [MyPayslipController::class, 'print'])->whereNumber('item')->middleware('can:employee_self_service.print')->name('payslips.print');
+
+            Route::get('approvals', [MyLeaveController::class, 'approvals'])->middleware('can:leaves.approve')->name('approvals.index');
         });
 
         /*

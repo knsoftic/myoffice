@@ -362,6 +362,47 @@ final class Sidebar
                         'permission' => 'employee_advances.view_any',
                     ],
                     [
+                        'label' => 'My HR',
+                        'icon' => 'user-circle',
+                        'children' => [
+                            [
+                                'label' => 'My Profile',
+                                'icon' => 'user',
+                                'route' => 'admin.my.profile',
+                                'module' => 'employee_self_service',
+                                'permission' => 'employee_self_service.view',
+                            ],
+                            [
+                                'label' => 'My Attendance',
+                                'icon' => 'clock',
+                                'route' => 'admin.my.attendance.index',
+                                'module' => 'employee_self_service',
+                                'permission' => 'employee_self_service.view',
+                            ],
+                            [
+                                'label' => 'My Leave',
+                                'icon' => 'calendar',
+                                'route' => 'admin.my.leave.index',
+                                'module' => 'employee_self_service',
+                                'permission' => 'employee_self_service.view',
+                            ],
+                            [
+                                'label' => 'My Salary Slips',
+                                'icon' => 'document-text',
+                                'route' => 'admin.my.payslips.index',
+                                'module' => 'employee_self_service',
+                                'permission' => 'employee_self_service.view_financial',
+                            ],
+                            [
+                                'label' => 'Approvals',
+                                'icon' => 'inbox',
+                                'route' => 'admin.my.approvals.index',
+                                'module' => 'employee_self_service',
+                                'permission' => 'leaves.approve',
+                            ],
+                        ],
+                    ],
+                    [
                         'label' => 'HR Setup',
                         'icon' => 'adjustments-horizontal',
                         'children' => [
