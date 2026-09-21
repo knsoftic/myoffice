@@ -193,6 +193,17 @@ final class SidebarVisibilityTest extends TestCase
                 'Holidays',
                 'Leave Types',
                 'Salary Components',
+                // phase-13 §8: the finance group, now that every one of its screens has a route. The
+                // second 'Payments' is the cross-source register and is a different screen from the
+                // project one above — same word, two documents.
+                'Invoices',
+                'Payments',
+                'Expenses',
+                'Expense Approvals',
+                'Income',
+                'Payment Methods',
+                'Finance Categories',
+                'Finance Reports',
                 // phase-08-09 §7.1: the two collaborator entries whose routes now exist. The other four
                 // in that group — Commissions, Commission Settings, Wallets, Payouts — and `Referral
                 // Visits` stay hidden behind gate 2 until the phase that registers their routes.
@@ -203,7 +214,17 @@ final class SidebarVisibilityTest extends TestCase
                 // two phases. It now points at the route the contract actually names.
                 'Commissions',
                 'Commission Skips',
+                // phase-10-12 §8.5-§8.7: the reconciler's report, the wallet register and the payout
+                // queue, hidden behind gate 2 until Phase 12 registered their routes.
+                'Discrepancies',
+                'Wallets',
+                'Payouts',
                 'Referral Visits',
+                // phase-14-17 §7.1: the catalogue. `Courses` is a parent, like `Projects` and
+                // `HR Setup` — it carries `All Courses` and `Categories` rather than a route.
+                'Courses',
+                'All Courses',
+                'Categories',
                 // phase-10-12 §8.2. The money register sits in the **Institute** group, beside the
                 // charges it pays off — `student_fee_payments` is an Institute module, and it being
                 // what triggers commission is not a reason to file it under Collaborator. Its parent
@@ -307,12 +328,16 @@ final class SidebarVisibilityTest extends TestCase
 
             $this->assertContains('Dashboard', $labels, $role.' must always reach its own dashboard.');
 
-            // The client panel grew a real nav in Phase 5; the other three still have only a dashboard
-            // until their own phase ships routes. Each entry must be one this account can actually open.
-            $expectedLabels = $panel === PanelType::Client
-                ? ['Dashboard', 'My Projects', 'Milestones', 'Tasks', 'Documents', 'Files', 'Invoices',
-                    'Payments', 'Meetings', 'Messages', 'Support', 'Notifications', 'My Profile']
-                : ['Dashboard'];
+            // The client panel grew a real nav in Phase 5 and the collaborator panel in Phases 8-12;
+            // student and teacher still have only a dashboard until Phases 15-17 ship their routes.
+            // Each entry must be one this account can actually open.
+            $expectedLabels = match ($panel) {
+                PanelType::Client => ['Dashboard', 'My Projects', 'Milestones', 'Tasks', 'Documents', 'Files',
+                    'Invoices', 'Payments', 'Meetings', 'Messages', 'Support', 'Notifications', 'My Profile'],
+                PanelType::Collaborator => ['Dashboard', 'My Projects', 'Wallet', 'Commissions', 'Payouts',
+                    'Statements'],
+                default => ['Dashboard'],
+            };
 
             $this->assertSame(
                 $expectedLabels,

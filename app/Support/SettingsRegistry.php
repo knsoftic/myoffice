@@ -2925,6 +2925,10 @@ final class SettingsRegistry
                 'rules' => ['nullable', 'boolean'],
                 'default' => true,
                 'help' => 'Shows "Referred by Ali Traders" once the code validates.',
+                // Public because a public component asks it what to render, and INV-10 says a public
+                // view reads only keys the registry marks public — it decides what a visitor sees, so
+                // the visitor's own page is allowed to ask.
+                'public' => true,
                 'span' => 6,
                 'sort' => 280,
             ],
@@ -3202,6 +3206,19 @@ final class SettingsRegistry
                 'readonly' => true,
                 'span' => 4,
                 'sort' => 130,
+            ],
+
+            // phase-14-17 §5. The one Phase 14 key: how many courses a page of the public catalogue
+            // shows. Public, because the catalogue is rendered before anybody signs in.
+            'public_course_catalogue_per_page' => [
+                'label' => 'Courses per catalogue page',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:3', 'max:60'],
+                'default' => 12,
+                'help' => 'How many courses the public /courses page shows before paginating.',
+                'public' => true,
+                'span' => 4,
+                'sort' => 200,
             ],
         ];
     }

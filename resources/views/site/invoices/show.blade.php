@@ -23,7 +23,7 @@
     $hasRounding = bccomp((string) $invoice->round_off_amount, '0.00', 2) !== 0;
     $settled = bccomp((string) $invoice->balance_amount, '0.00', 2) <= 0;
 
-    $qty = static fn ($value): string => rtrim(rtrim(number_format((float) $value, 4, '.', ''), '0'), '.');
+    $qty = static fn ($value): string => app_quantity($value);
 @endphp
 
 @section('title', 'Invoice '.$invoice->invoice_number)
@@ -149,21 +149,21 @@
     @if (filled($invoice->notes))
         <div class="panel avoid-break">
             <h4>Notes</h4>
-            <div>{!! nl2br(e($invoice->notes)) !!}</div>
+            <div class="pre-line">{{ $invoice->notes }}</div>
         </div>
     @endif
 
     @if (filled($invoice->paymentMethod?->instructions ?? null))
         <div class="panel avoid-break">
             <h4>How to pay</h4>
-            <div>{!! nl2br(e($invoice->paymentMethod->instructions)) !!}</div>
+            <div class="pre-line">{{ $invoice->paymentMethod->instructions }}</div>
         </div>
     @endif
 
     @if (filled($invoice->bank_details))
         <div class="panel avoid-break">
             <h4>Bank details</h4>
-            <div>{!! nl2br(e($invoice->bank_details)) !!}</div>
+            <div class="pre-line">{{ $invoice->bank_details }}</div>
         </div>
     @endif
 @endsection

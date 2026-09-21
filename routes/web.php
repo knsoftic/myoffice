@@ -8,6 +8,7 @@ use App\Http\Controllers\Site\ContactController;
 use App\Http\Controllers\Site\HomeController;
 use App\Http\Controllers\Site\PortfolioController;
 use App\Http\Controllers\Site\PreviewController;
+use App\Http\Controllers\Site\CourseController as SiteCourseController;
 use App\Http\Controllers\Site\PublicInvoiceController;
 use App\Http\Controllers\Site\ReferralController;
 use App\Http\Controllers\Site\RobotsController;
@@ -127,6 +128,36 @@ Route::post('contact', [ContactController::class, 'store'])->middleware(['site',
 Route::post('referral/validate', [ReferralController::class, 'validateCode'])
     ->middleware('throttle:10,1')
     ->name('site.referral.validate');
+
+/*
+|--------------------------------------------------------------------------
+| phase-14-17 §7.10 — the public catalogue and course pages (§89–90)
+|--------------------------------------------------------------------------
+| Phase 3 owns the public shell and its three aliases; this reuses all three.
+| `site.cache` is safe here because every one of these pages is the same for
+| every visitor — the referral code they carry is rendered from the session by
+| the layout, not baked into the cached body.
+|
+| A draft, an archived course and a course in a switched-off category are all
+| 404s rather than 403s: a 403 would confirm that the slug somebody guessed is
+| a real course.
+*/
+Route::middleware(['capture_referral', 'site', 'site_module:courses', 'site.preview', 'site.cache'])
+    ->group(function (): void {
+        Route::get('courses', [SiteCourseController::class, 'index'])->name('site.courses.index');
+        Route::get('courses/category/{category}', [SiteCourseController::class, 'category'])->name('site.courses.category');
+        Route::get('courses/{course}', [SiteCourseController::class, 'show'])->name('site.courses.show');
+    });
+
+// Outside `site.cache`: a cached page is HTML, and a file stream is not something to keep a copy of
+// under a page key. The rule that decides whether this file exists for this visitor is the same one
+// the landing page uses, and it is re-run per request.
+Route::middleware(['capture_referral', 'site', 'site_module:courses', 'site.preview'])
+    ->group(static function (): void {
+        Route::get('courses/{course}/resource/{resource}', [SiteCourseController::class, 'resource'])
+            ->whereNumber('resource')
+            ->name('site.courses.resource');
+    });
 
 /*
 |--------------------------------------------------------------------------

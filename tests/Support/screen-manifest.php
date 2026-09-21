@@ -2238,4 +2238,212 @@ return [
         'response' => 'html',
     ],
 
+
+    /*
+    |----------------------------------------------------------------------
+    | Phase 14 - institute catalogue (13 GET routes)
+    |----------------------------------------------------------------------
+    | No IDOR owner column on any of them: a course is catalogue, not somebody's record, and the four
+    | public screens are the same page for every visitor. Branch scoping is a policy question
+    | (`CoursePolicy::view`), not an ownership column, and `branch_id = null` means "offered everywhere"
+    | rather than "belongs to nobody".
+    |
+    | The two file rows are out of the responsive and accessibility sweeps: a download has no layout to
+    | measure and no HTML to parse.
+    */
+
+    [
+        'route' => 'admin.course-categories.edit',
+        'panel' => 'admin',
+        'kind' => 'form',
+        'params' => static fn (?object $fixture = null): array => ['category' => $first(\App\Models\Institute\CourseCategory::class)],
+        'permissions' => ['course_categories.edit'],
+        'module' => 'course_categories',
+        'owner_phase' => 14,
+        'query_budget' => 20,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'admin.course-categories.index',
+        'panel' => 'admin',
+        'kind' => 'index',
+        'params' => static fn (?object $fixture = null): array => [],
+        'permissions' => ['course_categories.view_any'],
+        'module' => 'course_categories',
+        'owner_phase' => 14,
+        'query_budget' => 20,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'admin.course-outline.index',
+        'panel' => 'admin',
+        'kind' => 'index',
+        'params' => static fn (?object $fixture = null): array => ['course' => $first(\App\Models\Institute\Course::class)],
+        'permissions' => ['course_outline.view'],
+        'module' => 'course_outline',
+        'owner_phase' => 14,
+        'query_budget' => 20,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'admin.course-resources.download',
+        'panel' => 'admin',
+        'kind' => 'export',
+        'params' => static fn (?object $fixture = null): array => ['resource' => $first(\App\Models\Institute\CourseTopicResource::class, static fn ($q) => $q->whereNotNull('file_path'))],
+        'permissions' => ['course_outline.download'],
+        'module' => 'course_outline',
+        'owner_phase' => 14,
+        'query_budget' => 20,
+        'responsive' => false,
+        'a11y' => false,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'admin.courses.create',
+        'panel' => 'admin',
+        'kind' => 'form',
+        'params' => static fn (?object $fixture = null): array => [],
+        'permissions' => ['courses.create'],
+        'module' => 'courses',
+        'owner_phase' => 14,
+        'query_budget' => 20,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'admin.courses.edit',
+        'panel' => 'admin',
+        'kind' => 'form',
+        'params' => static fn (?object $fixture = null): array => ['course' => $first(\App\Models\Institute\Course::class)],
+        'permissions' => ['courses.edit'],
+        'module' => 'courses',
+        'owner_phase' => 14,
+        'query_budget' => 20,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'admin.courses.export',
+        'panel' => 'admin',
+        'kind' => 'export',
+        'params' => static fn (?object $fixture = null): array => ['format' => 'csv'],
+        'permissions' => ['courses.export'],
+        'module' => 'courses',
+        'owner_phase' => 14,
+        'query_budget' => 20,
+        'responsive' => false,
+        'a11y' => false,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'admin.courses.index',
+        'panel' => 'admin',
+        'kind' => 'index',
+        'params' => static fn (?object $fixture = null): array => [],
+        'permissions' => ['courses.view_any'],
+        'module' => 'courses',
+        'owner_phase' => 14,
+        'query_budget' => 20,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'admin.courses.show',
+        'panel' => 'admin',
+        'kind' => 'show',
+        'params' => static fn (?object $fixture = null): array => ['course' => $first(\App\Models\Institute\Course::class)],
+        'permissions' => ['courses.view'],
+        'module' => 'courses',
+        'owner_phase' => 14,
+        'query_budget' => 30,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'site.courses.category',
+        'panel' => 'public',
+        'kind' => 'public',
+        'params' => static fn (?object $fixture = null): array => ['category' => (string) \App\Models\Institute\CourseCategory::query()->where('is_active', true)->orderBy('id')->value('slug')],
+        'permissions' => [],
+        'module' => null,
+        'owner_phase' => 14,
+        'query_budget' => 30,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'site.courses.index',
+        'panel' => 'public',
+        'kind' => 'public',
+        'params' => static fn (?object $fixture = null): array => [],
+        'permissions' => [],
+        'module' => null,
+        'owner_phase' => 14,
+        'query_budget' => 30,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'site.courses.resource',
+        'panel' => 'public',
+        'kind' => 'export',
+        'params' => static fn (?object $fixture = null): array => ['course' => (string) \App\Models\Institute\Course::query()->where('status', 'published')->orderBy('id')->value('slug'), 'resource' => $first(\App\Models\Institute\CourseTopicResource::class, static fn ($q) => $q->where('is_public', true)->whereNotNull('file_path'))],
+        'permissions' => [],
+        'module' => null,
+        'owner_phase' => 14,
+        'query_budget' => 20,
+        'responsive' => false,
+        'a11y' => false,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'site.courses.show',
+        'panel' => 'public',
+        'kind' => 'public',
+        'params' => static fn (?object $fixture = null): array => ['course' => (string) \App\Models\Institute\Course::query()->where('status', 'published')->orderBy('id')->value('slug')],
+        'permissions' => [],
+        'module' => null,
+        'owner_phase' => 14,
+        'query_budget' => 30,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
 ];

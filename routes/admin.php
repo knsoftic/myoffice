@@ -57,6 +57,9 @@ use App\Http\Controllers\Admin\Finance\FinanceCategoryController;
 use App\Http\Controllers\Admin\Finance\FinanceReportController;
 use App\Http\Controllers\Admin\Finance\IncomeController;
 use App\Http\Controllers\Admin\Finance\InvoiceController;
+use App\Http\Controllers\Admin\Institute\CourseCategoryController;
+use App\Http\Controllers\Admin\Institute\CourseController;
+use App\Http\Controllers\Admin\Institute\CourseOutlineController;
 use App\Http\Controllers\Admin\Finance\PaymentMethodController;
 use App\Http\Controllers\Admin\Finance\PaymentRegisterController;
 use App\Http\Controllers\Admin\Finance\ProjectPaymentController;
@@ -1610,6 +1613,97 @@ Route::prefix('admin')
             Route::get('reports/finance/profit-loss', [FinanceReportController::class, 'show'])->defaults('report', 'profit-loss')->middleware(['can:income.view_reports', 'can:income.view_financial', 'can:expenses.view_financial'])->name('reports.finance.profit-loss');
             Route::get('reports/finance/receivables-aging', [FinanceReportController::class, 'show'])->defaults('report', 'receivables-aging')->middleware(['can:invoices.view_reports', 'can:invoices.view_financial'])->name('reports.finance.receivables-aging');
             Route::get('reports/finance/{report}/export/{format}', [FinanceReportController::class, 'export'])->middleware(['can:reports.view_reports', 'throttle:20,1'])->name('reports.finance.export');
+        });
+
+
+        /*
+        |----------------------------------------------------------------------
+        | Course categories and courses - phase-14-17 sec 7.1
+        |----------------------------------------------------------------------
+        |
+        | `courses.view_financial` gates the three fee columns everywhere a
+        | course is rendered - the index, the form, the export. The Form Request
+        | strips them from the payload too, so hiding the Fees tab is the
+        | courtesy and the strip is the control (FT-10).
+        |
+        | A course is created as a draft and moves only through the sec 2.30.1
+        | transition table, which is why publish / unpublish / archive / revive
+        | are their own routes rather than a `status` field on the update.
+        |
+        */
+        Route::middleware('module:course_categories')->group(static function (): void {
+            Route::get('course-categories', [CourseCategoryController::class, 'index'])->middleware('can:course_categories.view_any')->name('course-categories.index');
+            Route::post('course-categories', [CourseCategoryController::class, 'store'])->middleware('can:course_categories.create')->name('course-categories.store');
+            Route::post('course-categories/reorder', [CourseCategoryController::class, 'reorder'])->middleware('can:course_categories.edit')->name('course-categories.reorder');
+            Route::get('course-categories/{category}/edit', [CourseCategoryController::class, 'edit'])->middleware('can:course_categories.edit')->name('course-categories.edit');
+            Route::put('course-categories/{category}', [CourseCategoryController::class, 'update'])->middleware('can:course_categories.edit')->name('course-categories.update');
+            Route::post('course-categories/{category}/toggle', [CourseCategoryController::class, 'toggle'])->middleware('can:course_categories.change_status')->name('course-categories.toggle');
+            Route::delete('course-categories/{category}', [CourseCategoryController::class, 'destroy'])->middleware('can:course_categories.delete')->name('course-categories.destroy');
+        });
+
+        Route::middleware('module:courses')->group(static function (): void {
+            Route::get('courses', [CourseController::class, 'index'])->middleware('can:courses.view_any')->name('courses.index');
+            Route::get('courses/create', [CourseController::class, 'create'])->middleware('can:courses.create')->name('courses.create');
+            Route::post('courses', [CourseController::class, 'store'])->middleware('can:courses.create')->name('courses.store');
+            Route::post('courses/reorder', [CourseController::class, 'reorder'])->middleware('can:courses.edit')->name('courses.reorder');
+            Route::get('courses/export/{format}', [CourseController::class, 'export'])->middleware('can:courses.export')->name('courses.export');
+
+            Route::get('courses/{course}', [CourseController::class, 'show'])->middleware('can:view,course')->name('courses.show');
+            Route::get('courses/{course}/edit', [CourseController::class, 'edit'])->middleware('can:update,course')->name('courses.edit');
+            Route::put('courses/{course}', [CourseController::class, 'update'])->middleware('can:update,course')->name('courses.update');
+            Route::delete('courses/{course}', [CourseController::class, 'destroy'])->middleware('can:delete,course')->name('courses.destroy');
+
+            Route::post('courses/{course}/publish', [CourseController::class, 'publish'])->middleware('can:changeStatus,course')->name('courses.publish');
+            Route::post('courses/{course}/unpublish', [CourseController::class, 'unpublish'])->middleware('can:changeStatus,course')->name('courses.unpublish');
+            Route::post('courses/{course}/archive', [CourseController::class, 'archive'])->middleware('can:changeStatus,course')->name('courses.archive');
+            Route::post('courses/{course}/revive', [CourseController::class, 'revive'])->middleware('can:changeStatus,course')->name('courses.revive');
+            Route::post('courses/{course}/featured', [CourseController::class, 'featured'])->middleware('can:changeStatus,course')->name('courses.featured');
+            Route::post('courses/{course}/duplicate', [CourseController::class, 'duplicate'])->middleware('can:duplicate,course')->name('courses.duplicate');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | The course outline - phase-14-17 sec 7.2
+        |----------------------------------------------------------------------
+        |
+        | Every parent is a route binding, never a request field: a topic is
+        | posted to its module and a lecture to its topic, so the ids the row is
+        | written with were never in the body (INV-I12). Reorder and move
+        | re-verify ownership in the service - the client's word is never taken.
+        |
+        | `change_status` is deliberately separate from `edit`: switching a node
+        | off is the alternative to deleting one that has been taught from, and
+        | somebody trusted to reword a topic is not automatically trusted to
+        | take it out of every student's denominator (INV-I13).
+        |
+        */
+        Route::middleware('module:course_outline')->group(static function (): void {
+            Route::get('courses/{course}/outline', [CourseOutlineController::class, 'index'])->middleware('can:course_outline.view')->name('course-outline.index');
+            Route::post('courses/{course}/outline/reorder', [CourseOutlineController::class, 'reorder'])->middleware('can:course_outline.edit')->name('course-outline.reorder');
+            Route::post('courses/{course}/outline/{level}/{node}/toggle', [CourseOutlineController::class, 'toggle'])->whereNumber('node')->middleware('can:course_outline.change_status')->name('course-outline.toggle');
+
+            Route::post('courses/{course}/modules', [CourseOutlineController::class, 'storeModule'])->middleware('can:course_outline.create')->name('course-modules.store');
+            Route::put('course-modules/{module}', [CourseOutlineController::class, 'updateModule'])->whereNumber('module')->middleware('can:course_outline.edit')->name('course-modules.update');
+            Route::delete('course-modules/{module}', [CourseOutlineController::class, 'destroyModule'])->whereNumber('module')->middleware('can:delete,module')->name('course-modules.destroy');
+            Route::post('course-modules/{module}/duplicate', [CourseOutlineController::class, 'duplicateModule'])->whereNumber('module')->middleware('can:course_outline.create')->name('course-modules.duplicate');
+
+            Route::post('course-modules/{module}/topics', [CourseOutlineController::class, 'storeTopic'])->whereNumber('module')->middleware('can:course_outline.create')->name('course-topics.store');
+            Route::put('course-topics/{topic}', [CourseOutlineController::class, 'updateTopic'])->whereNumber('topic')->middleware('can:course_outline.edit')->name('course-topics.update');
+            Route::delete('course-topics/{topic}', [CourseOutlineController::class, 'destroyTopic'])->whereNumber('topic')->middleware('can:delete,topic')->name('course-topics.destroy');
+            Route::post('course-topics/{topic}/move', [CourseOutlineController::class, 'moveTopic'])->whereNumber('topic')->middleware('can:course_outline.edit')->name('course-topics.move');
+
+            Route::post('course-topics/{topic}/lectures', [CourseOutlineController::class, 'storeLecture'])->whereNumber('topic')->middleware('can:course_outline.create')->name('course-lectures.store');
+            Route::put('course-lectures/{lecture}', [CourseOutlineController::class, 'updateLecture'])->whereNumber('lecture')->middleware('can:course_outline.edit')->name('course-lectures.update');
+            Route::delete('course-lectures/{lecture}', [CourseOutlineController::class, 'destroyLecture'])->whereNumber('lecture')->middleware('can:delete,lecture')->name('course-lectures.destroy');
+
+            Route::post('course-topics/{topic}/resources', [CourseOutlineController::class, 'storeResource'])->whereNumber('topic')->middleware('can:course_outline.upload')->name('course-resources.store');
+            Route::get('course-resources/{resource}/download', [CourseOutlineController::class, 'downloadResource'])->whereNumber('resource')->middleware('can:course_outline.download')->name('course-resources.download');
+            Route::put('course-resources/{resource}', [CourseOutlineController::class, 'updateResource'])->whereNumber('resource')->middleware('can:course_outline.edit')->name('course-resources.update');
+            Route::delete('course-resources/{resource}', [CourseOutlineController::class, 'destroyResource'])->whereNumber('resource')->middleware('can:course_outline.delete')->name('course-resources.destroy');
+
+            Route::post('course-topics/{topic}/assignments', [CourseOutlineController::class, 'storeAssignment'])->whereNumber('topic')->middleware('can:course_outline.create')->name('course-topic-assignments.store');
+            Route::put('course-topic-assignments/{blueprint}', [CourseOutlineController::class, 'updateAssignment'])->whereNumber('blueprint')->middleware('can:course_outline.edit')->name('course-topic-assignments.update');
+            Route::delete('course-topic-assignments/{blueprint}', [CourseOutlineController::class, 'destroyAssignment'])->whereNumber('blueprint')->middleware('can:course_outline.delete')->name('course-topic-assignments.destroy');
         });
 
         /*

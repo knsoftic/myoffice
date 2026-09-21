@@ -72,7 +72,7 @@
 
     @if ($overLimit)
         <div class="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300">
-            {{ number_format($result->rowCount()) }} rows — above the {{ number_format($syncLimit) }} an
+            {{ app_number($result->rowCount()) }} rows — above the {{ app_number($syncLimit) }} an
             export is built inline for. Narrow the range before exporting, or expect it to take a while.
         </div>
     @endif

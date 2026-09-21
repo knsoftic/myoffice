@@ -193,6 +193,18 @@ use App\Policies\Finance\FinanceCategoryPolicy;
 use App\Policies\Finance\IncomePolicy;
 use App\Policies\Finance\InvoicePolicy;
 use App\Policies\Finance\PaymentMethodPolicy;
+use App\Models\Institute\Course;
+use App\Models\Institute\CourseCategory;
+use App\Models\Institute\CourseLecture;
+use App\Models\Institute\CourseModule;
+use App\Models\Institute\CourseTopic;
+use App\Models\Institute\CourseTopicAssignment;
+use App\Models\Institute\CourseTopicResource;
+use App\Policies\Institute\CourseCategoryPolicy;
+use App\Policies\Institute\CourseOutlinePolicy;
+use App\Policies\Institute\CoursePolicy;
+use App\Support\Institute\Sitemap\CourseCategorySitemapProvider;
+use App\Support\Institute\Sitemap\CourseSitemapProvider;
 use Illuminate\Support\ServiceProvider;
 use Throwable;
 
@@ -294,6 +306,16 @@ class AppServiceProvider extends ServiceProvider
         Income::class => IncomePolicy::class,
         PaymentMethodOption::class => PaymentMethodPolicy::class,
         FinanceCategory::class => FinanceCategoryPolicy::class,
+
+        // phase-14-17 §4.2. The five outline models share ONE policy: the tree is one thing with one
+        // permission, and five near-identical classes would be five places to forget INV-I13.
+        CourseCategory::class => CourseCategoryPolicy::class,
+        Course::class => CoursePolicy::class,
+        CourseModule::class => CourseOutlinePolicy::class,
+        CourseTopic::class => CourseOutlinePolicy::class,
+        CourseLecture::class => CourseOutlinePolicy::class,
+        CourseTopicResource::class => CourseOutlinePolicy::class,
+        CourseTopicAssignment::class => CourseOutlinePolicy::class,
     ];
 
     /**
@@ -423,6 +445,12 @@ class AppServiceProvider extends ServiceProvider
             new BlogTagSitemapProvider,
             new JobOpeningSitemapProvider,
             new TeamSitemapProvider,
+            // phase-14-17 §7.10: the catalogue registers here like every other public entity and never
+            // edits the generator (D23). `is_indexable = false` is honoured in the query, not only in a
+            // meta tag — telling a crawler not to index a page and then listing it is two instructions
+            // that contradict each other.
+            new CourseSitemapProvider,
+            new CourseCategorySitemapProvider,
         ] as $provider) {
             SitemapGenerator::extend($provider->key(), $provider);
         }

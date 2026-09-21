@@ -164,6 +164,31 @@ final class FormatTest extends TestCase
         $this->assertSame($expected, app_number($value, $decimals));
     }
 
+    /**
+     * @return array<string, array{0: string|int|float|null, 1: string}>
+     */
+    public static function quantityProvider(): array
+    {
+        return [
+            'a whole number loses its four zeros' => ['8.0000', '8'],
+            'a real fraction keeps what it needs' => ['1.5000', '1.5'],
+            'and no more than it needs' => ['1.2500', '1.25'],
+            'the separators are still applied' => ['1200.2500', '1,200.25'],
+            // The one that would break a naive rtrim: the zeros before the separator are not trailing.
+            'a round thousand keeps its own zeros' => ['1000.0000', '1,000'],
+            'negative' => ['-2.5000', '-2.5'],
+            'zero is zero, not an empty string' => ['0.0000', '0'],
+            'null is zero' => [null, '0'],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('quantityProvider')]
+    public function a_quantity_drops_the_zeros_its_column_carries(string|int|float|null $value, string $expected): void
+    {
+        $this->assertSame($expected, app_quantity($value));
+    }
+
     #[Test]
     public function a_percentage_is_a_number_with_a_percent_sign(): void
     {

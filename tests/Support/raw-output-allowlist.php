@@ -52,4 +52,32 @@ return [
         'why' => 'The FAQ manager previews each answer as it will render on the site; the stored answer is rich text, sanitised again on render.',
     ],
 
+
+    /*
+    |----------------------------------------------------------------------
+    | Phase 14 — the course landing page
+    |----------------------------------------------------------------------
+    | The course page lives under `site/`, which Phase 3's scan already walks, so its two rich-text
+    | echoes belong here rather than in a scan of this phase's own. Both are CMS rich text going
+    | through the one sanitiser; the JSON-LD block beside them is NOT a raw echo — it is Blade's
+    | `@json` with the HEX flags, so a course name containing `</script>` cannot close the tag.
+    */
+
+    [
+        'view' => 'site/courses/show.blade.php',
+        'expression' => '\App\Support\RichText::sanitize($course->full_description)',
+        'occurrences' => 1,
+        'sanitiser' => 'App\Support\RichText::sanitize()',
+        'owner_phase' => 14,
+        'why' => 'The long course description is rich text authored in the course form and sanitised on write; it is sanitised again here on render, by the same profile the CMS uses, because a value stored before a profile tightened would otherwise print under the old rules.',
+    ],
+    [
+        'view' => 'site/courses/show.blade.php',
+        'expression' => '\App\Support\RichText::sanitize((string) $faq->answer)',
+        'occurrences' => 1,
+        'sanitiser' => 'App\Support\RichText::sanitize()',
+        'owner_phase' => 14,
+        'why' => 'A course FAQ is a Phase 3 `faqs` row (F-2.2) rendered on this page, so it prints exactly as the FAQ manager previews it — same value, same sanitiser, one definition of what an answer may contain.',
+    ],
+
 ];

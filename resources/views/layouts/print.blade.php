@@ -198,6 +198,9 @@
         .sheet > *:not(.watermark) { position: relative; z-index: 1; }
 
         .avoid-break { page-break-inside: avoid; }
+        /* Plain text whose line breaks matter: the breaks are CSS, so the value still goes out
+           through an escaping echo and no view has to reason about raw output (FT-37). */
+        .pre-line { white-space: pre-line; }
 
         @@media print {
             body { background: #fff; }

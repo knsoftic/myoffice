@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Events\SettingsChanged;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -42,6 +43,9 @@ use Throwable;
  */
 final class SettingsRepository
 {
+    /** Set while setMany() runs, so a batch announces once instead of once per key. */
+    private bool $deferAnnounce = false;
+
     /** Cache key for the whole payload. The Setting model forgets this key on save/delete. */
     public const CACHE_KEY = 'settings.all';
 
@@ -255,6 +259,7 @@ final class SettingsRepository
         }
 
         $this->flush();
+        $this->announce([$group.'.'.$name]);
     }
 
     /**
@@ -274,9 +279,20 @@ final class SettingsRepository
             $this->assertLowLevelWriteAllowed($group, $name);
         }
 
-        foreach ($values as $key => $value) {
-            $this->set((string) $key, $value, $meta[$key] ?? []);
+        $this->deferAnnounce = true;
+
+        try {
+            foreach ($values as $key => $value) {
+                $this->set((string) $key, $value, $meta[$key] ?? []);
+            }
+        } finally {
+            $this->deferAnnounce = false;
         }
+
+        $this->announce(array_map(
+            fn (string $key): string => implode('.', $this->split($key)),
+            array_map('strval', array_keys($values)),
+        ));
     }
 
     /**
@@ -403,6 +419,27 @@ final class SettingsRepository
         DB::table(self::TABLE)->where('group', $group)->where('key', $name)->delete();
 
         $this->flush();
+        $this->announce([$dotted]);
+    }
+
+    /**
+     * Say which keys moved, the way `SettingsService::afterWrite()` does for the settings screen.
+     *
+     * These three writers are the console-and-tests door into the table (`assertLowLevelWriteAllowed()`
+     * keeps everything else out), and they used to close it silently: a public key written here — say
+     * `seo.robots_indexable` from a deploy script — flushed the settings cache and left Phase 3's cached
+     * pages serving the old value for up to `website.cache_ttl_minutes`. `flush()` stays what its name
+     * says: a cache clear, announcing nothing, because clearing a cache is not a change.
+     *
+     * @param  list<string>  $keys  dotted keys
+     */
+    private function announce(array $keys): void
+    {
+        if ($this->deferAnnounce || $keys === []) {
+            return;
+        }
+
+        SettingsChanged::dispatch(array_values($keys), null);
     }
 
     /**

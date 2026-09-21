@@ -3343,4 +3343,557 @@ return [
         'owner_phase' => 13,
     ],
 
+
+    /*
+    |----------------------------------------------------------------------
+    | Phase 14 - institute catalogue: categories, courses, outline (47 routes)
+    |----------------------------------------------------------------------
+    | Every admin route additionally carries `auth`, `active`, `panel:admin`; `module:*` is stated per
+    | block. Thirteen of them are guarded by a policy rather than by a bare permission, and those rows
+    | carry a `policy` key as well (D87): `can:update,course` is an ability on a model, not a permission
+    | name, so the row says which permission the policy requires AND which method also weighs the
+    | course's own state - a course anybody was ever admitted to is archived, never deleted.
+    |
+    | The four public rows carry no `can:` and say why. Nothing unpublished is reachable through any of
+    | them, and every refusal is a 404: a 403 would confirm that a guessed slug is a real course.
+    */
+
+    [
+        'route' => 'admin.course-categories.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_categories', 'can:course_categories.delete'],
+        'permission' => 'course_categories.delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-categories.edit',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_categories', 'can:course_categories.edit'],
+        'permission' => 'course_categories.edit',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-categories.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_categories', 'can:course_categories.view_any'],
+        'permission' => 'course_categories.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-categories.reorder',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_categories', 'can:course_categories.edit'],
+        'permission' => 'course_categories.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-categories.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_categories', 'can:course_categories.create'],
+        'permission' => 'course_categories.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-categories.toggle',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_categories', 'can:course_categories.change_status'],
+        'permission' => 'course_categories.change_status',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-categories.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_categories', 'can:course_categories.edit'],
+        'permission' => 'course_categories.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-lectures.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:delete,lecture'],
+        'permission' => 'course_outline.delete',
+        'policy' => 'CourseOutlinePolicy::delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-lectures.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:course_outline.create'],
+        'permission' => 'course_outline.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-lectures.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:course_outline.edit'],
+        'permission' => 'course_outline.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-modules.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:delete,module'],
+        'permission' => 'course_outline.delete',
+        'policy' => 'CourseOutlinePolicy::delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-modules.duplicate',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:course_outline.create'],
+        'permission' => 'course_outline.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-modules.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:course_outline.create'],
+        'permission' => 'course_outline.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-modules.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:course_outline.edit'],
+        'permission' => 'course_outline.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-outline.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:course_outline.view'],
+        'permission' => 'course_outline.view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-outline.reorder',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:course_outline.edit'],
+        'permission' => 'course_outline.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-outline.toggle',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:course_outline.change_status'],
+        'permission' => 'course_outline.change_status',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-resources.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:course_outline.delete'],
+        'permission' => 'course_outline.delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-resources.download',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:course_outline.download'],
+        'permission' => 'course_outline.download',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-resources.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:course_outline.upload'],
+        'permission' => 'course_outline.upload',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-resources.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:course_outline.edit'],
+        'permission' => 'course_outline.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-topic-assignments.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:course_outline.delete'],
+        'permission' => 'course_outline.delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-topic-assignments.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:course_outline.create'],
+        'permission' => 'course_outline.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-topic-assignments.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:course_outline.edit'],
+        'permission' => 'course_outline.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-topics.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:delete,topic'],
+        'permission' => 'course_outline.delete',
+        'policy' => 'CourseOutlinePolicy::delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-topics.move',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:course_outline.edit'],
+        'permission' => 'course_outline.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-topics.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:course_outline.create'],
+        'permission' => 'course_outline.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.course-topics.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_outline', 'can:course_outline.edit'],
+        'permission' => 'course_outline.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.courses.archive',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:courses', 'can:changeStatus,course'],
+        'permission' => 'courses.change_status',
+        'policy' => 'CoursePolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.courses.create',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:courses', 'can:courses.create'],
+        'permission' => 'courses.create',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.courses.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:courses', 'can:delete,course'],
+        'permission' => 'courses.delete',
+        'policy' => 'CoursePolicy::delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.courses.duplicate',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:courses', 'can:duplicate,course'],
+        'permission' => 'courses.create',
+        'policy' => 'CoursePolicy::duplicate',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.courses.edit',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:courses', 'can:update,course'],
+        'permission' => 'courses.edit',
+        'policy' => 'CoursePolicy::update',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.courses.export',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:courses', 'can:courses.export'],
+        'permission' => 'courses.export',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.courses.featured',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:courses', 'can:changeStatus,course'],
+        'permission' => 'courses.change_status',
+        'policy' => 'CoursePolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.courses.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:courses', 'can:courses.view_any'],
+        'permission' => 'courses.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.courses.publish',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:courses', 'can:changeStatus,course'],
+        'permission' => 'courses.change_status',
+        'policy' => 'CoursePolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.courses.reorder',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:courses', 'can:courses.edit'],
+        'permission' => 'courses.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.courses.revive',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:courses', 'can:changeStatus,course'],
+        'permission' => 'courses.change_status',
+        'policy' => 'CoursePolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.courses.show',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:courses', 'can:view,course'],
+        'permission' => 'courses.view',
+        'policy' => 'CoursePolicy::view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.courses.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:courses', 'can:courses.create'],
+        'permission' => 'courses.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.courses.unpublish',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:courses', 'can:changeStatus,course'],
+        'permission' => 'courses.change_status',
+        'policy' => 'CoursePolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'admin.courses.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:courses', 'can:update,course'],
+        'permission' => 'courses.edit',
+        'policy' => 'CoursePolicy::update',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'site.courses.category',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:courses', 'site.preview', 'site.cache'],
+        'permission' => null,
+        'panel' => 'public',
+        'state_changing' => false,
+        'rationale' => 'Public website route (INV-15). Same gate as the catalogue; a category that is switched off is a '
+            .'404 rather than an empty page, because an empty page invites a second guess at the slug.',
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'site.courses.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:courses', 'site.preview', 'site.cache'],
+        'permission' => null,
+        'panel' => 'public',
+        'state_changing' => false,
+        'rationale' => 'Public website route (INV-15): the catalogue answers without a permission. site_module:courses '
+            .'decides whether the section exists at all, and the publish state decides what is listed - a '
+            .'draft, an archived course and a course in a switched-off category are simply not in it.',
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'site.courses.resource',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:courses', 'site.preview'],
+        'permission' => null,
+        'panel' => 'public',
+        'state_changing' => false,
+        'rationale' => 'Public website route (INV-15), and the rule is the landing page\'s own, re-run per request by '
+            .'PublicCourseService::downloadableResource(): the course must be one the catalogue would show and '
+            .'the resource must be marked public and downloadable, or it is a 404. No permission, because the '
+            .'file is part of a published syllabus - but it is served by the application rather than by the '
+            .'web server, so hiding the resource takes the address away with it (D85).',
+        'owner_phase' => 14,
+    ],
+
+    [
+        'route' => 'site.courses.show',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:courses', 'site.preview', 'site.cache'],
+        'permission' => null,
+        'panel' => 'public',
+        'state_changing' => false,
+        'rationale' => 'Public website route (INV-15). A draft, an archived course, a course in a switched-off category '
+            .'and a slug that was never real all answer 404 - a 403 would confirm to a stranger that the slug '
+            .'they guessed is a real course.',
+        'owner_phase' => 14,
+    ],
 ];

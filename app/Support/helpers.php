@@ -115,6 +115,18 @@ if (! function_exists('app_number')) {
     }
 }
 
+if (! function_exists('app_quantity')) {
+    /**
+     * A quantity without its trailing zeros: app_quantity('8.0000') // '8'.
+     *
+     * For an amount of money use money(); for a count or a plain figure use app_number().
+     */
+    function app_quantity(string|int|float|null $value, int $maxDecimals = 4): string
+    {
+        return Format::quantity($value, $maxDecimals);
+    }
+}
+
 if (! function_exists('per_page')) {
     /**
      * Rows per page for an admin list screen: `appearance.table_page_size`, clamped to 10..100.

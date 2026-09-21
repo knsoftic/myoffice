@@ -16,7 +16,7 @@
     $token = $links->tokenForForm(request());
     $visit = $token !== null ? $links->currentVisit(request()) : null;
     $partner = $visit?->collaborator;
-    $showPartner = $partner !== null && (bool) setting('collaborator.referral_public_name_visible', true);
+    $showPartner = $partner !== null && (bool) site_setting('collaborator.referral_public_name_visible', true);
 @endphp
 
 @if ($token !== null)

@@ -269,6 +269,34 @@ final class Format
     }
 
     /**
+     * A quantity, with the trailing zeros its column carries but nobody wants to read: '1.5', '12',
+     * '1,200.25'.
+     *
+     * An invoice line quantity is `decimal(15,4)` because a rate may be charged per quarter hour, and
+     * "8.0000 hours" on a document a client reads is noise. The separators are the configured ones,
+     * like every other number on the screen — a quantity printed with a hard-coded dot is the one
+     * number on an invoice that disagrees with the rest of it.
+     */
+    public static function quantity(string|int|float|null $value, int $maxDecimals = 4): string
+    {
+        $maxDecimals = max(0, $maxDecimals);
+        $formatted = self::number($value, $maxDecimals);
+
+        if ($maxDecimals === 0) {
+            return $formatted;
+        }
+
+        $decimal = self::decimalSeparator();
+
+        // Guarded on the separator being present: without it, '1,000' would lose its own zeros.
+        if ($decimal !== '' && str_contains($formatted, $decimal)) {
+            $formatted = rtrim(rtrim($formatted, '0'), $decimal);
+        }
+
+        return $formatted === '' || $formatted === '-' ? '0' : $formatted;
+    }
+
+    /**
      * A percentage, at the `decimal(8,4)` precision rates are stored with, trimmed for display:
      * '12.5%'.
      */

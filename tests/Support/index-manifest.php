@@ -288,4 +288,38 @@ return [
         ['expense_id'], ['income_id'], ['occurred_on', 'type'],
         ['performed_by'], ['created_by'], ['updated_by'],
     ],
+
+    /*
+    |----------------------------------------------------------------------
+    | Phase 14 - institute catalogue: categories, courses, outline
+    |----------------------------------------------------------------------
+    | Every Keys-block index of phase-14-17 §2.4-§2.9, plus a row for each foreign key column (F-9.2).
+    | The outline tables carry `course_id` as well as their own parent, denormalised on purpose: the
+    | landing page reads a whole tree by course in one query per level instead of joining three deep.
+    */
+    'course_categories' => [['slug'], ['is_active', 'sort_order'], ['name'], ['created_by'], ['updated_by']],
+    'courses' => [
+        ['code'], ['slug'],
+        ['status', 'is_featured', 'sort_order'], ['course_category_id', 'status'],
+        ['level'], ['delivery_mode'], ['branch_id', 'status'], ['admission_open', 'status'],
+        ['default_teacher_id'], ['course_category_id'], ['branch_id'], ['created_by'], ['updated_by'],
+    ],
+    'course_modules' => [['course_id', 'sort_order'], ['course_id', 'is_active'], ['course_id'], ['created_by'], ['updated_by']],
+    'course_topics' => [
+        ['course_module_id', 'sort_order'], ['course_id', 'is_active'],
+        ['course_module_id'], ['course_id'], ['created_by'], ['updated_by'],
+    ],
+    'course_lectures' => [
+        ['course_topic_id', 'sort_order'], ['course_id', 'is_preview'],
+        ['course_topic_id'], ['course_id'], ['created_by'], ['updated_by'],
+    ],
+    'course_topic_resources' => [
+        ['course_topic_id', 'sort_order'], ['course_id', 'is_public'],
+        ['course_topic_id'], ['course_id'], ['created_by'], ['updated_by'],
+    ],
+    'course_topic_assignments' => [
+        ['course_topic_id', 'sort_order'], ['course_id'],
+        ['course_topic_id'], ['created_by'], ['updated_by'],
+    ],
+
 ];

@@ -195,6 +195,11 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D80 | **There is no `App\Support\AgingCalculator`; `AgingBucket::forDays()` is the one implementation.** | §6.9 names a calculator class whose whole content would be a `match` the enum already owns. Two classes answering "which bucket is 47 days" is exactly the duplication the rest of the phase argues against — the SQL, the CSV and the screen all call the enum, so there is one definition, which is what the contract line wanted. |
 | D82 | **A sidebar item may advertise a *list* of permissions, and-ed, and the consistency test compares the whole rule.** | `PermissionStringConsistencyTest` found it the moment the payments register shipped: the route carries `can:payments.view_any` **and** `can:payments.view_financial` — the register's whole content is amounts, so a version of it without them would be a list of reference numbers — while the item advertised only the first. That is a visible link that 403s, which is the exact failure the test exists to catch, and the test was comparing `[$permission]` against the route's full list so it could only ever pass for single-permission routes. Widening the rule is the fix; narrowing the route would have been the bug. |
 | D81 | **dompdf is not installed, so `pdf` renders the print HTML and every PDF route answers 404.** | §6.8 specifies `InvoicePdfService` over dompdf. Installing a rendering engine is a dependency decision, not a Phase 13 one, and a service that returned an empty file or an HTML blob named `.pdf` would be worse than an honest refusal: somebody would attach it to an email. The print layout is shipped and is the document — `layouts/print.blade.php` is deliberately self-contained (inline CSS, an inlined logo, no Vite and no CDN) precisely so that dompdf can render it unchanged the day it arrives. |
+| D83 | **The outline's cache invalidation is its own step (`CourseOutlineService::announce()`), never something riding on a recount.** | §7.10 asks that publishing, unpublishing, archiving or editing a course — and any outline change — take Phase 3's cached copy of that page out of circulation, and nothing did: three catalogue tests failed as stale `200`s, a switched-off category still serving its courses, a deactivated topic still listed, "Apply now" still offered after admissions closed. The first fix put the bump inside `recountCourse()`, which reads well and is wrong — `recountTopic()` never reaches the course, so a resource added to a published syllabus recounted perfectly and told the site nothing, and `reorder()` recounts nothing at all while changing the order a visitor reads. One named step, called by every write, is the only version of this that stays true when the fifteenth write is added. |
+| D84 | **`SettingsRepository::set()`, `setMany()` and `forget()` announce `SettingsChanged`; `flush()` still announces nothing.** | The settings screen writes through `SettingsService`, which dispatches the event `PublicCache::settingsChanged()` listens for. The low-level door — console and tests, held shut for everything else by `assertLowLevelWriteAllowed()` — wrote in silence, so switching `institute.admission_open` off left every cached course page still offering "Apply now" for up to `website.cache_ttl_minutes`. `flush()` keeps its meaning deliberately: clearing a cache is not a change, and a bump there would fire on `SettingSeeder`'s closing flush and on every test that drops the payload. |
+| D85 | **A syllabus resource file lands on the private disk, against this phase's own contract line.** | §2.8 says `file_path` is "`public` disk under `courses/{course}/resources/`" and, four lines earlier, that a resource which is not `is_public` needs `course_outline.view`. Both cannot be true: a file on the public disk is served by the web server with no application code in the path, so the permission is decoration, and `Storage::url()` hands out an address that stays valid after the resource is hidden, after it is deleted, and after the person shown it leaves. CLAUDE.md §3 / D21 decides it. Two controllers serve these files now — the admin one re-runs `course_outline.download`, the public one answers only for an `is_public`, `is_downloadable` resource of a course the catalogue would show and 404s on every other case. Done now because nothing linked these files yet, so it migrates nobody's data. |
+| D86 | **A faked upload cannot test a content-sniffing rule.** | `UploadedFile::fake()->createWithContent()` reports a MIME guessed from the filename — precisely the value §111 refuses to trust — so FT-09 passed while proving nothing about the check it was named after. The test writes a real temporary file and hands it over with `$test = true`, so `getMimeType()` runs `finfo` over actual bytes and a `.php` renamed to `.pdf` is refused by the thing that is supposed to refuse it. |
+| D87 | **A policy-guarded route's manifest row names both the permission and the policy method.** | Every earlier phase guards with `can:<module.ability>`, so a route-guard row records the literal text after `can:` and `PermissionRegistry` must declare it. Phase 14 is the first with `can:update,course`, where that literal is an ability on a model and not a permission name at all. Recording `null` would file a policy-guarded route beside a deliberately public one — the exact confusion the `rationale` column exists to prevent — so the row carries `permission` (the ability the policy requires: `courses.edit`) and `policy` (`CoursePolicy::update`, which also weighs the course's own state). |
 
 ---
 
@@ -495,7 +500,27 @@ screen, the client panel, the public link, the reports and the nine dashboard ca
 | [ ] | `RecordPayrollExpense` (D44) — **blocked, not skipped**: `PayrollRunPaid` does not exist until Phase 7's payroll ships. Without it §99's profit and loss is short by the whole payroll, and the reserved `salaries` category is already in place waiting for it |
 | [ ] | `InvoicePdfService` / `InvoiceDeliveryService` — **deferred with a reason (D81)**: dompdf is not installed. The print layout is the document; the PDF routes answer 404 rather than serving an HTML blob named `.pdf` |
 
-### [ ] PHASE 14 — Institute: course categories, courses, outline (modules / topics / lectures)
+### [x] PHASE 14 — Institute: course categories, courses, outline (modules / topics / lectures)
+
+Contract: [`docs/phases/phase-14-17.md`](docs/phases/phase-14-17.md) §1–§8.20 · **schema, services,
+policies, every admin screen, the public catalogue and course page, the sitemap providers and the
+dashboard card landed 2026-09-21.**
+
+| | Item |
+|---|---|
+| [x] | Seven tables and six enums — `course_categories`, `courses` (eight CHECKs), the three outline levels, `course_topic_resources`, `course_topic_assignments` — 499/499 schema checks on both databases, 36/36 behavioural checks inside a rolled-back transaction |
+| [x] | **INV-I12 in the code, not only in the contract**: every parent id is read from the parent the route bound, never from the request, so there is no path a crafted POST could use to graft a node onto another course's tree. `reorder()` and `moveTopic()` re-verify every id against its parent and the parent against the course, and a payload with one foreign id reorders nothing at all |
+| [x] | `CourseService` — the §2.30.1 transition table verbatim, `archived` the one move that demands a reason, `publishingGaps()` counted live rather than from `modules_count`, `duplicate()` deep-copying the tree and the FAQs through Phase 3's `FaqService` |
+| [x] | `CourseOutlineService` — the five adds, the five edits, `setActive()`, `delete()`, `reorder()`, `moveTopic()`, `duplicateModule()`, and the counter maintenance the landing page reads |
+| [x] | **D83**: the public-cache invalidation §7.10 asks for, as its own step called by every write. Three catalogue tests were failing as stale `200`s and the cause was that nothing bumped Phase 3's version stamp |
+| [x] | **D85**: a resource file is on the **private** disk and is served by two controllers that re-run their own rule — against §2.8's own line, which contradicts the permission the same section requires (D21) |
+| [x] | `PublicCourseService` — `catalogue()`, `filterCategories()`, `landing()`, `downloadableResource()`, and every Apply / WhatsApp link, so no page writes its own `href` and drops a partner's attribution |
+| [x] | Three policies (`CourseCategoryPolicy`, `CoursePolicy`, one `CourseOutlinePolicy` registered for all five node models). The permission opens the door; the course's own history decides what is behind it — a course anybody was ever admitted to is archived, never deleted, and `courses.view_financial` gates the three fee columns on the index, the form, the export and the public page |
+| [x] | 47 routes (43 admin, 4 public), 19 screens rendered against live data with 0 failures: the category list, the course register, the create and edit forms, the course detail with its outline tree, the standalone outline screen, the public catalogue, a category page and a course landing page |
+| [x] | §111 upload validation by **content**: `finfo` over the bytes, checked against `CourseResourceType::allowedMimes()`, a 40-character random name on disk so nothing the uploader chose becomes a path. **D86** — the test that proved this had to stop using `UploadedFile::fake()` |
+| [x] | Two sitemap providers that honour `is_indexable` and skip a category with nothing published in it, and the `institute-active-courses` dashboard card reading the service (D28) |
+| [x] | The four `course_id` keys Phases 4 and 10 deferred until this table existed, finally attached ([D-IN-1]) — `contact_inquiries`, `student_reviews`, `success_stories` and `student_fees`. Their own migrations are idempotent and ask to be re-run, but `migrate` runs a file once, so the phase that creates the target has to do it |
+| [x] | The four D60 manifests: 47 route-guard rows read off the live route table, 13 screen rows, the seven tables' indexes and the one upload route — with **D87**'s row shape for the thirteen routes a policy guards, and `CourseManifestTest` comparing all four against the thing they describe |
 ### [ ] PHASE 15 — Inquiries, online admission, admission workflow, registration
 ### [ ] PHASE 16 — Teachers, batches, timetable, demo classes
 ### [ ] PHASE 17 — Student attendance + course progress
@@ -514,6 +539,82 @@ screen, the client panel, the public link, the reports and the nine dashboard ca
 ---
 
 ## 6. Change Log
+
+### 2026-09-21 — Phase 14: the catalogue, and a cache that kept serving the page after it was taken down
+
+**Three tests failed for one reason, and it was a real gap.** Switching a category off left its
+courses answering `200`. A topic the institute had stopped teaching stayed on the landing page.
+"Apply now" survived admissions being closed. §7.10 asks that a course, outline or FAQ change take
+Phase 3's cached copy of that page out of circulation, and nothing in this phase did it — so every
+screen was right, every query was right, and the site served yesterday.
+
+The first fix put the bump inside `recountCourse()`, on the reasoning that every outline write already
+calls it. That reasoning was wrong in two places and both were the interesting ones: `recountTopic()`
+never reaches the course, so adding a resource to a published syllabus recounted perfectly and told the
+site nothing, and `reorder()` recounts nothing at all while changing the order a visitor reads. It is
+`announce()` now — one named step, called by every write, cheap to call and impossible to mistake for
+counter maintenance (D83).
+
+**The setting that could not reach the cache.** The fourth failure had a different cause with the same
+shape. The settings screen writes through `SettingsService`, which dispatches `SettingsChanged`, which
+`PublicCache` listens to. The low-level door — `SettingsRepository::set()`, for the console and the
+tests — wrote in silence, so `institute.admission_open` switched off left every cached course page
+offering to take an admission for up to a day. The three writers announce now; `flush()` still does
+not, because clearing a cache is not a change (D84).
+
+**A contract line this phase did not follow.** §2.8 puts a syllabus file on the `public` disk and, four
+lines earlier, says a resource that is not `is_public` needs `course_outline.view`. Both cannot hold: a
+file the web server serves has no application code in front of it, so the permission is decoration, and
+`Storage::url()` hands out an address that outlives hiding the resource, deleting it, and the employment
+of whoever was shown it. CLAUDE.md §3 decides that one. The file is on the private disk and two
+controllers serve it — the admin one re-running `course_outline.download`, the public one answering only for
+a public, downloadable resource of a course the catalogue would show, and 404ing on every other case
+(D85). It cost nothing to fix because nothing linked these files yet; in three phases' time it would
+have cost a migration and an apology.
+
+**The outline is three levels, and the code is what makes that true.** Module → topic → lecture, no
+`parent_id` anywhere. Every parent id is read from the parent the route bound rather than from the
+request body, so `storeTopic()` cannot be talked into filing a topic under another course's module, and
+`reorder()` checks every id against its parent and the parent against the course before a single row
+moves — a payload with one foreign id reorders nothing rather than reordering what it could.
+
+**Publishing asks the table, not the cache.** `publishingGaps()` counts modules live rather than
+reading `modules_count`, because the cached count is most likely to be stale on exactly the course
+somebody is about to publish for the first time. It returns the missing field names, so the button is
+disabled with a reason instead of failing on submit.
+
+**An upload is what it is, not what it says.** The content goes through `finfo` and is checked against
+`CourseResourceType::allowedMimes()`; the stored name is forty random characters, so nothing the
+uploader chose ever becomes a path. The test that was supposed to prove this proved nothing:
+`UploadedFile::fake()->createWithContent()` reports a MIME guessed from the filename, which is the one
+value the rule exists to distrust. It writes a real temporary file now (D86).
+
+**Two Blade traps, both introduced by the fix above and both caught by the full suite.** `@json`
+splits its argument on every top-level comma to find its flags, so `@json(array_filter([...]), FLAGS)`
+compiled to PHP that does not parse — the course page answered 500 and the static scan that had just
+passed could not see it, because the scan reads the source and the failure is in the output. The array
+is built in an `@php` block now and `@json` gets a variable. The second was a `{{ }}` written inside a
+**CSS comment** in the print layout: Blade compiles an echo wherever it finds one, comment or not, so
+`{{ }}` became `<?php echo e(}}` and every printable document 500ed. Seven failures, one line each.
+
+**Two tests that had been red since before this phase.** `SidebarVisibilityTest` is a ledger of which
+screens have shipped their routes, and Phases 12, 13 and 14 all added entries without signing it — the
+finance group, the reconciler's discrepancy report, the wallet register, the payout queue and the
+collaborator panel's own nav. `NoHardcodedFormatsTest` had four hits, three of them the same
+hand-rolled quantity formatter: `number_format((float) $value, 4, '.', '')` trimmed of its zeros, which
+is a number printed with a hard-coded dot and no thousands separator on a document where every other
+number honours the localization settings. The test says what to do about that — give `Format` the
+method rather than excuse the view — so there is an `app_quantity()` now, and the row counts on the
+report screen go through `app_number()` like every other count.
+
+**Also.** `outlineHours()` returns null under thirty minutes rather than "about 0 hours" — a
+twenty-minute module rounded to zero and read as missing data. `applyUrl()` falls back to the contact
+page with the same parameters until Phase 15 ships the admission form, so the referral code survives
+the hop either way. The public controller goes through `ComposesContentPages` and `SeoService` like
+every other public page rather than writing its own `@section('meta')` (D23). The five outline edits
+moved out of the controller into the service, which is where three of them picked up the cache
+invalidation they had been missing.
+
 
 ### 2026-09-21 — Phase 13: every finance screen, and a number that was being spent twice
 

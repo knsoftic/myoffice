@@ -676,7 +676,13 @@ final class PermissionRegistry
                 'icon' => 'academic-cap',
                 'is_core' => false,
                 'sort' => 520,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::MONEY, self::FILES, self::RESTORE),
+                // phase-14-17 §4.2 adds REPORTS and LOGS: a catalogue is reported on (which courses
+                // sell, which never filled a batch) and a fee change is a decision somebody is asked
+                // to account for. `view_financial` from MONEY gates the three fee columns everywhere a
+                // course is rendered — the index, the form, the export and the public page.
+                'abilities' => self::merge(
+                    self::CRUD_FULL, self::STATUS, self::MONEY, self::FILES, self::REPORTS, self::LOGS, self::RESTORE,
+                ),
             ],
             'course_outline' => [
                 'name' => 'Course Outline',
@@ -684,7 +690,10 @@ final class PermissionRegistry
                 'icon' => 'list-bullet',
                 'is_core' => false,
                 'sort' => 530,
-                'abilities' => self::merge(self::CRUD, self::RESTORE),
+                // phase-14-17 §4.2 adds FILES (a syllabus resource is an upload) and STATUS
+                // (deactivating a node rather than deleting it is the whole of INV-I13, and it is a
+                // different right from editing one).
+                'abilities' => self::merge(self::CRUD, self::FILES, self::STATUS, self::RESTORE),
             ],
             'course_materials' => [
                 'name' => 'Course Materials',

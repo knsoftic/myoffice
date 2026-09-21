@@ -264,6 +264,13 @@ class RoleSeeder extends Seeder
                         'installments',
                         'collaborator_payouts',
                     ]),
+                    // phase-14-17 §4.4: the catalogue read-only, **with** `view_financial`. Quoting a
+                    // student the right fee means seeing the price list; changing it is somebody
+                    // else's job, so nothing beyond reading is granted.
+                    PermissionRegistry::permissionNamesFor('courses', [
+                        Ability::ViewAny, Ability::View, Ability::ViewFinancial,
+                    ]),
+                    PermissionRegistry::permissionNamesFor('course_categories', self::READ),
                     // phase-07 §4.4. Deliberately **not** payroll.approve: whoever locks a run is not
                     // whoever pays it, and collapsing the two would let one person decide and disburse.
                     PermissionRegistry::permissionNamesFor('payroll', $this->abilitiesExcept('payroll', [
@@ -273,7 +280,6 @@ class RoleSeeder extends Seeder
                     PermissionRegistry::permissionNamesFor('employee_advances', self::READ_MONEY),
                     PermissionRegistry::permissionNamesFor('employees', self::READ_MONEY),
                     PermissionRegistry::permissionNamesFor('reports', self::FINANCIAL_REPORTING),
-                    PermissionRegistry::permissionNamesFor('website_media', [Ability::ViewAny, Ability::View, Ability::Upload]),
                     // phase-08-09 §4.3: whoever pays a partner registers and verifies where the money
                     // goes. No ability on this module reveals the encrypted details — only the last four
                     // digits are ever rendered (INV-C6).
@@ -379,6 +385,10 @@ class RoleSeeder extends Seeder
                     // seo.edit, no publish.
                     PermissionRegistry::permissionNamesFor(['website_cta_blocks', 'faqs']),
                     PermissionRegistry::permissionNamesFor('website_media', [Ability::ViewAny, Ability::View, Ability::Upload]),
+                    // phase-14-17 §4.4: the catalogue read-only, so a campaign can name a real course
+                    // and link to a real slug. No fee columns.
+                    PermissionRegistry::permissionNamesFor('courses', self::READ),
+                    PermissionRegistry::permissionNamesFor('course_categories', self::READ),
                 ),
             ],
             [
@@ -401,6 +411,10 @@ class RoleSeeder extends Seeder
                     // nobody's business on the sales floor.
                     PermissionRegistry::permissionNamesFor('collaborators', self::READ),
                     PermissionRegistry::permissionNamesFor('collaborator_referrals', [Ability::Create]),
+                    // phase-14-17 §4.4: read the catalogue to answer "what do you teach". Not the fee
+                    // columns — a quote is the accountant's figure, not a sales guess.
+                    PermissionRegistry::permissionNamesFor('courses', self::READ),
+                    PermissionRegistry::permissionNamesFor('course_categories', self::READ),
                 ),
             ],
             [
@@ -470,13 +484,22 @@ class RoleSeeder extends Seeder
                 'permissions' => $this->merge(
                     $staffBase,
                     PermissionRegistry::permissionNamesFor([
-                        'courses',
                         'course_outline',
                         'course_materials',
                         'batches',
                         'timetable',
                         'student_attendance',
                     ]),
+                    // phase-14-17 §4.2, §4.4: a coordinator builds syllabi, and `courses.view_financial`
+                    // gates the three fee columns everywhere a course is rendered. The price list is the
+                    // accountant's and the manager's business, so the slug is granted minus that one
+                    // ability rather than wholesale. (D65 still applies to an installation that already
+                    // holds it: this changes what a fresh install is given, and revokes nothing.)
+                    array_values(array_diff(
+                        PermissionRegistry::permissionNamesFor('courses'),
+                        PermissionRegistry::permissionNamesFor('courses', [Ability::ViewFinancial]),
+                    )),
+                    PermissionRegistry::permissionNamesFor('course_categories'),
                     PermissionRegistry::permissionNamesFor('students', self::READ_EDIT),
                 ),
             ],

@@ -643,13 +643,10 @@ final class Sidebar
                                 'module' => 'course_categories',
                                 'permission' => 'course_categories.view_any',
                             ],
-                            [
-                                'label' => 'Outline',
-                                'icon' => 'list-bullet',
-                                'route' => 'admin.course-outline.index',
-                                'module' => 'course_outline',
-                                'permission' => 'course_outline.view_any',
-                            ],
+                            // phase-14-17 §8.4: there is deliberately no "Outline" entry here. The
+                            // outline builder is a tab on one course's detail screen, so its route
+                            // needs a `{course}` — and a nav item for a route it cannot build a URL
+                            // for renders as dead text that looks like a broken link.
                             [
                                 'label' => 'Materials',
                                 'icon' => 'folder-open',

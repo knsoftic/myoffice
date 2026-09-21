@@ -355,4 +355,31 @@ return [
         'stored_as' => 'finance-reversals/{Y}/{m}/{ulid}.{ext} — shown on the parent row only',
     ],
 
+
+    /*
+    |--------------------------------------------------------------------------
+    | Phase 14 — the one syllabus upload, on the private disk (D21, D85)
+    |--------------------------------------------------------------------------
+    | phase-14-17 §2.8 puts this file on the `public` disk and, four lines earlier, requires
+    | `course_outline.view` for a resource that is not `is_public`. Both cannot hold, so the file is
+    | private and two controllers serve it: `admin.course-resources.download` re-runs
+    | `course_outline.download`, and `site.courses.resource` answers only for a public, downloadable
+    | resource of a course the catalogue would show.
+    |
+    | `allowed_mimes` is per resource type and is checked against the CONTENT (`finfo`), never against
+    | the name or the client's claim (§111) — the list below is the union of
+    | `CourseResourceType::allowedMimes()`.
+    */
+    [
+        'route' => 'admin.course-resources.store',
+        'field' => 'file',
+        'disk' => 'local',
+        'allowed_mimes' => 'App\\Enums\\CourseResourceType::allowedMimes() — per type, checked on the content',
+        'max_mb' => 25,
+        'permission' => 'course_outline.upload',
+        'owner_phase' => 14,
+        'public_reachable' => false,
+        'stored_as' => 'courses/{course}/resources/{40 random chars}.{ext} — streamed by admin.course-resources.download and, when public, site.courses.resource',
+    ],
+
 ];
