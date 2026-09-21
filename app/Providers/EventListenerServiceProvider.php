@@ -22,6 +22,7 @@ use App\Events\Crm\LeadFollowUpMissed;
 use App\Events\Crm\LeadImportCompleted;
 use App\Events\Finance\PaymentReversalApproved;
 use App\Events\Finance\PaymentReversalRecorded;
+use App\Events\Finance\PaymentReversalRejected;
 use App\Events\Finance\ProjectPaymentRecorded;
 use App\Events\Finance\StudentFeePaymentRecorded;
 use App\Listeners\Cms\FlushPublicContentCache;
@@ -44,6 +45,7 @@ use App\Listeners\Crm\NotifyOfLeadConversion;
 use App\Listeners\Crm\NotifyStaffOfWebsiteLead;
 use App\Listeners\Crm\RecordCapturedReferral;
 use App\Listeners\Crm\TouchLeadActivityCaches;
+use App\Listeners\Finance\RecomputeInvoiceOnPaymentChange;
 use App\Listeners\RecordFailedLogin;
 use App\Listeners\RecordLogout;
 use App\Listeners\RecordSuccessfulLogin;
@@ -112,11 +114,16 @@ final class EventListenerServiceProvider extends ServiceProvider
         // cashier never waits on the engine and a rolled-back receipt never earns anybody anything
         // (INV-20).
         StudentFeePaymentRecorded::class => [QueueStudentFeeCommission::class],
-        ProjectPaymentRecorded::class => [QueueProjectPaymentCommission::class],
         // Both reversal events reach one listener, which fires the job only for a reversal that is
         // actually authorised — so a refund awaiting approval undoes nothing yet.
-        PaymentReversalRecorded::class => [QueueCommissionReversal::class],
-        PaymentReversalApproved::class => [QueueCommissionReversal::class],
+        PaymentReversalRecorded::class => [QueueCommissionReversal::class, RecomputeInvoiceOnPaymentChange::class],
+        PaymentReversalApproved::class => [QueueCommissionReversal::class, RecomputeInvoiceOnPaymentChange::class],
+
+        // phase-13 §10.2. Phase 13 reacts here and never drives: the spine records the money, and this
+        // re-derives what the invoice says about it. A rejected reversal reaches the same listener,
+        // because the right response to either outcome is the same — ask the database what is true now.
+        ProjectPaymentRecorded::class => [QueueProjectPaymentCommission::class, RecomputeInvoiceOnPaymentChange::class],
+        PaymentReversalRejected::class => [RecomputeInvoiceOnPaymentChange::class],
     ];
 
     public function register(): void
