@@ -41,6 +41,7 @@ final class CommissionApprovalService
         private readonly DatabaseManager $db,
         private readonly CollaboratorWalletService $wallets,
         private readonly CollaboratorActivityService $activity,
+        private readonly CommissionEntitlementService $entitlements,
     ) {}
 
     /*
@@ -306,7 +307,41 @@ final class CommissionApprovalService
             'cancel_reason' => mb_substr($reason, 0, 255),
         ]);
 
+        $this->returnToPromise($entry);
+
         $this->log($entry, CollaboratorActivityEvent::CommissionReversed, $event, ['reason' => $reason], $reason);
+    }
+
+    /**
+     * Give the entitlement back what a cancelled entry had claimed against it.
+     *
+     * A rejection is not a reversal: the row leaves every bucket with a reason on it and no debit is
+     * written. But the promise it was released against still records the release, and leaving it there
+     * would cap the partner at a figure they never actually received — a PKR 2,000 fixed commission
+     * whose first instalment was rejected could then only ever reach PKR 1,333.
+     *
+     * Only the part that was still standing goes back. Anything already reversed or clawed back was
+     * returned by `unrelease()` when its debit was written, and returning it twice would open headroom
+     * the promise never had.
+     */
+    private function returnToPromise(CollaboratorCommissionLedgerEntry $entry): void
+    {
+        $entitlement = $entry->entitlement;
+
+        if ($entitlement === null || ! $entry->purpose->isEarning()) {
+            return;
+        }
+
+        $standing = Money::max(Money::ZERO, Money::sub(
+            (string) $entry->amount,
+            Money::add((string) $entry->reversed_amount, (string) $entry->clawed_back_amount),
+        ));
+
+        $baseShare = Money::isZero((string) $entry->amount)
+            ? Money::ZERO
+            : Money::prorate((string) $entry->base_amount, $standing, (string) $entry->amount);
+
+        $this->entitlements->unclaim($entitlement, $standing, $baseShare);
     }
 
     /**

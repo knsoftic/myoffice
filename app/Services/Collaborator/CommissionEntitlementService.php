@@ -159,6 +159,45 @@ final class CommissionEntitlementService
     }
 
     /**
+     * A release that turned out never to have happened: the entry was **cancelled**, not reversed.
+     *
+     * Deliberately not {@see unrelease()}. That one is the reversal side, and it raises the promise's
+     * `reversed_amount` to mirror the debit row a reversal writes. A rejection writes no debit — the
+     * row simply leaves every bucket with a reason on it — so adding to `reversed_amount` here would
+     * claim an undoing that has no evidence anywhere in the ledger, and §6.5.3 R7 would then find a
+     * promise whose figures do not match its own entries.
+     *
+     * What it does share is the reason the floor exists: the slice goes back, so a promise that was
+     * `fully_released` is open again and the partner can still earn it on a later payment. Without
+     * this, a rejected first instalment would quietly cap a PKR 2,000 fixed commission at PKR 1,333.
+     */
+    public function unclaim(CollaboratorCommissionEntitlement $entitlement, string $amount, string $baseAmountShare): void
+    {
+        $this->assertInTransaction('unclaim');
+
+        $amount = Money::of($amount);
+        $baseAmountShare = Money::of($baseAmountShare);
+
+        if (Money::isZero($amount) && Money::isZero($baseAmountShare)) {
+            return;
+        }
+
+        $this->db->table($entitlement->getTable())
+            ->where('id', $entitlement->getKey())
+            ->update([
+                'released_amount' => $this->db->raw('GREATEST(0, released_amount - '.$this->literal($amount).')'),
+                'collected_amount' => $this->db->raw('GREATEST(0, collected_amount - '.$this->literal($baseAmountShare).')'),
+                'updated_at' => now(),
+            ]);
+
+        $entitlement->refresh();
+
+        if ($entitlement->status === EntitlementStatus::FullyReleased && ! $entitlement->isFullyReleased()) {
+            $this->write($entitlement, ['status' => EntitlementStatus::Open->value, 'closed_on' => null]);
+        }
+    }
+
+    /**
      * Re-floor a promise whose document changed, on a **successor row** (spine §6.5, §6.6 rows 6-8).
      *
      * `entitlement_amount = max(new_promise, released_amount)`: the new promise can never be set below

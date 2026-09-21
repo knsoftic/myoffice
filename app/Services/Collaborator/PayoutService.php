@@ -355,13 +355,31 @@ final class PayoutService
 
             $payout = $allocation->payout;
 
-            if ($payout !== null && $this->liveAllocations($payout)->isEmpty()) {
+            if ($payout === null) {
+                continue;
+            }
+
+            $live = $this->liveAllocations($payout);
+
+            if ($live->isEmpty()) {
                 $this->write($payout, [
                     'status' => PayoutStatus::Cancelled->value,
+                    'amount' => Money::ZERO,
+                    'entry_count' => 0,
                     'cancelled_at' => now(),
                     'cancellation_reason' => 'Every entry it claimed was reversed before it was paid.',
                 ]);
+
+                continue;
             }
+
+            // A payout that lost part of its claim is still a payout, for less. §6.5.3 R4 asserts
+            // `amount = SUM(live allocations)` on every payout still in flight, so the figure has to
+            // follow the claim down rather than keep promising money that was refunded away.
+            $this->write($payout, [
+                'amount' => Money::sum($live->map(fn ($a): string => Money::of((string) $a->amount))->all()),
+                'entry_count' => $live->count(),
+            ]);
         }
 
         if (Money::isPositive($released)) {

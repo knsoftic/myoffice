@@ -22,7 +22,7 @@ use App\Models\Collaborator\CollaboratorWallet;
 use App\Models\Institute\StudentFee;
 use App\Models\Institute\StudentFeeInstallment;
 use App\Models\Institute\StudentFeePayment;
-use App\Services\Collaborator\CollaboratorWalletService;
+use App\Services\Collaborator\CommissionReconciliationService;
 use App\Services\Collaborator\CommissionRuleService;
 use App\Services\Collaborator\ReferralService;
 use App\Services\Finance\PaymentService;
@@ -32,11 +32,11 @@ use Illuminate\Support\Carbon;
 /**
  * Fixtures and the shared assertion for the financial acceptance suite (phase-10-12 §11).
  *
- * **`assertWalletMatchesLedger()` is the helper every money test ends with**, and it calls
- * `CollaboratorWalletService::assertConsistent()` — the same derivation the nightly reconciler runs
- * and the same one every screen reads (INV-26). That is the point of one shared helper: when Phase
- * 12's `CommissionReconciliationService` lands, this body becomes a call to it and every test in the
- * suite gains the other seven checks of spine §6.5.3 without one of them being edited.
+ * **`assertWalletMatchesLedger()` is the helper every money test ends with**, and it runs the nightly
+ * reconciler's own eight checks (spine §6.5.3) against the same derivation every screen reads
+ * (INV-26). That was the point of one shared helper: when `CommissionReconciliationService` landed,
+ * this body became a call to it and every test in the suite gained the other seven checks without one
+ * of them being edited.
  */
 trait BuildsFinancialFixtures
 {
@@ -191,16 +191,19 @@ trait BuildsFinancialFixtures
     */
 
     /**
-     * The wallet cache equals the ledger, and the §6.5.2 closed identity holds.
+     * All eight checks of spine §6.5.3, against this partner.
      *
-     * It calls `CollaboratorWalletService::assertConsistent()` — the same derivation the nightly
-     * reconciler runs and the same one every screen reads. A test that computed the expected balance
+     * It runs `CommissionReconciliationService::assertConsistent()` — literally what the nightly job
+     * runs, reading the one derivation every screen reads. A test that computed the expected balance
      * its own way would be checking the cache against a second opinion rather than against the ledger,
      * which is exactly the situation INV-26 exists to prevent.
+     *
+     * `check()` and not `run()`: the assertion is a pure reader, so the suite does not fill
+     * `collaborator_wallet_reconciliations` with a row per assertion per test.
      */
     protected function assertWalletMatchesLedger(Collaborator $collaborator): void
     {
-        app(CollaboratorWalletService::class)->assertConsistent($collaborator);
+        app(CommissionReconciliationService::class)->assertConsistent($collaborator);
 
         $this->assertSame(
             0,

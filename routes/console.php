@@ -179,3 +179,17 @@ Schedule::command('commissions:sweep')->everyTenMinutes()->withoutOverlapping(10
 Schedule::command('commission-rules:activate')->dailyAt('00:05')->withoutOverlapping();
 Schedule::command('commissions:release-held')->dailyAt('00:10')->withoutOverlapping();
 Schedule::command('financial:verify-constraints', ['--quiet-when-ok'])->dailyAt('02:00')->withoutOverlapping();
+
+/*
+| collaborators:reconcile-wallets is the other half of that argument, and the one §50 actually asks for:
+| every wallet figure must be re-derivable by summing the ledger, and this is the dated record that it
+| was re-derived and agreed. It writes a row whether the answer was yes or no, because a table holding
+| only the bad days proves nothing about the good ones.
+|
+| It runs **without --repair**. A scheduled auto-repair would erase the evidence of whatever caused the
+| drift, and the cause is the interesting part; the screens fall back to the derived figures behind a
+| banner and a human presses Recalculate. Structural failures are never repaired by anything.
+*/
+Schedule::command('collaborators:reconcile-wallets', ['--run-type=scheduled'])
+    ->dailyAt('01:30')
+    ->withoutOverlapping();
