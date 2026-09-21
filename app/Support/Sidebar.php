@@ -1066,6 +1066,13 @@ final class Sidebar
                         'permission' => 'collaborator_portal.tasks',
                     ],
                     [
+                        'label' => 'Wallet',
+                        'icon' => 'wallet',
+                        'route' => 'collaborator.wallet.index',
+                        'module' => 'collaborators',
+                        'permission' => 'collaborator_portal.wallet',
+                    ],
+                    [
                         'label' => 'Commissions',
                         'icon' => 'calculator',
                         'route' => 'collaborator.commissions.index',
@@ -1077,12 +1084,21 @@ final class Sidebar
                         'icon' => 'banknotes',
                         'route' => 'collaborator.payouts.index',
                         'module' => 'collaborators',
+                        // `payouts`, not `payout_request`: seeing what has been paid is not the same
+                        // right as asking for more, and a partner who may not ask still has a history.
+                        'permission' => 'collaborator_portal.payouts',
+                    ],
+                    [
+                        'label' => 'Payout Accounts',
+                        'icon' => 'credit-card',
+                        'route' => 'collaborator.payout-accounts.index',
+                        'module' => 'collaborators',
                         'permission' => 'collaborator_portal.payout_request',
                     ],
                     [
                         'label' => 'Statements',
                         'icon' => 'document-text',
-                        'route' => 'collaborator.statements.index',
+                        'route' => 'collaborator.statement.index',
                         'module' => 'collaborators',
                         'permission' => 'collaborator_portal.statement_download',
                     ],
