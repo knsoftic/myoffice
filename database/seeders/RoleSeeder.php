@@ -271,6 +271,11 @@ class RoleSeeder extends Seeder
                         Ability::ViewAny, Ability::View, Ability::ViewFinancial,
                     ]),
                     PermissionRegistry::permissionNamesFor('course_categories', self::READ),
+                    // phase-14-17 §4.4: the admission carries the agreed figures every receipt is
+                    // checked against, so the accountant reads it with `view_financial` — and holds
+                    // nothing that could change what was agreed after money moved (INV-I2).
+                    PermissionRegistry::permissionNamesFor('admissions', self::READ_MONEY),
+                    PermissionRegistry::permissionNamesFor('students', self::READ),
                     // phase-07 §4.4. Deliberately **not** payroll.approve: whoever locks a run is not
                     // whoever pays it, and collapsing the two would let one person decide and disburse.
                     PermissionRegistry::permissionNamesFor('payroll', $this->abilitiesExcept('payroll', [
@@ -389,6 +394,9 @@ class RoleSeeder extends Seeder
                     // and link to a real slug. No fee columns.
                     PermissionRegistry::permissionNamesFor('courses', self::READ),
                     PermissionRegistry::permissionNamesFor('course_categories', self::READ),
+                    // phase-14-17 §4.4: the §67 inbox read-only. A campaign is measured by what came
+                    // out of it, and nothing in that job needs to touch somebody's admission form.
+                    PermissionRegistry::permissionNamesFor('student_applications', self::READ),
                 ),
             ],
             [
@@ -415,6 +423,9 @@ class RoleSeeder extends Seeder
                     // columns — a quote is the accountant's figure, not a sales guess.
                     PermissionRegistry::permissionNamesFor('courses', self::READ),
                     PermissionRegistry::permissionNamesFor('course_categories', self::READ),
+                    // phase-14-17 §4.4: reads the inbox to follow up on an application it sourced;
+                    // converting one is the front desk's act, not sales'.
+                    PermissionRegistry::permissionNamesFor('student_applications', self::READ),
                 ),
             ],
             [
@@ -427,7 +438,16 @@ class RoleSeeder extends Seeder
                 'is_default' => false,
                 'permissions' => $this->merge(
                     $staffBase,
-                    PermissionRegistry::permissionNamesFor(['course_inquiries', 'admissions', 'demo_classes']),
+                    PermissionRegistry::permissionNamesFor(['course_inquiries', 'demo_classes']),
+                    // phase-14-17 §4.4 gives the front desk create + read + change_status on an
+                    // admission, and it keeps `view_financial` because it takes the fee money and
+                    // prints the receipt — it has to see what was agreed. `delete` and `restore` are
+                    // withheld: an admission is the document a commission and a fee structure hang
+                    // off, and removing one is never a front-desk decision. (A fresh install is given
+                    // this narrower grant; D65 leaves an existing installation's rows alone.)
+                    PermissionRegistry::permissionNamesFor('admissions', $this->abilitiesExcept('admissions', [
+                        'delete', 'restore',
+                    ])),
                     PermissionRegistry::permissionNamesFor('students', self::READ_CREATE_EDIT),
                     PermissionRegistry::permissionNamesFor('student_fees', self::READ_CREATE),
                     // phase-04 §9.1.2: view the inquiries assigned to the front desk.
@@ -442,6 +462,16 @@ class RoleSeeder extends Seeder
                     PermissionRegistry::permissionNamesFor('student_fee_payments', [
                         Ability::ViewAny, Ability::View, Ability::Create, Ability::Print,
                     ]),
+                    // phase-14-17 §4.4: the front desk triages the §67 inbox — claim, review, reject,
+                    // mark duplicate, withdraw. Converting one creates a student, which is a separate
+                    // permission this role already holds; the module boundary is what lets an
+                    // installation grant one without the other (§4.1).
+                    // array_merge, not $this->merge: that one de-duplicates permission NAMES and
+                    // casts each entry to a string, which an Ability case is not.
+                    PermissionRegistry::permissionNamesFor('student_applications', array_merge(
+                        self::READ_EDIT,
+                        [Ability::Approve, Ability::Reject, Ability::ChangeStatus, Ability::Export],
+                    )),
                 ),
             ],
             [
@@ -501,6 +531,9 @@ class RoleSeeder extends Seeder
                     )),
                     PermissionRegistry::permissionNamesFor('course_categories'),
                     PermissionRegistry::permissionNamesFor('students', self::READ_EDIT),
+                    // phase-14-17 §4.4: reads admissions to know who is on which course, and holds no
+                    // `view_financial` — a coordinator plans teaching, not money.
+                    PermissionRegistry::permissionNamesFor('admissions', self::READ),
                 ),
             ],
             [

@@ -709,7 +709,12 @@ final class PermissionRegistry
                 'icon' => 'users',
                 'is_core' => false,
                 'sort' => 550,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::ASSIGN, self::FILES, self::MONEY, self::IMPORT, self::REPORTS, self::RESTORE),
+                // phase-14-17 §4.2 adds LOGS: a student record is one somebody may later have to
+                // account for, and `view_logs` is what lets an auditor read that account without
+                // holding `edit`. `view_financial` is declared but gates nothing here — a student's
+                // money is `student_fees.view_financial` (§4.2), and three seeded roles already hold
+                // this one, so removing it would revoke rather than tidy.
+                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::ASSIGN, self::FILES, self::MONEY, self::IMPORT, self::REPORTS, self::LOGS, self::RESTORE),
             ],
             'admissions' => [
                 'name' => 'Admissions',
@@ -717,7 +722,10 @@ final class PermissionRegistry
                 'icon' => 'user-plus',
                 'is_core' => false,
                 'sort' => 560,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::APPROVE, self::MONEY, self::FILES, self::RESTORE),
+                // §4.2: `view_financial` gates the agreed figures and the four paid/pending caches
+                // everywhere an admission is rendered, and LOGS lets somebody read the history of a
+                // discount without being able to change one.
+                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::APPROVE, self::MONEY, self::FILES, self::REPORTS, self::LOGS, self::RESTORE),
             ],
             'course_inquiries' => [
                 'name' => 'Course Inquiries',
@@ -725,7 +733,10 @@ final class PermissionRegistry
                 'icon' => 'question-mark-circle',
                 'is_core' => false,
                 'sort' => 570,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::ASSIGN, self::RESTORE),
+                // §4.2: `assign` hands an enquiry to another counsellor, and REPORTS is the §88 funnel
+                // — which is a different right from working the queue, because the conversion rate is
+                // a management number and the queue is a job.
+                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::ASSIGN, self::REPORTS, self::LOGS, self::RESTORE),
             ],
             'demo_classes' => [
                 'name' => 'Demo Classes',
@@ -733,7 +744,27 @@ final class PermissionRegistry
                 'icon' => 'video-camera',
                 'is_core' => false,
                 'sort' => 580,
-                'abilities' => self::merge(self::CRUD, self::STATUS, self::ASSIGN, self::RESTORE),
+                // §4.2 adds `print` — the demo slip an attendee is handed at reception — and REPORTS.
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::ASSIGN, self::REPORTS, self::RESTORE),
+            ],
+
+            // §4.1, a module of its own: the public §67 inbox is triaged by a receptionist who must
+            // NOT hold `students.create` until the day they convert one, and a module boundary is the
+            // only way to say that. It has no `delete` and never will — a public submission is
+            // evidence that somebody asked, so it is rejected or marked duplicate, never removed.
+            'student_applications' => [
+                'name' => 'Admission Applications',
+                'group' => ModuleGroup::Institute,
+                'icon' => 'inbox-arrow-down',
+                'is_core' => false,
+                'sort' => 585,
+                'abilities' => self::merge(
+                    self::READ,
+                    [Ability::Create, Ability::Edit, Ability::Export],
+                    self::APPROVE,
+                    self::STATUS,
+                    self::LOGS,
+                ),
             ],
             'teachers' => [
                 'name' => 'Teachers',
@@ -1371,6 +1402,7 @@ final class PermissionRegistry
         'course_outline' => ['courses'],
         'course_materials' => ['courses'],
         'course_inquiries' => ['courses'],
+        'student_applications' => ['courses'],
         'demo_classes' => ['courses'],
         'admissions' => ['courses', 'students'],
         'batches' => ['courses'],

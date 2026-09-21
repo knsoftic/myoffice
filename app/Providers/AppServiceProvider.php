@@ -195,14 +195,24 @@ use App\Policies\Finance\InvoicePolicy;
 use App\Policies\Finance\PaymentMethodPolicy;
 use App\Models\Institute\Course;
 use App\Models\Institute\CourseCategory;
+use App\Models\Institute\CourseInquiry;
 use App\Models\Institute\CourseLecture;
 use App\Models\Institute\CourseModule;
 use App\Models\Institute\CourseTopic;
 use App\Models\Institute\CourseTopicAssignment;
+use App\Models\Institute\DemoClass;
+use App\Models\Institute\Student;
+use App\Models\Institute\StudentAdmission;
+use App\Models\Institute\StudentApplication;
 use App\Models\Institute\CourseTopicResource;
 use App\Policies\Institute\CourseCategoryPolicy;
+use App\Policies\Institute\CourseInquiryPolicy;
 use App\Policies\Institute\CourseOutlinePolicy;
 use App\Policies\Institute\CoursePolicy;
+use App\Policies\Institute\DemoClassPolicy;
+use App\Policies\Institute\StudentAdmissionPolicy;
+use App\Policies\Institute\StudentApplicationPolicy;
+use App\Policies\Institute\StudentPolicy;
 use App\Support\Institute\Sitemap\CourseCategorySitemapProvider;
 use App\Support\Institute\Sitemap\CourseSitemapProvider;
 use Illuminate\Support\ServiceProvider;
@@ -316,6 +326,15 @@ class AppServiceProvider extends ServiceProvider
         CourseLecture::class => CourseOutlinePolicy::class,
         CourseTopicResource::class => CourseOutlinePolicy::class,
         CourseTopicAssignment::class => CourseOutlinePolicy::class,
+
+        // phase-15: the five records the §68 pipeline runs through. `CourseInquiryFollowUp` has no
+        // policy of its own — a follow-up is never reached except through its enquiry, and the
+        // enquiry's `logFollowUp` is what authorises writing one.
+        CourseInquiry::class => CourseInquiryPolicy::class,
+        StudentApplication::class => StudentApplicationPolicy::class,
+        Student::class => StudentPolicy::class,
+        StudentAdmission::class => StudentAdmissionPolicy::class,
+        DemoClass::class => DemoClassPolicy::class,
     ];
 
     /**

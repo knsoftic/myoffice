@@ -682,6 +682,16 @@ final class Sidebar
                                 'permission' => 'course_inquiries.view_any',
                             ],
                             [
+                                // phase-14-17 §4.1, §8.6: its own entry because it is its own module
+                                // — the front desk triages the public form without holding
+                                // `students.create` until the day it converts one.
+                                'label' => 'Applications',
+                                'icon' => 'inbox-arrow-down',
+                                'route' => 'admin.student-applications.index',
+                                'module' => 'student_applications',
+                                'permission' => 'student_applications.view_any',
+                            ],
+                            [
                                 'label' => 'Demo Classes',
                                 'icon' => 'video-camera',
                                 'route' => 'admin.demo-classes.index',

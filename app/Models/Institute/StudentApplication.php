@@ -74,6 +74,7 @@ class StudentApplication extends Model
             'course_inquiry_id' => 'integer',
             'collaborator_id' => 'integer',
             'referral_visit_id' => 'integer',
+            'referral_source' => \App\Enums\ReferralSource::class,
             'duplicate_of_application_id' => 'integer',
             'reviewed_by' => 'integer',
             'converted_student_id' => 'integer',

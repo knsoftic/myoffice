@@ -72,6 +72,7 @@ class Student extends Model
             'branch_id' => 'integer',
             'collaborator_id' => 'integer',
             'referral_visit_id' => 'integer',
+            'referral_source' => \App\Enums\ReferralSource::class,
             'status' => StudentStatus::class,
             'gender' => Gender::class,
             'date_of_birth' => 'date',
