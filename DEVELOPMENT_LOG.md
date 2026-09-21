@@ -200,6 +200,12 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D85 | **A syllabus resource file lands on the private disk, against this phase's own contract line.** | §2.8 says `file_path` is "`public` disk under `courses/{course}/resources/`" and, four lines earlier, that a resource which is not `is_public` needs `course_outline.view`. Both cannot be true: a file on the public disk is served by the web server with no application code in the path, so the permission is decoration, and `Storage::url()` hands out an address that stays valid after the resource is hidden, after it is deleted, and after the person shown it leaves. CLAUDE.md §3 / D21 decides it. Two controllers serve these files now — the admin one re-runs `course_outline.download`, the public one answers only for an `is_public`, `is_downloadable` resource of a course the catalogue would show and 404s on every other case. Done now because nothing linked these files yet, so it migrates nobody's data. |
 | D86 | **A faked upload cannot test a content-sniffing rule.** | `UploadedFile::fake()->createWithContent()` reports a MIME guessed from the filename — precisely the value §111 refuses to trust — so FT-09 passed while proving nothing about the check it was named after. The test writes a real temporary file and hands it over with `$test = true`, so `getMimeType()` runs `finfo` over actual bytes and a `.php` renamed to `.pdf` is refused by the thing that is supposed to refuse it. |
 | D87 | **A policy-guarded route's manifest row names both the permission and the policy method.** | Every earlier phase guards with `can:<module.ability>`, so a route-guard row records the literal text after `can:` and `PermissionRegistry` must declare it. Phase 14 is the first with `can:update,course`, where that literal is an ability on a model and not a permission name at all. Recording `null` would file a policy-guarded route beside a deliberately public one — the exact confusion the `rationale` column exists to prevent — so the row carries `permission` (the ability the policy requires: `courses.edit`) and `policy` (`CoursePolicy::update`, which also weighs the course's own state). |
+| D88 | **The Super Admin is excluded from the inquiry round-robin.** | Spatie's `permission()` scope matches a permission held directly *or through a role*, and the Super Admin role holds every one — so the first version handed every website enquiry to the break-glass account, which is where nobody looks. It is not a counsellor with a queue. If it is the only candidate the enquiry stays unassigned, which is visible on the screen as "Unassigned" rather than quietly parked on somebody who will never open it. |
+| D89 | **A follow-up on a `new` enquiry makes two moves, not one.** | §2.30.2 has no `new -> interested`, and that gap is deliberate: an enquiry that jumped straight there would have no record of ever being called. The first version picked one status and hit the transition table; the service now records what actually happened — you reached them (`contacted`), and then they said something (`interested`) — with both moves going through `changeStatus()` so the table still governs each. The outcome wins over the first-contact default, because somebody who says "not interested" on the first call is not merely "contacted". |
+| D90 | **`StudentNumberService` reads its format tokens case-insensitively.** | §6.5 writes them in capitals (`{PREFIX}{YY}{SEQ:5}`) and Phase 2 seeded `registration_number_format` as `{prefix}-{year}-{seq}`. §5 says that key is "used exactly as defined, not redefined", so the two spellings have to be one instruction — an installation that saved one of them must not have its numbering break because the other was written down later. `{year}` and `{month}` are accepted as aliases of `{YYYY}` and `{MM}` for the same reason. |
+| D91 | **The public admission form validates an email with `rfc` and not `dns`.** | A DNS lookup on every submit makes the form as fast and as available as somebody else's nameserver, and it rejects real addresses at domains with no MX record — on the one form where a refusal costs the institute a student. The address is confirmed by somebody ringing the applicant, which is what the phone number is for. |
+| D92 | **`chk_sap_not_self_duplicate` is not a CHECK; the service refuses it.** | MariaDB rejects any CHECK that reads an `AUTO_INCREMENT` column (error 1901), so "an application is not its own duplicate" cannot be expressed there. `StudentApplicationService::markDuplicate()` refuses it instead and a test pins that — a self-reference would render one row twice on the review screen and loop anything that walks to the original. The other five CHECKs on that table stand. |
+| D93 | **A cancelled or lost record loses its next-action date.** | A `follow_up_date` left behind on a closed enquiry puts it back into tomorrow's "due" count, where somebody works it again and rings a person who has already said no. `changeStatus()` clears it whenever the status stops being open — found by a test asserting that a finished enquiry needs no next action. |
 
 ---
 
@@ -521,7 +527,29 @@ dashboard card landed 2026-09-21.**
 | [x] | Two sitemap providers that honour `is_indexable` and skip a category with nothing published in it, and the `institute-active-courses` dashboard card reading the service (D28) |
 | [x] | The four `course_id` keys Phases 4 and 10 deferred until this table existed, finally attached ([D-IN-1]) — `contact_inquiries`, `student_reviews`, `success_stories` and `student_fees`. Their own migrations are idempotent and ask to be re-run, but `migrate` runs a file once, so the phase that creates the target has to do it |
 | [x] | The four D60 manifests: 47 route-guard rows read off the live route table, 13 screen rows, the seven tables' indexes and the one upload route — with **D87**'s row shape for the thirteen routes a policy guards, and `CourseManifestTest` comparing all four against the thing they describe |
-### [ ] PHASE 15 — Inquiries, online admission, admission workflow, registration
+### [x] PHASE 15 — Inquiries, online admission, admission workflow, registration
+
+Contract: [`docs/phases/phase-14-17.md`](docs/phases/phase-14-17.md) §2.11–§2.16, §2.30.2–§2.30.6,
+§2.31, §4, §5, §6.4–§6.6, §6.12, §7.3–§7.4, §7.10, §8.5–§8.9 · **schema, services, policies, every
+admin screen, the public admission form and the four D60 manifests landed 2026-09-21.**
+
+| | Item |
+|---|---|
+| [x] | Six tables and ten enums — `course_inquiries`, `course_inquiry_follow_ups` (append-only), `student_applications`, `students`, `student_admissions` (three generated columns), `demo_classes` — 730/730 schema checks on both databases, 49/49 behavioural checks inside a rolled-back transaction |
+| [x] | **§68's pipeline as one column.** Every step asserts the one before it, so `activate()` on an admission still at `application` throws and names the step that was skipped rather than producing an active student with no registration number and no fee |
+| [x] | **INV-I2 in the code**: `updateFigures()` refuses once `figures_locked_at` is set, and the four money caches refuse a write from outside `StudentFeeService` through the model's own `updating` hook — the guard is in the model, not in a docblock |
+| [x] | **[D-IN-7]**: the public form creates one application row and nothing else. A test asserts the `students` and `users` counts do not move |
+| [x] | **[D-IN-13]**: the referral is captured on the application and attached at conversion, through Phase 9's resolver and Phase 10's `ReferralService::attach()`. A `collaborator_id` posted by the browser is discarded (INV-I4), and an unrecognised code is stored verbatim and attaches nobody |
+| [x] | `StudentNumberService` — six document numbers, every one through Phase 5's `DocumentNumberService` (D27). No second `FOR UPDATE`, no local fallback. **D90**: the format tokens read case-insensitively so Phase 2's seeded spelling still works |
+| [x] | The `student_applications` module (§4.1) with **no `delete` ability**, so a receptionist triages the §67 inbox without holding `students.create` — and converting asks for both modules. Tested from both sides |
+| [x] | `EnsureAdmissionFormOpen` — closed answers **200 with a noindex**, not 404, and a staff user holding `admissions.create` passes through to an amber ribbon naming the state |
+| [x] | 60 routes (56 admin, 4 public), 27 screens rendered against live data with 0 failures: the counsellor's queue and its funnel report, the application inbox and review screen, the student directory, the §68 stepper, the demo list, calendar and slip, and the public form with its thank-you and closed pages |
+| [x] | The nine foreign keys Phases 4 and 10 deferred until `students` and `student_admissions` existed, finally attached ([D-IN-1]) |
+| [x] | 47 tests across five files: the pipeline, the public form's guards, the inquiry queue, authorization and branch isolation, and the manifests |
+| [x] | The four D60 manifests: 60 route-guard rows with **D87**'s shape for the 34 a policy guards, 23 screen rows, the six tables' indexes, and an explicit assertion that this phase accepts no upload at all |
+| [ ] | `StudentService::merge()` — **blocked, not skipped**: merging moves fee, enrolment and attendance rows between two students, and those tables arrive with Phases 16–18. The route and the permission exist and the action refuses with the reason |
+| [ ] | The student importer — **deferred**: a partial importer that dropped rows quietly would be worse than none. The route answers with that sentence |
+| [ ] | `assignBatch()` / `transferBatch()` / `requestFees()` — **delegated, not implemented**: `BatchEnrollmentService` is Phase 16's and `StudentFeeService` is Phase 18's. Each refuses with the name of the service that owns it rather than half-doing its job (INV-I1) |
 ### [ ] PHASE 16 — Teachers, batches, timetable, demo classes
 ### [ ] PHASE 17 — Student attendance + course progress
 ### [ ] PHASE 18 — Student fees, installments, discounts, scholarships (commission triggers)
@@ -539,6 +567,68 @@ dashboard card landed 2026-09-21.**
 ---
 
 ## 6. Change Log
+
+### 2026-09-21 — Phase 15: the admission pipeline, and four guards that had to be two
+
+**One column holds §68, and every step checks it.** The pipeline spans an enquiry, an application, a
+student and an admission; if each carried its own idea of where things stood, a screen would have to
+pick one to believe. The admission carries it, `students.status` advances beside it, and calling
+`activate()` on an admission still at `application` throws and names the step that was skipped — which
+is the difference between a pipeline and four columns that drift.
+
+**The public form creates one row.** No student, no login, no fee. A stranger filling in a form is
+making a request; a student record is something a member of staff decides to create, and the distance
+between those two facts is the whole reason `student_applications` exists. A test asserts the
+`students` and `users` counts do not move, because that distance is the kind of thing that closes by
+accident three phases later.
+
+**The key blocks and the fingerprint flags, and the asymmetry is the point.** One ULID per rendered
+form makes a double-tapped submit the same application. The fingerprint — phone, course, name — is
+deliberately *not* unique, because the same person really does apply twice for the same course six
+months apart, and a database that refused the second one would refuse a real customer. It turns the
+row amber and puts the two side by side for somebody to judge.
+
+**Two invisible fields that cost a real applicant nothing.** A honeypot, and a minimum age for the
+form: nobody reads and completes an admission form in under two seconds, and a bot does. Neither
+error says which one caught it, because a message naming the timing check would tell the next author
+exactly what to change.
+
+**A follow-up now makes two moves (D89).** §2.30.2 has no `new → interested`, and that gap is
+deliberate: an enquiry that jumped straight there would have no record of ever being called. The
+first version picked one status and hit the transition table — correctly, which is how the gap was
+found. It records what happened instead: you reached them, and then they said something. Both moves
+go through `changeStatus()`, so the table still governs each.
+
+**The round-robin was handing every enquiry to the Super Admin (D88).** Spatie's `permission()` scope
+matches a permission held through a role, and that role holds all of them — so the account with the
+lowest id and no open enquiries won every time. It is the installation's break-glass account, not a
+counsellor with a queue. Excluded now, and if it is the only candidate the enquiry stays visibly
+unassigned rather than quietly parked where nobody looks.
+
+**A constraint MariaDB would not accept, and what replaced it.** `chk_sap_not_self_duplicate` reads
+the `id` column, and MariaDB rejects any CHECK that touches an `AUTO_INCREMENT` (error 1901) — the
+migration failed on the first run and left the table created, which is D70's situation exactly. The
+rule moved into `markDuplicate()` with a test to pin it (D92); the other five CHECKs on that table
+stand.
+
+**Two spellings of one instruction (D90).** §6.5 writes the numbering tokens in capitals and Phase 2
+seeded `registration_number_format` as `{prefix}-{year}-{seq}`. §5 says that key is used exactly as
+defined, so the service reads its tokens case-insensitively rather than the contract quietly
+redefining a value somebody may already have saved.
+
+**Nine more deferred keys.** `student_fees.student_id`, `collaborator_referrals.student_id`,
+`testimonials.student_id` and six others had been unconstrained since Phases 4 and 10 — the same gap
+the `courses` keys had, and the same cause: the migrations that defer them are idempotent and ask to
+be re-run, but `migrate` runs a file once. Attaching them surfaced twenty-five rows in the dev
+database pointing at student ids that were invented before `students` existed. Those students were
+created rather than the financial rows deleted; the commission screens are built on them.
+
+**What is delegated, and what it says instead.** `assignBatch()` and `transferBatch()` belong to
+Phase 16's `BatchEnrollmentService`, which checks capacity under a row lock; `requestFees()` belongs
+to Phase 18's `StudentFeeService`, which is the only thing that may write a charge. Each refuses with
+the name of the service that owns it. A seat handed out anywhere else is a seat that was never
+counted, and a charge nobody can reconcile is worse than not having one (INV-I1).
+
 
 ### 2026-09-21 — Phase 14: the catalogue, and a cache that kept serving the page after it was taken down
 

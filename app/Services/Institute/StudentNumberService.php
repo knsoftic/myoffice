@@ -35,11 +35,21 @@ use Illuminate\Support\Carbon;
  */
 final class StudentNumberService
 {
-    /** `{SEQ:n}` — the padded sequence, and the only token that takes an argument. */
-    private const SEQUENCE_PATTERN = '/\{SEQ(?::(\d+))?\}/';
+    /**
+     * `{SEQ:n}` — the padded sequence, and the only token that takes an argument.
+     *
+     * Case-insensitive on purpose: §6.5 writes the tokens in capitals and Phase 2 seeded
+     * `registration_number_format` as `{prefix}-{year}-{seq}`. Both are the same instruction, and an
+     * institute that has already saved one spelling must not have its numbering break because the
+     * other one was written down later.
+     */
+    private const SEQUENCE_PATTERN = '/\{SEQ(?::(\d+))?\}/i';
 
-    /** Every token §6.5 declares. Anything else in a format string is a mistake worth naming. */
-    private const TOKENS = ['PREFIX', 'YYYY', 'YY', 'MM', 'BRANCH', 'COURSE', 'SEQ'];
+    /**
+     * Every token §6.5 declares, plus the three spellings Phase 2's seeded default uses (`{year}`,
+     * `{month}`, `{prefix}`). Anything else in a format string is a mistake worth naming.
+     */
+    private const TOKENS = ['PREFIX', 'YYYY', 'YY', 'MM', 'BRANCH', 'COURSE', 'SEQ', 'YEAR', 'MONTH'];
 
     public function __construct(
         private readonly DocumentNumberService $numbers,
@@ -130,10 +140,10 @@ final class StudentNumberService
     {
         $unknown = [];
 
-        preg_match_all('/\{([A-Z]+)(?::\d+)?\}/', $format, $matches);
+        preg_match_all('/\{([A-Za-z]+)(?::\d+)?\}/', $format, $matches);
 
         foreach ($matches[1] as $token) {
-            if (! in_array($token, self::TOKENS, true)) {
+            if (! in_array(strtoupper($token), self::TOKENS, true)) {
                 $unknown[] = '{'.$token.'}';
             }
         }
@@ -187,14 +197,24 @@ final class StudentNumberService
             $pad = isset($seq[1]) && $seq[1] !== '' ? max(1, min(12, (int) $seq[1])) : 6;
         }
 
-        $expanded = strtr($format, [
-            '{PREFIX}' => $prefix,
-            '{YYYY}' => $now->format('Y'),
-            '{YY}' => $now->format('y'),
-            '{MM}' => $now->format('m'),
-            '{BRANCH}' => $branchCode,
-            '{COURSE}' => trim((string) ($course?->code ?? '')),
-        ]);
+        $replacements = [
+            'PREFIX' => $prefix,
+            'YYYY' => $now->format('Y'),
+            'YEAR' => $now->format('Y'),
+            'YY' => $now->format('y'),
+            'MM' => $now->format('m'),
+            'MONTH' => $now->format('m'),
+            'BRANCH' => $branchCode,
+            'COURSE' => trim((string) ($course?->code ?? '')),
+        ];
+
+        // Replaced case-insensitively so `{prefix}` and `{PREFIX}` are one instruction, and by regex
+        // rather than strtr() so the two spellings do not need eight entries each.
+        $expanded = (string) preg_replace_callback(
+            '/\{(PREFIX|YYYY|YEAR|YY|MM|MONTH|BRANCH|COURSE)\}/i',
+            static fn (array $m): string => $replacements[strtoupper($m[1])] ?? '',
+            $format,
+        );
 
         return (string) preg_replace(
             self::SEQUENCE_PATTERN,

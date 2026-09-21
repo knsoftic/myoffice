@@ -9,6 +9,7 @@ use App\Enums\FollowUpOutcome;
 use App\Enums\InquirySource;
 use App\Models\Institute\CourseInquiry;
 use App\Models\Institute\CourseInquiryFollowUp;
+use App\Enums\UserStatus;
 use App\Models\User;
 use App\Services\Institute\Exceptions\CourseRuleException;
 use Illuminate\Database\DatabaseManager;
@@ -147,18 +148,22 @@ final class CourseInquiryService
                 'created_by' => $actor?->getKey(),
             ])->save();
 
-            // A first contact on a `new` enquiry is what "contacted" means; after that the outcome
-            // decides. Both go through changeStatus(), so both obey §2.30.2.
-            $suggested = $before === CourseInquiryStatus::New && $outcome->reachedSomebody()
-                ? CourseInquiryStatus::Contacted
-                : $outcome->suggestsStatus();
+            // Two moves, in the order they really happened: you reached them, and then they said
+            // something. §2.30.2 has no `new -> interested` for exactly this reason — an enquiry that
+            // jumped straight there would have no record of ever being called. Both go through
+            // changeStatus(), so both obey the table and either can still be refused by it.
+            if ($before === CourseInquiryStatus::New && $outcome->reachedSomebody()) {
+                $this->changeStatus($inquiry, CourseInquiryStatus::Contacted, null, $actor, silent: true);
+            }
 
-            if ($suggested instanceof CourseInquiryStatus && $suggested !== $before) {
+            $suggested = $outcome->suggestsStatus();
+
+            if ($suggested instanceof CourseInquiryStatus && $suggested !== $inquiry->refresh()->status) {
                 $this->changeStatus(
                     $inquiry,
                     $suggested,
                     $suggested === CourseInquiryStatus::NotInterested
-                        ? ($data['notes'] ?? 'Recorded from a follow-up outcome.')
+                        ? (trim((string) ($data['notes'] ?? '')) ?: sprintf('Recorded from a follow-up: %s.', $outcome->label()))
                         : null,
                     $actor,
                     silent: true,
@@ -205,7 +210,13 @@ final class CourseInquiryService
 
         $reason = trim((string) $reason);
 
-        if (in_array($to->value, self::REASON_REQUIRED, true) && $reason === '' && $from !== CourseInquiryStatus::New) {
+        // `contacted` needs no reason when it is simply the first call being logged; every OTHER move
+        // in the list does, including a loss on that same first call. `chk_ci_lost_reason` would refuse
+        // the row anyway — this is what turns a constraint violation into a sentence somebody can read.
+        $needsReason = in_array($to->value, self::REASON_REQUIRED, true)
+            && ! ($to === CourseInquiryStatus::Contacted && $from === CourseInquiryStatus::New);
+
+        if ($needsReason && $reason === '') {
             throw CourseRuleException::reasonRequired('status', $to === CourseInquiryStatus::NotInterested
                 ? 'Losing an enquiry takes a reason: the lost ones are the list worth reading later.'
                 : 'Re-opening an enquiry somebody closed takes a reason.');
@@ -233,6 +244,13 @@ final class CourseInquiryService
             // the enquiry was lost, and a stale reason on a live enquiry reads as a current verdict.
             if ($to === CourseInquiryStatus::Contacted) {
                 $attributes['lost_reason'] = null;
+            }
+
+            // A finished enquiry has no next action, however it got there. A date left behind on a
+            // closed row puts it back into tomorrow's "due" count, where somebody works it again and
+            // rings a person who already said no.
+            if (! $to->isOpen()) {
+                $attributes['follow_up_date'] = null;
             }
 
             $inquiry->forceFill($attributes)->save();
@@ -339,8 +357,14 @@ final class CourseInquiryService
     private function assignRoundRobin(CourseInquiry $inquiry): void
     {
         $candidates = User::query()
-            ->where('status', 'active')
+            ->where('status', UserStatus::Active->value)
+            // Spatie's scope covers a permission held directly or through a role.
             ->permission('course_inquiries.edit')
+            // The Super Admin holds every permission and works no queue: it is the installation's
+            // break-glass account, and handing it every website enquiry would file them where nobody
+            // looks. If it is the only candidate the enquiry stays unassigned, which is visible on the
+            // screen as "Unassigned" rather than quietly parked.
+            ->whereDoesntHave('roles', fn ($q) => $q->where('name', User::SUPER_ADMIN_ROLE))
             ->pluck('id')
             ->all();
 

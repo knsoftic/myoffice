@@ -322,4 +322,61 @@ return [
         ['course_topic_id'], ['created_by'], ['updated_by'],
     ],
 
+
+    /*
+    |----------------------------------------------------------------------
+    | Phase 15 - inquiries, applications, students, admissions, demo classes
+    |----------------------------------------------------------------------
+    | Every Keys-block index of phase-14-17 §2.11-§2.16, plus a row for each foreign key column
+    | (F-9.2). The `batch_id`, `teacher_id` and `classroom_id` columns are indexed here and carry no
+    | constraint yet: Phase 16 creates those tables and attaches the keys ([D-IN-1]).
+    */
+    'course_inquiries' => [
+        ['inquiry_number'], ['idempotency_key'], ['contact_inquiry_id'],
+        ['status', 'follow_up_date'], ['assigned_to', 'status'], ['course_id', 'status'],
+        ['source', 'created_at'], ['phone'], ['branch_id', 'status'],
+        ['collaborator_id'], ['referral_visit_id'], ['converted_application_id'],
+        ['converted_student_id'], ['batch_id'], ['created_by'], ['updated_by'],
+        // F-9.2: each of these leads a compound index above; listed alone so every foreign key
+        // column has a row of its own.
+        ['assigned_to'], ['branch_id'], ['course_id'],
+    ],
+    'course_inquiry_follow_ups' => [
+        ['course_inquiry_id', 'contacted_at'], ['user_id', 'contacted_at'], ['next_follow_up_at'],
+        ['course_inquiry_id'], ['user_id'], ['created_by'], ['updated_by'],
+    ],
+    'student_applications' => [
+        ['application_number'], ['idempotency_key'],
+        ['status', 'created_at'], ['duplicate_fingerprint'], ['phone'],
+        ['course_id', 'status'], ['collaborator_id'], ['branch_id', 'status'],
+        ['course_inquiry_id'], ['batch_id'], ['referral_visit_id'],
+        ['duplicate_of_application_id'], ['reviewed_by'],
+        ['converted_student_id'], ['converted_admission_id'], ['created_by'], ['updated_by'],
+        ['branch_id'], ['course_id'],
+    ],
+    'students' => [
+        ['student_code'], ['registration_number'], ['user_id'],
+        ['status', 'created_at'], ['branch_id', 'status'], ['collaborator_id', 'status'],
+        ['phone'], ['cnic'], ['name'], ['joining_date'], ['referral_visit_id'],
+        ['branch_id'], ['collaborator_id'],
+        ['created_by'], ['updated_by'],
+    ],
+    'student_admissions' => [
+        ['admission_number'], ['student_id', 'course_id', 'active_guard'],
+        ['stage', 'admission_date'], ['student_id', 'stage'], ['course_id', 'stage'],
+        ['batch_id'], ['counselor_id', 'admission_date'], ['collaborator_id'],
+        ['branch_id', 'stage'], ['admission_date'],
+        ['student_application_id'], ['course_inquiry_id'], ['cancelled_by'],
+        ['branch_id'], ['counselor_id'], ['course_id'], ['student_id'],
+        ['created_by'], ['updated_by'],
+    ],
+    'demo_classes' => [
+        ['teacher_id', 'scheduled_on', 'start_time', 'active_guard'],
+        ['classroom_id', 'scheduled_on', 'start_time', 'active_guard'],
+        ['scheduled_on', 'status'], ['teacher_id', 'scheduled_on'], ['classroom_id', 'scheduled_on'],
+        ['course_id', 'status'], ['status'], ['branch_id', 'scheduled_on'],
+        ['course_inquiry_id'], ['student_application_id'], ['student_id'], ['batch_id'],
+        ['converted_admission_id'], ['branch_id'], ['course_id'], ['created_by'], ['updated_by'],
+    ],
+
 ];

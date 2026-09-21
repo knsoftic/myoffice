@@ -3896,4 +3896,732 @@ return [
             .'they guessed is a real course.',
         'owner_phase' => 14,
     ],
+
+    /*
+    |----------------------------------------------------------------------
+    | Phase 15 - inquiries, applications, students, admissions, demos (60 routes)
+    |----------------------------------------------------------------------
+    | Every admin route additionally carries `auth`, `active`, `panel:admin`; `module:*` is stated per
+    | block. 34 of them are guarded by a policy and carry a `policy` key as well (D87): the text after
+    | `can:` there is an ability on a model, not a permission name, so the row says which permission
+    | the policy requires AND which method also weighs the record's own state.
+    |
+    | Three of those rows name a permission from ANOTHER module, and that is the point: converting an
+    | application writes a student, so it asks for `students.create`; promoting an inquiry writes an
+    | application, so it asks for `student_applications.create`. The policy asks for both ends; the
+    | row names the one that describes the act.
+    |
+    | Two rows carry a permission that belongs to a phase that has not shipped:
+    | `admissions.fees` is `student_fees.create` because Phase 18 writes the charge, and
+    | `admissions.batch` / `admissions.transfer` are `batches.assign` because Phase 16 owns the seat.
+    | This phase holds the stage column and delegates both.
+    |
+    | The four public rows carry no `can:` and say why.
+    */
+
+    [
+        'route' => 'admin.admissions.activate',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:changeStatus,admission'],
+        'permission' => 'admissions.change_status',
+        'policy' => 'StudentAdmissionPolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.admissions.batch',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:batches.assign'],
+        'permission' => 'batches.assign',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.admissions.cancel',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:cancel,admission'],
+        'permission' => 'admissions.change_status',
+        'policy' => 'StudentAdmissionPolicy::cancel',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.admissions.complete',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:changeStatus,admission'],
+        'permission' => 'admissions.change_status',
+        'policy' => 'StudentAdmissionPolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.admissions.create',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:admissions.create'],
+        'permission' => 'admissions.create',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.admissions.export',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:admissions.export'],
+        'permission' => 'admissions.export',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.admissions.fees',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:student_fees.create'],
+        'permission' => 'student_fees.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.admissions.figures',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:updateFigures,admission'],
+        'permission' => 'admissions.edit',
+        'policy' => 'StudentAdmissionPolicy::updateFigures',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.admissions.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:admissions.view_any'],
+        'permission' => 'admissions.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.admissions.print',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:print,admission'],
+        'permission' => 'admissions.print',
+        'policy' => 'StudentAdmissionPolicy::print',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.admissions.register',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:changeStatus,admission'],
+        'permission' => 'admissions.change_status',
+        'policy' => 'StudentAdmissionPolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.admissions.show',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:view,admission'],
+        'permission' => 'admissions.view',
+        'policy' => 'StudentAdmissionPolicy::view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.admissions.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:admissions.create'],
+        'permission' => 'admissions.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.admissions.transfer',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:batches.assign'],
+        'permission' => 'batches.assign',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.admissions.withdraw',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:withdraw,admission'],
+        'permission' => 'admissions.change_status',
+        'policy' => 'StudentAdmissionPolicy::withdraw',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.course-inquiries.assign',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_inquiries', 'can:assign,inquiry'],
+        'permission' => 'course_inquiries.assign',
+        'policy' => 'CourseInquiryPolicy::assign',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.course-inquiries.convert',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_inquiries', 'can:convert,inquiry'],
+        'permission' => 'students.create',
+        'policy' => 'CourseInquiryPolicy::convert',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.course-inquiries.create',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_inquiries', 'can:course_inquiries.create'],
+        'permission' => 'course_inquiries.create',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.course-inquiries.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_inquiries', 'can:delete,inquiry'],
+        'permission' => 'course_inquiries.delete',
+        'policy' => 'CourseInquiryPolicy::delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.course-inquiries.export',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_inquiries', 'can:course_inquiries.export'],
+        'permission' => 'course_inquiries.export',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.course-inquiries.follow-ups.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_inquiries', 'can:logFollowUp,inquiry'],
+        'permission' => 'course_inquiries.edit',
+        'policy' => 'CourseInquiryPolicy::logFollowUp',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.course-inquiries.funnel',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_inquiries', 'can:course_inquiries.view_reports'],
+        'permission' => 'course_inquiries.view_reports',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.course-inquiries.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_inquiries', 'can:course_inquiries.view_any'],
+        'permission' => 'course_inquiries.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.course-inquiries.promote',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_inquiries', 'can:promote,inquiry'],
+        'permission' => 'student_applications.create',
+        'policy' => 'CourseInquiryPolicy::promote',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.course-inquiries.show',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_inquiries', 'can:view,inquiry'],
+        'permission' => 'course_inquiries.view',
+        'policy' => 'CourseInquiryPolicy::view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.course-inquiries.status',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_inquiries', 'can:changeStatus,inquiry'],
+        'permission' => 'course_inquiries.change_status',
+        'policy' => 'CourseInquiryPolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.course-inquiries.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_inquiries', 'can:course_inquiries.create'],
+        'permission' => 'course_inquiries.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.course-inquiries.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:course_inquiries', 'can:update,inquiry'],
+        'permission' => 'course_inquiries.edit',
+        'policy' => 'CourseInquiryPolicy::update',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.demo-classes.calendar',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:demo_classes', 'can:demo_classes.view_any'],
+        'permission' => 'demo_classes.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.demo-classes.convert',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:demo_classes', 'can:convert,demo'],
+        'permission' => 'students.create',
+        'policy' => 'DemoClassPolicy::convert',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.demo-classes.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:demo_classes', 'can:demo_classes.view_any'],
+        'permission' => 'demo_classes.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.demo-classes.reschedule',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:demo_classes', 'can:reschedule,demo'],
+        'permission' => 'demo_classes.edit',
+        'policy' => 'DemoClassPolicy::reschedule',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.demo-classes.slip',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:demo_classes', 'can:print,demo'],
+        'permission' => 'demo_classes.print',
+        'policy' => 'DemoClassPolicy::print',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.demo-classes.status',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:demo_classes', 'can:changeStatus,demo'],
+        'permission' => 'demo_classes.change_status',
+        'policy' => 'DemoClassPolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.demo-classes.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:demo_classes', 'can:demo_classes.create'],
+        'permission' => 'demo_classes.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.demo-classes.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:demo_classes', 'can:update,demo'],
+        'permission' => 'demo_classes.edit',
+        'policy' => 'DemoClassPolicy::update',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.student-applications.claim',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_applications', 'can:claim,application'],
+        'permission' => 'student_applications.edit',
+        'policy' => 'StudentApplicationPolicy::claim',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.student-applications.convert',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_applications', 'can:convert,application'],
+        'permission' => 'students.create',
+        'policy' => 'StudentApplicationPolicy::convert',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.student-applications.duplicate',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_applications', 'can:markDuplicate,application'],
+        'permission' => 'student_applications.change_status',
+        'policy' => 'StudentApplicationPolicy::markDuplicate',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.student-applications.export',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_applications', 'can:student_applications.export'],
+        'permission' => 'student_applications.export',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.student-applications.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_applications', 'can:student_applications.view_any'],
+        'permission' => 'student_applications.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.student-applications.reject',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_applications', 'can:reject,application'],
+        'permission' => 'student_applications.reject',
+        'policy' => 'StudentApplicationPolicy::reject',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.student-applications.show',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_applications', 'can:view,application'],
+        'permission' => 'student_applications.view',
+        'policy' => 'StudentApplicationPolicy::view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.student-applications.withdraw',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_applications', 'can:withdraw,application'],
+        'permission' => 'student_applications.change_status',
+        'policy' => 'StudentApplicationPolicy::withdraw',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.students.create',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:students', 'can:students.create'],
+        'permission' => 'students.create',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.students.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:students', 'can:delete,student'],
+        'permission' => 'students.delete',
+        'policy' => 'StudentPolicy::delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.students.edit',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:students', 'can:update,student'],
+        'permission' => 'students.edit',
+        'policy' => 'StudentPolicy::update',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.students.export',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:students', 'can:students.export'],
+        'permission' => 'students.export',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.students.import',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:students', 'can:students.import'],
+        'permission' => 'students.import',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.students.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:students', 'can:students.view_any'],
+        'permission' => 'students.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.students.login.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:students', 'can:createLogin,student'],
+        'permission' => 'students.edit',
+        'policy' => 'StudentPolicy::createLogin',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.students.merge',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:students', 'can:merge,student'],
+        'permission' => 'students.delete',
+        'policy' => 'StudentPolicy::merge',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.students.show',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:students', 'can:view,student'],
+        'permission' => 'students.view',
+        'policy' => 'StudentPolicy::view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.students.status',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:students', 'can:changeStatus,student'],
+        'permission' => 'students.change_status',
+        'policy' => 'StudentPolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.students.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:students', 'can:students.create'],
+        'permission' => 'students.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.students.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:students', 'can:update,student'],
+        'permission' => 'students.edit',
+        'policy' => 'StudentPolicy::update',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'site.admission.create',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:students', 'site.preview', 'admission.open'],
+        'permission' => null,
+        'panel' => 'public',
+        'state_changing' => false,
+        'rationale' => 'Public website route (INV-15): §67\'s admission form answers without a permission. '
+            .'site_module:students decides whether the section exists at all, and admission.open decides '
+            .'whether it is taking submissions — closed answers 200 with a noindex rather than 404, because '
+            .'the page exists and the institute is simply not admitting today. A staff user holding '
+            .'admissions.create passes through and sees the form with a ribbon naming the state.',
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'site.admission.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:students', 'site.preview', 'admission.open', 'throttle:5,1'],
+        'permission' => null,
+        'panel' => 'public',
+        'state_changing' => true,
+        'rationale' => 'The same gate, plus throttle:5,1 per IP. It creates ONE student_applications row and nothing '
+            .'else (D-IN-7) - no student, no users row, no fee - so there is nothing here a permission could '
+            .'usefully protect. A one-time idempotency key makes a replayed POST the same application, a '
+            .'honeypot and a minimum render age refuse a bot, and a collaborator_id in the body is discarded '
+            .'(INV-I4).',
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'site.admission.submitted',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'signed', 'site'],
+        'permission' => null,
+        'panel' => 'public',
+        'state_changing' => false,
+        'rationale' => 'The applicant\'s own thank-you page, bound on application_number and SIGNED. The number is '
+            .'sequential by design so it can be quoted on the phone, which is exactly why the URL carries a '
+            .'signature: without it the series could be walked and every applicant\'s name read.',
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'site.course-inquiries.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'capture_referral', 'site', 'site_module:course_inquiries', 'throttle:5,1'],
+        'permission' => null,
+        'panel' => 'public',
+        'state_changing' => true,
+        'rationale' => '§86\'s enquiry block, posted from a course page, with throttle:5,1. It writes one '
+            .'course_inquiries row and answers back to the page it came from. Same honeypot and same '
+            .'server-side referral resolution as the admission form; a visitor names no partner (INV-I4).',
+        'owner_phase' => 15,
+    ],
 ];

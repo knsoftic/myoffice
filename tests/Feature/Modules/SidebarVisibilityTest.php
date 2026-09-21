@@ -225,6 +225,15 @@ final class SidebarVisibilityTest extends TestCase
                 'Courses',
                 'All Courses',
                 'Categories',
+                // phase-14-17 §7.3-§7.4: the admission pipeline. `Students` is a parent like
+                // `Courses`; `Applications` is its own entry because the §67 inbox is its own module
+                // (§4.1) — a receptionist triages it without holding `students.create`.
+                'Students',
+                'All Students',
+                'Admissions',
+                'Course Inquiries',
+                'Applications',
+                'Demo Classes',
                 // phase-10-12 §8.2. The money register sits in the **Institute** group, beside the
                 // charges it pays off — `student_fee_payments` is an Institute module, and it being
                 // what triggers commission is not a reason to file it under Collaborator. Its parent

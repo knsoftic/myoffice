@@ -48,7 +48,10 @@ final class StoreAdmissionApplicationRequest extends FormRequest
             'father_name' => ['nullable', 'string', 'max:150'],
             'phone' => ['required', 'string', 'max:32', 'regex:/^[0-9+\-\s()]{7,32}$/'],
             'whatsapp' => ['nullable', 'string', 'max:32', 'regex:/^[0-9+\-\s()]{7,32}$/'],
-            'email' => ['nullable', 'email:rfc,dns', 'max:180'],
+            // `rfc` and not `dns`: a DNS lookup on every submit makes the form as slow and as
+            // available as somebody else's nameserver, and it rejects real addresses at domains with
+            // no MX record. The address is confirmed by somebody calling the applicant, not by us.
+            'email' => ['nullable', 'email:rfc', 'max:180'],
             'city' => ['nullable', 'string', 'max:100'],
             'education' => ['nullable', 'string', 'max:150'],
 
