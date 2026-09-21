@@ -46,6 +46,7 @@ use App\Http\Controllers\Admin\Collaborator\CommissionRuleController;
 use App\Http\Controllers\Admin\Collaborator\ReferralVisitController;
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\Finance\FeePaymentController;
+use App\Http\Controllers\Admin\Finance\ProjectPaymentController;
 use App\Http\Controllers\Admin\Hr\AttendanceController;
 use App\Http\Controllers\Admin\Hr\AttendanceCorrectionController;
 use App\Http\Controllers\Admin\Hr\AttendanceSummaryController;
@@ -1328,6 +1329,31 @@ Route::prefix('admin')
             // A refund is a `payment_reversals` row, so it carries that module's create permission
             // rather than the receipt's.
             Route::post('fee-payments/{payment}/refund', [FeePaymentController::class, 'refund'])->whereNumber('payment')->middleware('can:payment_reversals.create')->name('fee-payments.refund');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Project payments — phase-11 §7.2
+        |----------------------------------------------------------------------
+        |
+        | Every route carries `module:project_payments`, **not** the `payments`
+        | umbrella (F-6.1): the umbrella belongs to phase-13's cross-source
+        | finance register, and switching that off must not take this one with
+        | it.
+        |
+        | No `edit` and no `destroy`, exactly as on the student side (INV-8).
+        |
+        */
+        Route::middleware('module:project_payments')->group(static function (): void {
+            Route::get('project-payments', [ProjectPaymentController::class, 'index'])->middleware('can:project_payments.view_any')->name('project-payments.index');
+            Route::get('project-payments/export/{format}', [ProjectPaymentController::class, 'export'])->middleware('can:project_payments.export')->name('project-payments.export');
+            Route::get('project-payments/{payment}', [ProjectPaymentController::class, 'show'])->whereNumber('payment')->middleware('can:project_payments.view')->name('project-payments.show');
+            Route::get('project-payments/{payment}/receipt', [ProjectPaymentController::class, 'receipt'])->whereNumber('payment')->middleware('can:project_payments.print')->name('project-payments.receipt');
+            Route::post('projects/{project}/payments', [ProjectPaymentController::class, 'store'])->whereNumber('project')->middleware(['can:project_payments.create', 'throttle:20,1'])->name('project-payments.store');
+            Route::post('project-payments/{payment}/void', [ProjectPaymentController::class, 'void'])->whereNumber('payment')->middleware('can:project_payments.change_status')->name('project-payments.void');
+            // A refund is a `payment_reversals` row, so it carries that module's create permission
+            // rather than the payment's — exactly as on the student side.
+            Route::post('project-payments/{payment}/refund', [ProjectPaymentController::class, 'refund'])->whereNumber('payment')->middleware('can:payment_reversals.create')->name('project-payments.refund');
         });
 
         /*

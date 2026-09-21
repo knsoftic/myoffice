@@ -170,6 +170,9 @@ final class SidebarVisibilityTest extends TestCase
                 'Projects',
                 'All Projects',
                 'Task board',
+                // phase-11 §8.2. The project money register, under Projects — that is the document
+                // the money is against.
+                'Payments',
                 'Tasks',
                 'Time Tracking',
                 // phase-07 §7-§8: HR. `My HR` is deliberately absent — its fourth gate asks whether the

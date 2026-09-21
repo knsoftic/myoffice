@@ -273,6 +273,17 @@ final class Sidebar
                                 'module' => 'tasks',
                                 'permission' => 'tasks.view_any',
                             ],
+                            // phase-11 §8.2. Under Projects, because that is the document the money
+                            // is against. It carries its own `project_payments` slug rather than
+                            // the `payments` umbrella (F-6.1), which belongs to phase-13's
+                            // cross-source register.
+                            [
+                                'label' => 'Payments',
+                                'icon' => 'banknotes',
+                                'route' => 'admin.project-payments.index',
+                                'module' => 'project_payments',
+                                'permission' => 'project_payments.view_any',
+                            ],
                         ],
                     ],
                     [
