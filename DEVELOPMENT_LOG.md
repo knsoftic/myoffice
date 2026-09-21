@@ -187,6 +187,9 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D72 | **`CollaboratorWalletService` is built in two instalments, in one class.** Phase 10 ships `lockFor()` and `applyDelta()`; Phase 12 adds `derive()`, `recalculate()`, `freeze()`, `assertConsistent()` and `payoutsPaidTotal()` to the same file. | phase-10-12 §1.3 assigns the class to Phase 12, while §6.1's wiring has `LedgerWriter` — a Phase 10 class — applying the wallet delta **inside the ledger insert's own transaction**. It has to: a committed entry whose cache write lands separately is a window in which `wallet != SUM(ledger)`, which is the one thing INV-26 and the reconciler exist to make impossible. Two classes with similar names would be the other way to resolve it, and that is the mistake the "reused, must not be re-created" rule exists to prevent. |
 | D73 | **A narrow ability is not the only way a guard can be too narrow: `uq_cle_reversal_pair` forbade the case the reversal algorithm is built around.** It shipped as `(payment_reversal_id, reverses_entry_id)`; migration 22 adds `purpose`. | Spine §2.19 says two paragraphs after the index definition that one reversal legitimately posts **two** debits against one original — a `reversal` for the unpaid part and a `clawback` for the part already paid out. That is §6.6's headline row, "refund after the commission was paid out". With the narrow index the second debit is a 1062 inside the reversal transaction, the whole refund rolls back, and a refunded receipt keeps its commission. The two statements in the design document contradicted each other; the behaviour was right and the index was wrong. |
 | D74 | **`uq_cle_source` carries a generated `source_guard`** — `1` for every purpose with a causing row, NULL for `manual_adjustment` and `write_off` — so the manual purposes leave the index (migration 23). | The four-column guard is NOT NULL by design ([D-FS-8]) and is what makes a second commission for one receipt impossible. A manual adjustment has no causing row, so `source_id` falls back to the collaborator and the tuple is identical for every adjustment that partner will ever receive: the first succeeds, the second is a 1062 that surfaces as a failed goodwill credit somebody has to explain. Spine §2.19 already says several are legitimate — it gives them a fresh `manual:{ulid}` key each time. The guard column is this schema's own idiom (`current_guard`, `open_guard`, `active_guard`, `default_guard`), and it exempts exactly those two purposes while every receipt and reversal keeps the guarantee unchanged. |
+| D76 | **`Blameable::updatedByColumn()` may return null, and an append-only model returns it.** `collaborator_payout_allocations` is the one such table today. | The trait stamps `updated_by` on every save, and an append-only table has no such column because it has no updates to attribute (D16, D19). It never fired in the service tests, which pass an actor without signing anyone in — so the first allocation released by a **signed-in user** died on an unknown column, inside a money transaction. The allocation's one mutation is its release, already recorded by `released_by` / `released_at` / `release_reason`: three columns that say *what* changed, where a generic `updated_by` beside them would be the weaker record of the same fact. |
+| D77 | **A rejected commission gives its promise back, through `unclaim()` — deliberately not `unrelease()`.** | R7 of the new reconciler found it: rejecting a commission cancelled the entry and left `released_amount` standing, so a PKR 2,000 fixed commission whose first instalment was rejected could afterwards only ever reach PKR 1,333 — money quietly lost to an act that was supposed to cost nothing but that instalment. `unrelease()` is the reversal side and raises `reversed_amount` to mirror a debit row; a rejection writes no debit, so reusing it would claim an undoing with no evidence anywhere in the ledger, which R7 would then report as a broken promise. |
+| D78 | **The dashboard widget endpoint's rate limit scales with the number of cards** (60/min → 240/min). | One dashboard load is one request per visible widget. Sixty a minute was three loads at twenty cards, and §8.12 added eight more — a Super Admin who reloaded and then changed the date range would have been rate-limited out of their own dashboard. The per-widget query budget (`DashboardQueryBudgetTest`) is what bounds the cost here; the limiter exists to stop a loop, not to ration normal use. |
 | D75 | **G3 asks `ReceivedPaymentStatus::earnsCommission()`, not `countsAsReceived()`.** The new method adds `refunded` to the two the old one allows. | The two questions differ by exactly one case and the difference is load-bearing. "Is this money the business has?" excludes a fully refunded receipt, correctly. "Does this receipt reach the commission engine?" includes it, because the receipt earns and its reversal posts the offsetting debit — which is what makes the order of the two jobs irrelevant. Sharing one method would mean a refund that overtook its own earning silently cancelled it, and the partner's statement would then show neither side of a transaction that really happened. |
 
 ---
@@ -444,17 +447,24 @@ register and the widgets still to come**
 | [ ] | The project commission widgets (§8.12) |
 ### [ ] PHASE 12 — Collaborator wallet, commission ledger, payouts, statements
 
-Contract: [`docs/phases/phase-10-12.md`](docs/phases/phase-10-12.md) · **the wallet completed
-2026-09-21; payouts, the statement and the reconciler still to come**
+Contract: [`docs/phases/phase-10-12.md`](docs/phases/phase-10-12.md) · **the four services, every
+admin and panel screen, and the eight widgets landed 2026-09-21. One §7.5 route is outstanding and
+waiting on a table that does not exist yet.**
 
 | | Item |
 |---|---|
-| [x] | `CollaboratorWalletService` completed (D72's second instalment, one class): `derive()` running spine §6.5.1's two queries verbatim, `recalculate()` which rewrites the cache and **never touches a ledger row**, `freeze()` (which stops payouts without stopping earning — two genuinely separate decisions), `assertConsistent()` and `payoutsPaidTotal()` with ND-6's company-wide form as one query rather than a loop |
+| [x] | `CollaboratorWalletService` completed (D72's second instalment, one class): `derive()` running spine §6.5.1's two queries verbatim, `recalculate()` which rewrites the cache and **never touches a ledger row**, `freeze()` (which stops payouts without stopping earning — two genuinely separate decisions), `assertConsistent()`, `payoutsPaidTotal()` and `liabilityTotals()`, both with ND-6's company-wide form as one query rather than a loop |
 | [x] | `WalletSnapshot` — the **only** definition of a balance in the system (INV-26), carrying the §6.5.2 closed identity, the per-column `differencesFrom()` a drift report needs, and `driftFrom()` |
-| [x] | The acceptance suite's shared helper now calls `assertConsistent()` rather than its own SQL, so Phase 12's reconciler will extend every money test at once |
-| [ ] | `PayoutService`, `CollaboratorStatementService`, `CommissionReconciliationService` |
-| [ ] | The wallet index/detail, payout wizard/register/voucher, statement + exports, reconciliation screens, the discrepancy queue, every collaborator-panel screen |
-| [ ] | The eight §8.12 dashboard widgets — deferred here rather than half-built in Phase 11, because seven of them must read through the wallet and statement services (INV-26) |
+| [x] | `PayoutService` — FIFO allocation claimed by **compare-and-swap** (`allocated_amount + slice + reversed_amount <= amount` checked *inside* the UPDATE), the payout's amount derived from what it actually claimed (INV-22), and `releaseForReversal()` closing the Phase 10 seam so a refund is never blocked by a pending withdrawal (§6.6 row 13) |
+| [x] | `AllocationDelta`, deliberately not `LedgerDelta`: the §6.5.1 identity splits at the payout, because `payable_total` comes from the ledger while `reserved` / `paid` come from live allocations |
+| [x] | `CommissionReconciliationService` — the eight §6.5.3 checks in two severities, a row written every run whether it passed or not, and `WalletDriftDetected` for the ones that need attention. Never repairs a structural failure (§6.5.4) |
+| [x] | `collaborators:reconcile-wallets`, scheduled daily at 01:30 **without `--repair`**: a scheduled auto-repair would erase the evidence of whatever caused the drift |
+| [x] | The acceptance suite's shared helper now runs all eight checks, so every money test in the suite gained the other seven without one of them being edited |
+| [x] | `CollaboratorStatementService` — the §6.5.5 identity asserted against the same balance re-derived one day later, and a refusal to render rather than an unbalanced document. Filters narrow the rows, never the balances |
+| [x] | Admin screens: wallet register and detail (the derivation **beside** the cache), reconciliation history and detail, payout register, wizard with its read-only FIFO preview, detail, voucher and CSV, payout destinations (masked, verified by somebody else), statement + print/PDF/CSV, and the §8.8 discrepancy queue |
+| [x] | Collaborator panel: wallet, commissions, statement + exports, payouts (ask, view, withdraw own), payout accounts, referred projects — every query scoped through the session, and another partner's row a **404** rather than a 403 |
+| [x] | The eight §8.12 dashboard widgets, each reading through the wallet or statement service (INV-26) and each tested against the service call it reads |
+| [ ] | `collaborator.students.index` (§57) — **blocked, not skipped**: there is no `students` table until the institute phases, and a screen over a table that does not exist would be a placeholder pretending to be a feature. Everything else in §7.5 is built |
 ### [ ] PHASE 13 — Software-house finance: invoices, payments, expenses, income
 ### [ ] PHASE 14 — Institute: course categories, courses, outline (modules / topics / lectures)
 ### [ ] PHASE 15 — Inquiries, online admission, admission workflow, registration
@@ -475,6 +485,72 @@ Contract: [`docs/phases/phase-10-12.md`](docs/phases/phase-10-12.md) · **the wa
 ---
 
 ## 6. Change Log
+
+### 2026-09-21 — Phase 12: payouts, the reconciler, the statement, and every screen over them
+
+**`PayoutService`.** A payout claims named ledger entries FIFO and is worth exactly what it manages to
+claim (INV-22, [D-FS-11]). The claim is a compare-and-swap — `allocated_amount + slice +
+reversed_amount <= amount` is checked *inside* the UPDATE, not before it — so two payouts racing for
+one entry cannot both believe they won it. The seam Phase 10 left open is closed:
+`CommissionReversalService` calls `releaseForReversal()` **before** it measures the paid portion,
+because releasing changes it, and a refund is never blocked by a pending withdrawal (§6.6 row 13).
+
+`AllocationDelta` is deliberately not `LedgerDelta`, and the distinction is not tidiness: the §6.5.1
+identity splits at the payout. `payable_total` comes from the ledger while `reserved` and `paid` come
+from live allocations, so an entry moving `available -> paid` changes **nothing** on the ledger side
+and a real amount between allocation buckets.
+
+**`CommissionReconciliationService`** is §6.5.3's eight checks in two severities. R1 and R8 are drift —
+the cache fell behind, or a payment was processed with no trace of why nothing posted — and may be
+repaired by recomputing. R2–R7 are structural: the ledger disagrees with itself, and recomputing a
+cache derived from that ledger would only hide it. The nightly job never repairs either way; it
+records, fires `WalletDriftDetected`, and the screens fall back to the derived figures behind a banner
+until a human presses Recalculate. A row is written every run, pass or fail — a table holding only the
+bad days proves nothing about the good ones, and §50 asks for evidence rather than alarms.
+
+`assertWalletMatchesLedger()` now calls it, which is what the helper's docblock has promised since
+Phase 10: all seventy-nine money tests that existed gained the other seven checks without one of them
+being edited. R7 immediately found **D77** — a rejected commission was not giving its promise back —
+and R4 found a payout that kept promising the amount it was requested for after a refund took part of
+its claim away.
+
+**`CollaboratorStatementService`** is movement-based and refuses to print without its proof.
+`opening + credits − debits − payouts = closing` is checked against the same balance re-derived as an
+opening balance one day later — two different queries that must agree — and a mismatch throws.
+With the schema intact those two *cannot* disagree (`chk_cle_sign` pins purpose to six values and the
+two lists cover all six), so the guard is really a tripwire for a seventh purpose; a test asserts that
+coverage directly, which catches it on the day it is added rather than the day a partner is handed a
+statement that will not render. Filters narrow the rows and never the balances, and each visible row
+carries its true running balance, taken from the full ordered list before filtering.
+
+**Fourteen admin screens and six panel screens.** The wallet detail shows the derivation *beside* the
+cache rather than instead of it — "the cache says 12,400 and the ledger says 12,350" is the sentence
+somebody needs. The payout wizard previews its allocation through a GET that claims nothing, so the
+figure can be stale by the time the form is submitted, and when it is the store refuses with the
+shortfall named rather than paying less than was asked for. In the panel, every query is scoped
+through the session by one trait, and another partner's row is a **404**: "that payout exists but is
+not yours" leaks that it exists.
+
+**§8.8's discrepancy queue** and **§8.12's eight widgets** close the contract. Accepting a discrepancy
+writes a note and closes the row and moves nothing, which is what stops `over_released_amount` growing
+for ever (spine R-6); the figure is kept, because it is a fact about what happened.
+
+Four things the work found beyond D76–D78: the wallet register mixed aggregates with the list's ORDER
+BY, which MariaDB refuses; two Phase 11 receipts read a settings key the registry does not declare and
+the new print views reached for three deprecated ones (`tests/Feature/Settings` had been red since
+Phase 11 and is green again); the sidebar named three collaborator routes that never existed and gated
+Payouts on `payout_request`, which would have hidden a partner's own history from anyone not allowed to
+ask for more; and `chk_cce_cap` turned out to make R7's over-release half unreachable by any path
+including raw SQL, so the test asserts the database's refusal instead of simulating a breach that
+cannot happen.
+
+**Tests.** `tests/Feature/Financial` 147, `tests/Feature/Rbac` 163, `tests/Feature/Settings` 356,
+`tests/Feature/Dashboard` 27 — all green. Eighteen admin screens and eight widgets render against live
+development data.
+
+**Outstanding.** `collaborator.students.index` (§57) is blocked on the `students` table, which arrives
+with the institute phases. A browser pass over the new screens is owed: the in-app browser pane is not
+signed in, and entering a password to authenticate is not something this assistant does.
 
 ### 2026-09-20 — Phase 10 §6: the engine, and two unique indexes that forbade legitimate money
 
