@@ -56,7 +56,7 @@ return new class extends Migration
         // spine's hand-entered ledger adjustments, but a *project override* of `manual` would be an
         // override with neither a rate nor an amount — precisely the half-configured state this CHECK
         // exists to forbid.
-        'chk_projects_commission' => "`commission_type` is null"
+        'chk_projects_commission' => '`commission_type` is null'
             ." or (`commission_type` = 'percentage' and `commission_rate` is not null)"
             ." or (`commission_type` = 'fixed' and `commission_fixed_amount` is not null)",
         'chk_projects_rate' => '`commission_rate` is null or (`commission_rate` >= 0 and `commission_rate` <= 100)',

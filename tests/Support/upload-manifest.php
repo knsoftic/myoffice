@@ -313,4 +313,46 @@ return [
         'stored_as' => 'job-applications/{ulid}.{ext} on the private disk — never the client filename',
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Phase 13 — finance artefacts, none of them on the public disk (D21, F-12.5)
+    |--------------------------------------------------------------------------
+    | A receipt scan names a supplier and an amount, and an invoice PDF names a client and what they
+    | were charged. Both are reachable only through a controller that re-runs the permission chain;
+    | there is no public path and no signed URL.
+    */
+    [
+        'route' => 'admin.expenses.store',
+        'field' => 'receipt',
+        'disk' => 'local',
+        'allowed_mimes' => ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
+        'max_mb' => 'security.max_upload_mb',
+        'permission' => 'expenses.create',
+        'owner_phase' => 13,
+        'public_reachable' => false,
+        'stored_as' => 'expenses/{Y}/{m}/{ulid}.{ext} — streamed by admin.expenses.receipt',
+    ],
+    [
+        'route' => 'admin.income.store',
+        'field' => 'receipt',
+        'disk' => 'local',
+        'allowed_mimes' => ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
+        'max_mb' => 'security.max_upload_mb',
+        'permission' => 'income.create',
+        'owner_phase' => 13,
+        'public_reachable' => false,
+        'stored_as' => 'incomes/{Y}/{m}/{ulid}.{ext} — streamed by admin.income.receipt',
+    ],
+    [
+        'route' => 'admin.finance-reversals.store',
+        'field' => 'attachment',
+        'disk' => 'local',
+        'allowed_mimes' => ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
+        'max_mb' => 'security.max_upload_mb',
+        'permission' => 'expenses.change_status',
+        'owner_phase' => 13,
+        'public_reachable' => false,
+        'stored_as' => 'finance-reversals/{Y}/{m}/{ulid}.{ext} — shown on the parent row only',
+    ],
+
 ];

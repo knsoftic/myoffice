@@ -3406,6 +3406,197 @@ final class SettingsRegistry
                 'span' => 6,
                 'sort' => 200,
             ],
+
+            /*
+            |------------------------------------------------------------------
+            | phase-13 §5 — two more document series, and the rules for invoices,
+            | expenses and the finance reports.
+            |------------------------------------------------------------------
+            |
+            | Every default here is the cautious one. Round-off is **off**, so the
+            | arithmetic never changes unless the business asks for it. Reminders
+            | are **off**, so the system never emails a client unasked. And
+            | self-approval is **off**, because an expense somebody approved for
+            | themselves is not an approval.
+            */
+
+            'expense_prefix' => [
+                'label' => 'Expense voucher prefix',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:16', 'regex:/^[A-Za-z0-9\-\/]*$/'],
+                'default' => 'EXP-',
+                'span' => 4,
+                'sort' => 210,
+            ],
+            'expense_next_number' => [
+                'label' => 'Next expense number',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1'],
+                'default' => 1,
+                'help' => 'Locked in the same transaction as the expense, so two people recording at once cannot share a number.',
+                'span' => 4,
+                'sort' => 220,
+            ],
+            'income_prefix' => [
+                'label' => 'Other income prefix',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:16', 'regex:/^[A-Za-z0-9\-\/]*$/'],
+                'default' => 'INC-',
+                'span' => 4,
+                'sort' => 230,
+            ],
+            'income_next_number' => [
+                'label' => 'Next other-income number',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1'],
+                'default' => 1,
+                'span' => 4,
+                'sort' => 240,
+            ],
+
+            'expense_approval_threshold' => [
+                'label' => 'Only expenses above this need approval',
+                'type' => self::TYPE_DECIMAL,
+                'rules' => ['required', 'numeric', 'decimal:0,2', 'min:0'],
+                'default' => '0.00',
+                'help' => '0 means every expense needs approval while the switch above is on. The decision is snapshotted onto each expense, so raising this later never re-opens what was already approved.',
+                'span' => 6,
+                'sort' => 250,
+            ],
+            'expense_self_approval_allowed' => [
+                'label' => 'Somebody may approve their own expense',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Off, because an expense somebody approved for themselves is not an approval. Turn it on only in a one-person finance team.',
+                'span' => 6,
+                'sort' => 260,
+            ],
+            'expense_receipt_required' => [
+                'label' => 'An expense needs a receipt',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'span' => 6,
+                'sort' => 270,
+            ],
+            'expense_receipt_threshold' => [
+                'label' => 'Only above this amount',
+                'type' => self::TYPE_DECIMAL,
+                'rules' => ['required', 'numeric', 'decimal:0,2', 'min:0'],
+                'default' => '0.00',
+                'help' => '0 means every expense needs one while the switch above is on.',
+                'span' => 6,
+                'sort' => 280,
+            ],
+
+            'invoice_round_off_enabled' => [
+                'label' => 'Round invoice totals',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Off by default: rounding changes what a client is asked to pay, and the difference is printed as its own signed line so nobody has to work out where it came from.',
+                'span' => 6,
+                'sort' => 290,
+            ],
+            'invoice_rounding_precision' => [
+                'label' => 'Round to the nearest',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'in:1,5,10'],
+                'options' => ['1' => '1', '5' => '5', '10' => '10'],
+                'default' => '1',
+                'span' => 6,
+                'sort' => 300,
+            ],
+            'invoice_allow_edit_after_issue' => [
+                'label' => 'An issued invoice may still be corrected',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Only while nothing has been paid against it, and the change is fully audited. Switch it off and the only correction is cancel and replace, which burns an invoice number for a typo.',
+                'span' => 6,
+                'sort' => 310,
+            ],
+            'invoice_public_link_enabled' => [
+                'label' => 'Clients can open an invoice by link',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'A client record can exist without a login, so without this some clients have no way to read their own invoice.',
+                'span' => 6,
+                'sort' => 320,
+            ],
+            'invoice_public_link_days' => [
+                'label' => 'A link stays valid for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:365'],
+                'default' => 30,
+                'suffix' => 'days',
+                'span' => 6,
+                'sort' => 330,
+            ],
+            'invoice_email_subject' => [
+                'label' => 'Invoice email subject',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:190'],
+                'default' => 'Invoice {invoice_number} from {company_name}',
+                'help' => 'Placeholders: {invoice_number}, {company_name}, {client_name}, {total_amount}, {due_date}.',
+                'span' => 6,
+                'sort' => 340,
+            ],
+            'invoice_email_body' => [
+                'label' => 'Invoice email message',
+                'type' => self::TYPE_RICHTEXT,
+                'rules' => ['nullable', 'string', 'max:5000'],
+                'default' => '<p>Dear {client_name},</p><p>Please find invoice {invoice_number} for {total_amount}, due {due_date}.</p><p>Thank you.</p>',
+                'span' => 12,
+                'sort' => 350,
+            ],
+            'invoice_reminders_enabled' => [
+                'label' => 'Send payment reminders',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Off, because the system should never email a client unasked. Turning it on is a decision about the relationship, not a setting.',
+                'span' => 6,
+                'sort' => 360,
+            ],
+            'invoice_reminder_days_after_due' => [
+                'label' => 'Remind this many days after the due date',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:64', 'regex:/^\d+(,\d+)*$/'],
+                'default' => '3,7,14',
+                'help' => 'A comma-separated list.',
+                'span' => 6,
+                'sort' => 370,
+            ],
+            'invoice_show_bank_details' => [
+                'label' => 'Print bank details on the invoice',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'span' => 6,
+                'sort' => 380,
+            ],
+
+            'report_sync_row_limit' => [
+                'label' => 'Export rows before queueing',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:100', 'max:100000'],
+                'default' => 5000,
+                'help' => 'Above this a report export is built in the background and delivered by notification, rather than holding a request open until it times out.',
+                'span' => 6,
+                'sort' => 390,
+            ],
+            'reports_include_institute' => [
+                'label' => 'Finance reports include the institute',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Off shows the software house alone. The reports say which one they are showing either way, so a figure is never ambiguous about what it covers.',
+                'span' => 6,
+                'sort' => 400,
+            ],
         ];
     }
 

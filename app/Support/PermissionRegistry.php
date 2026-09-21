@@ -449,21 +449,30 @@ final class PermissionRegistry
             |------------------------------------------------------------------
             */
 
+            // phase-13 §4.2 adds LOGS. **Emailing an invoice is `change_status`** — it is the act that
+            // moves `draft` to `sent` — so no `send` ability is invented; the spine set that precedent by
+            // mapping "run a reconciliation" onto the same case. `delete` stays, narrowed by the policy
+            // to an unissued draft with no payment against it: taking an ability away would revoke a
+            // permission somebody has already granted (D65).
             'invoices' => [
                 'name' => 'Invoices',
                 'group' => ModuleGroup::Finance,
                 'icon' => 'document-text',
                 'is_core' => false,
                 'sort' => 310,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::APPROVE, self::MONEY, self::FILES, self::REPORTS, self::RESTORE),
+                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::APPROVE, self::MONEY, self::FILES, self::REPORTS, self::RESTORE, self::LOGS),
             ],
+            // phase-13 §4.2 adds LOGS. This slug gates **only** the cross-source money-in register
+            // (§8.13): every project-payment screen, admin and client alike, carries
+            // `module:project_payments` instead (F-6.1). A business that switches `payments` off loses
+            // the combined view and keeps both registers it combines.
             'payments' => [
                 'name' => 'Payments',
                 'group' => ModuleGroup::Finance,
                 'icon' => 'credit-card',
                 'is_core' => false,
                 'sort' => 320,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::APPROVE, self::MONEY, self::REPORTS, self::RESTORE),
+                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::APPROVE, self::MONEY, self::REPORTS, self::RESTORE, self::LOGS),
             ],
             // phase-10-12 §4.1. **No `edit` and no `delete`, for ever** (INV-8, INV-5): a received payment
             // is never editable, and voiding it is `change_status`. `link_invoice` is the single narrow,
@@ -475,10 +484,13 @@ final class PermissionRegistry
                 'icon' => 'banknotes',
                 'is_core' => false,
                 'sort' => 325,
+                // phase-13 §4.2 adds REPORTS: the income report, the profit-and-loss statement and the
+                // receivables aging all read this table, and without `view_reports` they could not be
+                // permissioned honestly — the alternative is a report gated on a module it does not read.
                 'abilities' => self::merge(
                     self::READ,
                     [Ability::Create, Ability::Print, Ability::Export, Ability::LinkInvoice],
-                    self::STATUS, self::MONEY, self::LOGS,
+                    self::STATUS, self::MONEY, self::REPORTS, self::LOGS,
                 ),
             ],
             // phase-10-12 §4.1. A reversal is created and approved; it is never edited or deleted,
@@ -501,29 +513,48 @@ final class PermissionRegistry
                 'sort' => 345,
                 'abilities' => self::merge(self::READ, self::STATUS, self::MONEY, self::REPORTS, self::LOGS),
             ],
+            // phase-13 §4.2 adds LOGS. `approve` is §30's approval workflow, `change_status` is the
+            // void path, and `FILES` is the receipt — three different acts that a single `edit` would
+            // have collapsed into one permission nobody could hand out safely.
             'expenses' => [
                 'name' => 'Expenses',
                 'group' => ModuleGroup::Finance,
                 'icon' => 'receipt-percent',
                 'is_core' => false,
                 'sort' => 330,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::APPROVE, self::MONEY, self::FILES, self::REPORTS, self::RESTORE),
+                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::APPROVE, self::MONEY, self::FILES, self::REPORTS, self::RESTORE, self::LOGS),
             ],
+            // phase-13 §4.2 adds STATUS (void), FILES (the receipt) and LOGS. **No `approve`**:
+            // requirement §29 asks for none, and money that has arrived does not need a second person
+            // to agree that it arrived.
             'income' => [
                 'name' => 'Income',
                 'group' => ModuleGroup::Finance,
                 'icon' => 'arrow-trending-up',
                 'is_core' => false,
                 'sort' => 340,
-                'abilities' => self::merge(self::CRUD_FULL, self::MONEY, self::REPORTS, self::RESTORE),
+                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::MONEY, self::FILES, self::REPORTS, self::RESTORE, self::LOGS),
             ],
+            // phase-13 §4.2 adds LOGS. **No `MONEY` and no `export`**: the table holds no amounts, and
+            // the one sensitive thing on it — the encrypted gateway config — is reachable through
+            // `edit` alone and is rendered nowhere, so there is nothing for `view_financial` to unmask.
             'payment_methods' => [
                 'name' => 'Payment Methods',
                 'group' => ModuleGroup::Finance,
                 'icon' => 'wallet',
                 'is_core' => false,
                 'sort' => 350,
-                'abilities' => self::merge(self::CRUD, self::STATUS, self::RESTORE),
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::RESTORE, self::LOGS),
+            ],
+            // phase-13 §4.1. **No `MONEY`**: a category carries no amount, so somebody who maintains the
+            // list never has to be given sight of a single figure to do it.
+            'finance_categories' => [
+                'name' => 'Finance Categories',
+                'group' => ModuleGroup::Finance,
+                'icon' => 'tag',
+                'is_core' => false,
+                'sort' => 355,
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::RESTORE, self::LOGS),
             ],
 
             /*
@@ -751,10 +782,11 @@ final class PermissionRegistry
                 'icon' => 'receipt-percent',
                 'is_core' => false,
                 'sort' => 645,
+                // phase-13 §4.2 adds REPORTS: the income report's fee lines read this table.
                 'abilities' => self::merge(
                     self::READ,
                     [Ability::Create, Ability::Print, Ability::Export],
-                    self::STATUS, self::MONEY, self::LOGS,
+                    self::STATUS, self::MONEY, self::REPORTS, self::LOGS,
                 ),
             ],
             'installments' => [
@@ -1302,6 +1334,9 @@ final class PermissionRegistry
 
         // Finance — phase-13.
         'invoices' => ['clients'],
+        // phase-13 §4.1. A category is the axis every expense and income report groups by; switching
+        // the module off would leave both sides of the books unable to classify a new row.
+        'finance_categories' => [],
         'payments' => ['projects'],
 
         // Collaborator spine — phase-08 … phase-12.

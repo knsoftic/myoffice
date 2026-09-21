@@ -250,4 +250,42 @@ return [
     'lead_imports' => [['status', 'created_at'], ['file_hash'], ['created_by', 'created_at'], ['created_by'], ['updated_by']],
     'lead_import_rows' => [['lead_import_id', 'row_number'], ['lead_import_id', 'status'], ['lead_id'], ['lead_import_id'], ['duplicate_lead_id']],
     // phase-05 promotes these two Phase 4 columns to foreign keys; the index already exists (phase-04 rows).
+
+    /*
+    |----------------------------------------------------------------------
+    | Phase 13 - software-house finance: invoices, expenses, other income
+    |----------------------------------------------------------------------
+    | Every Keys-block index of phase-13 §2, plus a row for each foreign key column (F-9.2). The three
+    | deferred foreign keys this phase finally creates (`project_payments.invoice_id` and the two
+    | `payment_method_id` columns) already have their indexes from the spine's own migrations.
+    */
+    'payment_methods' => [['code'], ['default_guard'], ['is_active', 'sort_order'], ['type'], ['created_by'], ['updated_by']],
+    'finance_categories' => [['type', 'code'], ['type', 'is_active', 'sort_order'], ['created_by'], ['updated_by']],
+    'invoices' => [
+        ['invoice_number'], ['public_token'],
+        ['client_id', 'status'], ['project_id', 'status'], ['status', 'due_date'],
+        ['issue_date'], ['due_date'], ['branch_id'],
+        ['replaces_invoice_id'], ['payment_method_id'], ['issued_by'], ['cancelled_by'],
+        ['client_id'], ['project_id'], ['created_by'], ['updated_by'],
+    ],
+    'invoice_items' => [['invoice_id', 'sort_order'], ['project_milestone_id'], ['invoice_id'], ['created_by'], ['updated_by']],
+    'expenses' => [
+        ['expense_no'], ['idempotency_key'], ['source_type', 'source_id'],
+        ['status', 'expense_date'], ['finance_category_id', 'expense_date'], ['created_by', 'status'],
+        ['project_id'], ['branch_id'], ['expense_date'], ['payment_method'],
+        ['approved_by'], ['rejected_by'], ['voided_by'], ['corrects_expense_id'], ['payment_method_id'],
+        ['finance_category_id'], ['created_by'], ['updated_by'],
+    ],
+    'incomes' => [
+        ['income_no'], ['idempotency_key'],
+        ['status', 'received_on'], ['finance_category_id', 'received_on'],
+        ['client_id'], ['project_id'], ['branch_id'], ['received_on'],
+        ['voided_by'], ['corrects_income_id'], ['payment_method_id'],
+        ['finance_category_id'], ['created_by'], ['updated_by'],
+    ],
+    'finance_reversals' => [
+        ['reversal_no'], ['idempotency_key'],
+        ['expense_id'], ['income_id'], ['occurred_on', 'type'],
+        ['performed_by'], ['created_by'], ['updated_by'],
+    ],
 ];

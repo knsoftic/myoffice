@@ -38,7 +38,7 @@ return new class extends Migration
 
     private const GUARD_COLUMN = 'open_guard';
 
-    private const GUARD_EXPRESSION = "CASE WHEN `ended_at` IS NULL"
+    private const GUARD_EXPRESSION = 'CASE WHEN `ended_at` IS NULL'
         ." THEN COALESCE(CONCAT('u:', `user_id`), CONCAT('c:', `collaborator_id`)) ELSE NULL END";
 
     private const DURATION_EXPRESSION = 'CASE WHEN `ended_at` IS NULL THEN 0'

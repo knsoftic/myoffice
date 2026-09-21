@@ -56,14 +56,14 @@ return new class extends Migration
         'work_shifts.default_guard' => [
             'work_shifts',
             'VARCHAR(16)',
-            "CASE WHEN `is_default` = 1 AND `deleted_at` IS NULL THEN CAST(COALESCE(`branch_id`, 0) AS CHAR) ELSE NULL END",
+            'CASE WHEN `is_default` = 1 AND `deleted_at` IS NULL THEN CAST(COALESCE(`branch_id`, 0) AS CHAR) ELSE NULL END',
             'sort_order',
         ],
         // One active holiday per branch per date.
         'holidays.holiday_guard' => [
             'holidays',
             'VARCHAR(40)',
-            "CASE WHEN `is_active` = 1 AND `deleted_at` IS NULL"
+            'CASE WHEN `is_active` = 1 AND `deleted_at` IS NULL'
                 ." THEN CONCAT(COALESCE(`branch_id`, 0), ':', CAST(`holiday_date` AS CHAR)) ELSE NULL END",
             'is_active',
         ],
@@ -71,7 +71,7 @@ return new class extends Migration
         'attendances.day_guard' => [
             'attendances',
             'VARCHAR(40)',
-            "CASE WHEN `deleted_at` IS NULL"
+            'CASE WHEN `deleted_at` IS NULL'
                 ." THEN CONCAT(`employee_id`, ':', CAST(`attendance_date` AS CHAR)) ELSE NULL END",
             'locked_at',
         ],
@@ -79,7 +79,7 @@ return new class extends Migration
         'leave_request_days.day_guard' => [
             'leave_request_days',
             'VARCHAR(40)',
-            "CASE WHEN `is_active` = 1 AND `is_counted` = 1"
+            'CASE WHEN `is_active` = 1 AND `is_counted` = 1'
                 ." THEN CONCAT(`employee_id`, ':', CAST(`leave_date` AS CHAR)) ELSE NULL END",
             'attendance_id',
         ],
@@ -247,7 +247,7 @@ return new class extends Migration
         'trg_pric_no_delete' => [
             'payroll_run_item_components',
             'A payroll component can only be removed while its run is still a draft (phase-07 HR-16).',
-            "IF (SELECT r.`status` FROM `payroll_runs` r"
+            'IF (SELECT r.`status` FROM `payroll_runs` r'
                 .' JOIN `payroll_run_items` i ON i.`payroll_run_id` = r.`id`'
                 ." WHERE i.`id` = OLD.`payroll_run_item_id`) NOT IN ('draft', 'generated') THEN",
         ],
