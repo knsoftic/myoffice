@@ -443,6 +443,18 @@ register and the widgets still to come**
 | [x] | The payment trail on the project detail screen. `$payments` is **null, not empty**, when the viewer may not read receipts — "nothing yet" and "not yours to see" are different facts, and a card that rendered both as an empty list would answer a question it was not asked. It shows the **net** figure, not the gross |
 | [ ] | The project commission widgets (§8.12) |
 ### [ ] PHASE 12 — Collaborator wallet, commission ledger, payouts, statements
+
+Contract: [`docs/phases/phase-10-12.md`](docs/phases/phase-10-12.md) · **the wallet completed
+2026-09-21; payouts, the statement and the reconciler still to come**
+
+| | Item |
+|---|---|
+| [x] | `CollaboratorWalletService` completed (D72's second instalment, one class): `derive()` running spine §6.5.1's two queries verbatim, `recalculate()` which rewrites the cache and **never touches a ledger row**, `freeze()` (which stops payouts without stopping earning — two genuinely separate decisions), `assertConsistent()` and `payoutsPaidTotal()` with ND-6's company-wide form as one query rather than a loop |
+| [x] | `WalletSnapshot` — the **only** definition of a balance in the system (INV-26), carrying the §6.5.2 closed identity, the per-column `differencesFrom()` a drift report needs, and `driftFrom()` |
+| [x] | The acceptance suite's shared helper now calls `assertConsistent()` rather than its own SQL, so Phase 12's reconciler will extend every money test at once |
+| [ ] | `PayoutService`, `CollaboratorStatementService`, `CommissionReconciliationService` |
+| [ ] | The wallet index/detail, payout wizard/register/voucher, statement + exports, reconciliation screens, the discrepancy queue, every collaborator-panel screen |
+| [ ] | The eight §8.12 dashboard widgets — deferred here rather than half-built in Phase 11, because seven of them must read through the wallet and statement services (INV-26) |
 ### [ ] PHASE 13 — Software-house finance: invoices, payments, expenses, income
 ### [ ] PHASE 14 — Institute: course categories, courses, outline (modules / topics / lectures)
 ### [ ] PHASE 15 — Inquiries, online admission, admission workflow, registration

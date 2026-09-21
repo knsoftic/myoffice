@@ -22,21 +22,21 @@ use App\Models\Collaborator\CollaboratorWallet;
 use App\Models\Institute\StudentFee;
 use App\Models\Institute\StudentFeeInstallment;
 use App\Models\Institute\StudentFeePayment;
+use App\Services\Collaborator\CollaboratorWalletService;
 use App\Services\Collaborator\CommissionRuleService;
 use App\Services\Collaborator\ReferralService;
 use App\Services\Finance\PaymentService;
 use App\Support\Money;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 
 /**
  * Fixtures and the shared assertion for the financial acceptance suite (phase-10-12 §11).
  *
- * **`assertWalletMatchesLedger()` is the helper every money test ends with.** The contract has it call
- * `CommissionReconciliationService`, which Phase 12 ships; until then it runs the same canonical SQL of
- * spine §6.5.1 inline. When the service arrives this body becomes a call to it and every test in the
- * suite gains the other seven checks for free — which is the point of every test ending in the same
- * helper rather than in its own bespoke arithmetic.
+ * **`assertWalletMatchesLedger()` is the helper every money test ends with**, and it calls
+ * `CollaboratorWalletService::assertConsistent()` — the same derivation the nightly reconciler runs
+ * and the same one every screen reads (INV-26). That is the point of one shared helper: when Phase
+ * 12's `CommissionReconciliationService` lands, this body becomes a call to it and every test in the
+ * suite gains the other seven checks of spine §6.5.3 without one of them being edited.
  */
 trait BuildsFinancialFixtures
 {
@@ -193,81 +193,14 @@ trait BuildsFinancialFixtures
     /**
      * The wallet cache equals the ledger, and the §6.5.2 closed identity holds.
      *
-     * Spine §6.5.1's canonical SQL, run here rather than re-derived per test: a test that computed the
-     * expected balance its own way would be checking the cache against a second opinion instead of
-     * against the ledger.
+     * It calls `CollaboratorWalletService::assertConsistent()` — the same derivation the nightly
+     * reconciler runs and the same one every screen reads. A test that computed the expected balance
+     * its own way would be checking the cache against a second opinion rather than against the ledger,
+     * which is exactly the situation INV-26 exists to prevent.
      */
     protected function assertWalletMatchesLedger(Collaborator $collaborator): void
     {
-        $wallet = $this->walletOf($collaborator);
-
-        if ($wallet === null) {
-            $this->assertSame(
-                0,
-                CollaboratorCommissionLedgerEntry::query()->where('collaborator_id', $collaborator->getKey())->count(),
-                'There is no wallet, so there must be no ledger entries either.'
-            );
-
-            return;
-        }
-
-        $sum = static fn (array $statuses): string => Money::of((string) (
-            CollaboratorCommissionLedgerEntry::query()
-                ->where('collaborator_id', $wallet->collaborator_id)
-                ->whereIn('status', $statuses)
-                ->sum('signed_amount') ?: '0.00'
-        ));
-
-        $pending = $sum(['pending', 'approved']);
-        $payable = $sum(['available', 'paid']);
-
-        $lifetime = Money::of((string) (
-            CollaboratorCommissionLedgerEntry::query()
-                ->where('collaborator_id', $wallet->collaborator_id)
-                ->whereNot('status', 'cancelled')
-                ->sum('signed_amount') ?: '0.00'
-        ));
-
-        $reserved = Money::of((string) (
-            DB::table('collaborator_payout_allocations as a')
-                ->join('collaborator_payouts as p', 'p.id', '=', 'a.payout_id')
-                ->where('a.collaborator_id', $wallet->collaborator_id)
-                ->where('a.is_released', 0)
-                ->whereIn('p.status', ['requested', 'pending', 'approved'])
-                ->sum('a.amount') ?: '0.00'
-        ));
-
-        $paid = Money::of((string) (
-            DB::table('collaborator_payout_allocations as a')
-                ->join('collaborator_payouts as p', 'p.id', '=', 'a.payout_id')
-                ->where('a.collaborator_id', $wallet->collaborator_id)
-                ->where('a.is_released', 0)
-                ->where('p.status', 'paid')
-                ->sum('a.amount') ?: '0.00'
-        ));
-
-        $this->assertSame($pending, Money::of((string) $wallet->pending_balance),
-            'R1: the wallet\'s pending balance must equal the ledger\'s.');
-
-        $this->assertSame(
-            Money::sub(Money::sub($payable, $reserved), $paid),
-            Money::of((string) $wallet->available_balance),
-            'R1: available must equal payable minus reserved minus paid.'
-        );
-
-        $this->assertSame($lifetime, Money::of((string) $wallet->lifetime_earned),
-            'R1: lifetime earned must equal the ledger, excluding cancelled rows.');
-
-        $this->assertSame(
-            $lifetime,
-            Money::sum(
-                (string) $wallet->pending_balance,
-                (string) $wallet->available_balance,
-                (string) $wallet->reserved_balance,
-                (string) $wallet->paid_balance,
-            ),
-            'R2, the closed identity: lifetime = pending + available + reserved + paid.'
-        );
+        app(CollaboratorWalletService::class)->assertConsistent($collaborator);
 
         $this->assertSame(
             0,
@@ -275,5 +208,9 @@ trait BuildsFinancialFixtures
             'INV-2: a zero-amount ledger row must never exist — a guard that produced nothing writes a '
             .'skip reason on the payment instead.'
         );
+
+        // `assertConsistent()` throws rather than asserting, so without this the helper would register
+        // no assertion at all and PHPUnit would call a passing test risky.
+        $this->addToAssertionCount(1);
     }
 }
