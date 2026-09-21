@@ -715,6 +715,15 @@ final class Sidebar
                         'permission' => 'teachers.view_any',
                     ],
                     [
+                        // phase-16 §4.1: its own module, so a branch administrator can be given the
+                        // rooms without the batches that fill them.
+                        'label' => 'Classrooms',
+                        'icon' => 'building-office-2',
+                        'route' => 'admin.classrooms.index',
+                        'module' => 'classrooms',
+                        'permission' => 'classrooms.view_any',
+                    ],
+                    [
                         'label' => 'Batches',
                         'icon' => 'squares-2x2',
                         'children' => [
@@ -729,6 +738,16 @@ final class Sidebar
                                 'label' => 'Timetable',
                                 'icon' => 'table-cells',
                                 'route' => 'admin.timetable.index',
+                                'module' => 'timetable',
+                                'permission' => 'timetable.view_any',
+                            ],
+                            [
+                                // phase-16 §8.14: the dated classes the timetable produced. Under
+                                // `timetable` because that is the module that owns them — a class is
+                                // an occurrence of a slot, not a thing of its own.
+                                'label' => 'Classes',
+                                'icon' => 'calendar-days',
+                                'route' => 'admin.class-sessions.index',
                                 'module' => 'timetable',
                                 'permission' => 'timetable.view_any',
                             ],

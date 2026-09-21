@@ -193,6 +193,9 @@ use App\Policies\Finance\FinanceCategoryPolicy;
 use App\Policies\Finance\IncomePolicy;
 use App\Policies\Finance\InvoicePolicy;
 use App\Policies\Finance\PaymentMethodPolicy;
+use App\Models\Institute\Batch;
+use App\Models\Institute\ClassSession;
+use App\Models\Institute\Classroom;
 use App\Models\Institute\Course;
 use App\Models\Institute\CourseCategory;
 use App\Models\Institute\CourseInquiry;
@@ -204,7 +207,12 @@ use App\Models\Institute\DemoClass;
 use App\Models\Institute\Student;
 use App\Models\Institute\StudentAdmission;
 use App\Models\Institute\StudentApplication;
+use App\Models\Institute\Teacher;
+use App\Models\Institute\TimetableEntry;
 use App\Models\Institute\CourseTopicResource;
+use App\Policies\Institute\BatchPolicy;
+use App\Policies\Institute\ClassroomPolicy;
+use App\Policies\Institute\ClassSessionPolicy;
 use App\Policies\Institute\CourseCategoryPolicy;
 use App\Policies\Institute\CourseInquiryPolicy;
 use App\Policies\Institute\CourseOutlinePolicy;
@@ -213,6 +221,8 @@ use App\Policies\Institute\DemoClassPolicy;
 use App\Policies\Institute\StudentAdmissionPolicy;
 use App\Policies\Institute\StudentApplicationPolicy;
 use App\Policies\Institute\StudentPolicy;
+use App\Policies\Institute\TeacherPolicy;
+use App\Policies\Institute\TimetableEntryPolicy;
 use App\Support\Institute\Sitemap\CourseCategorySitemapProvider;
 use App\Support\Institute\Sitemap\CourseSitemapProvider;
 use Illuminate\Support\ServiceProvider;
@@ -335,6 +345,15 @@ class AppServiceProvider extends ServiceProvider
         Student::class => StudentPolicy::class,
         StudentAdmission::class => StudentAdmissionPolicy::class,
         DemoClass::class => DemoClassPolicy::class,
+
+        // phase-16: the five scheduling records. `StudentBatchEnrollment` has no policy of its own —
+        // a seat is never reached except through its batch, and `BatchPolicy::assign` is what
+        // authorises moving one.
+        Teacher::class => TeacherPolicy::class,
+        Classroom::class => ClassroomPolicy::class,
+        Batch::class => BatchPolicy::class,
+        TimetableEntry::class => TimetableEntryPolicy::class,
+        ClassSession::class => ClassSessionPolicy::class,
     ];
 
     /**

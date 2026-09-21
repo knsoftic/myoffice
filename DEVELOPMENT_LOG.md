@@ -10,8 +10,8 @@
 | **Stack** | Laravel 12.69.2 · PHP 8.2.12 · MariaDB 10.4.32 · Tailwind 3.4 · Alpine 3 · Vite 7 |
 | **Database** | `my_office` (utf8mb4_unicode_ci) |
 | **Created** | 2026-09-12 |
-| **Last updated** | 2026-09-19 |
-| **Current phase** | PHASE 7 — Employees, departments, attendance, leave, payroll |
+| **Last updated** | 2026-09-21 |
+| **Current phase** | PHASE 16 complete — next: PHASE 17, student attendance + course progress |
 
 ---
 
@@ -205,6 +205,10 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D90 | **`StudentNumberService` reads its format tokens case-insensitively.** | §6.5 writes them in capitals (`{PREFIX}{YY}{SEQ:5}`) and Phase 2 seeded `registration_number_format` as `{prefix}-{year}-{seq}`. §5 says that key is "used exactly as defined, not redefined", so the two spellings have to be one instruction — an installation that saved one of them must not have its numbering break because the other was written down later. `{year}` and `{month}` are accepted as aliases of `{YYYY}` and `{MM}` for the same reason. |
 | D91 | **The public admission form validates an email with `rfc` and not `dns`.** | A DNS lookup on every submit makes the form as fast and as available as somebody else's nameserver, and it rejects real addresses at domains with no MX record — on the one form where a refusal costs the institute a student. The address is confirmed by somebody ringing the applicant, which is what the phone number is for. |
 | D92 | **`chk_sap_not_self_duplicate` is not a CHECK; the service refuses it.** | MariaDB rejects any CHECK that reads an `AUTO_INCREMENT` column (error 1901), so "an application is not its own duplicate" cannot be expressed there. `StudentApplicationService::markDuplicate()` refuses it instead and a test pins that — a self-reference would render one row twice on the review screen and loop anything that walks to the original. The other five CHECKs on that table stand. |
+| D94 | **The room unique indexes are guarded on `room_guard`, not `active_guard`.** | `ScheduleClashDetector` skips the classroom dimension for an online class and for a virtual room, but `uq_tte_room` and `uq_cs_room_slot` knew only whether the booking was live — so two online batches naming one meeting link were allowed by the rule and then refused by a 1062 nobody could explain. A backstop that catches what the rule permits is not a backstop. `room_guard` is 1 only while the booking is live **and** its mode needs a room, and the services now refuse a virtual room for anything but an online class, so index and detector exempt exactly the same rows. Migration `120007`. |
+| D95 | **A booking never clashes with its own parent.** `SlotCandidate` carries `alsoIgnore` and `ignoreGeneratedBy`. | A dated class generated from a weekly rule occupies the same hour as that rule, because it *is* that rule's occurrence — so editing a live timetable slot clashed with its own classes, and substituting a teacher clashed with its own slot. One `ignoreType`/`ignoreId` pair cannot say "this booking and its parent", and the generated classes are as many as the horizon is long, so they cannot be listed by id. Both were found by tests, not by reading. |
+| D96 | **A demo that names a batch is sitting in on it, so that batch's own class is not a conflict.** | §2.16 defines `demo_classes.batch_id` as "sit in on this batch" — and a sit-in is held by the same teacher in the same room at the same hour, which every dimension would otherwise report as a clash. `SlotCandidate::$joiningBatchId` drops conflicts belonging to the batch being joined, which is the only way the one thing that column is for can ever be booked. |
+| D97 | **F-9.2 is satisfied by an index the foreign key LEADS, not by a single-column one.** | The index manifest's own header says a prefix of a longer index counts as present, but Phase 15's check asked for an exact `['column']` row. Phase 16 attached three keys to `demo_classes`, whose `(classroom_id, scheduled_on, start_time, active_guard)` serves `classroom_id` perfectly — and the stricter reading would have had every future phase add manifest rows for indexes that do not exist. The assertion now matches the rule the file states. |
 | D93 | **A cancelled or lost record loses its next-action date.** | A `follow_up_date` left behind on a closed enquiry puts it back into tomorrow's "due" count, where somebody works it again and rings a person who has already said no. `changeStatus()` clears it whenever the status stops being open — found by a test asserting that a finished enquiry needs no next action. |
 
 ---
@@ -550,7 +554,31 @@ admin screen, the public admission form and the four D60 manifests landed 2026-0
 | [ ] | `StudentService::merge()` — **blocked, not skipped**: merging moves fee, enrolment and attendance rows between two students, and those tables arrive with Phases 16–18. The route and the permission exist and the action refuses with the reason |
 | [ ] | The student importer — **deferred**: a partial importer that dropped rows quietly would be worse than none. The route answers with that sentence |
 | [ ] | `assignBatch()` / `transferBatch()` / `requestFees()` — **delegated, not implemented**: `BatchEnrollmentService` is Phase 16's and `StudentFeeService` is Phase 18's. Each refuses with the name of the service that owns it rather than half-doing its job (INV-I1) |
-### [ ] PHASE 16 — Teachers, batches, timetable, demo classes
+### [x] PHASE 16 — Teachers, batches, timetable, demo classes
+
+Contract: [`docs/phases/phase-14-17.md`](docs/phases/phase-14-17.md) §2.17–§2.23, §2.30.7–§2.30.9, §4.1–§4.4,
+§5, §6.6–§6.7, §6.11, §7.5–§7.6, §7.8–§7.9, §8.10–§8.14, §8.18–§8.19 · **schema, the clash authority, six
+services, five policies, every admin screen, the two panels and the four D60 manifests landed 2026-09-21.**
+
+| | Item |
+|---|---|
+| [x] | Seven tables and seven enums — `teachers`, `course_teacher`, `classrooms`, `batches`, `student_batch_enrollments`, `timetable_entries`, `class_sessions` — **639/639 schema checks on both databases**, 55/55 behavioural checks inside a rolled-back transaction |
+| [x] | **`ScheduleClashDetector` is the one overlap test in the system (D47, F-4.7).** Timetable slots, one-off classes, reschedules, substitutions and demo bookings all call it; Phase 19–23's exams and meetings join with one `register()` declaration each. Half-open time, four day/date combinations, three dimensions, two exemptions, and a report that names **every** conflict at once — a coordinator who fixes the teacher and is then told about the room has done the work twice |
+| [x] | **Overlap is a range condition MariaDB cannot hold**, so the guard is a lock: transaction → `lockParents()` in one fixed order → check → insert. The six unique indexes underneath are the cheap backstop for the same form submitted twice, and **D94** made the two room ones exempt exactly what the detector exempts |
+| [x] | **D95, found by tests**: a booking used to clash with its own parent — editing a live slot collided with the classes it had generated, and substituting a teacher collided with the slot the class came from. `alsoIgnore` and `ignoreGeneratedBy` say "this booking and what produced it" |
+| [x] | **INV-I6 / INV-I7 / D48**: capacity is enforced in `BatchEnrollmentService` and nowhere else — one transaction, the batch row locked, then a **recount**. `current_students` is never read to decide. A test corrupts the cache to 99 and the real seat is still given; another sets it to 0 and the recount repairs it |
+| [x] | Overbooking takes **three separate yeses** — the institute setting, the caller's flag and a reason — and each missing one is refused with a different sentence. The room is a second ceiling for a physical batch, so twenty-two students and eighteen chairs is refused rather than discovered |
+| [x] | A transfer leaves the attendance in the batch where it happened, links both rows, repoints the admission, recounts both batches, and hands the fee side to Phase 18 by name (INV-I1) — this phase writes no money row |
+| [x] | `ClassSessionService::generate()` is idempotent by `uq_cs_generated`, so the nightly job, a manual run and a retry can overlap. Cancelling frees the slot and keeps the class visible; `original_teacher_id` is filled once and never overwritten, so §99's missed-class question stays answerable |
+| [x] | The `classrooms` module (§4.1) with **D96**'s sit-in rule, and `batches.assign` as the enrolment ability — tested from both sides: a seater cannot edit the batch, an editor cannot seat anybody |
+| [x] | 61 routes (51 admin, 7 teacher panel, 3 student panel), **38 screens rendered against live data with 0 failures**: the teacher register and workload report, the room list, the batch detail with its capacity meter and roster, the enrol and transfer dialogs, the five timetable views, the class detail with its four moves, and the two panels |
+| [x] | `salary` is behind `teachers.view_financial` and is **stripped from the payload**, not hidden in the template — a test posts one without the ability and asserts the column never moves |
+| [x] | 45 tests across five files: the clash authority, enrolment and capacity, the timetable and its classes, authorization and panel scoping, and the manifests (4,538 assertions) |
+| [x] | The four D60 manifests: 61 route-guard rows with D87's shape for the 24 a policy guards, 29 screen rows carrying an IDOR owner for the two panels, the seven tables' indexes including the three generated guards, and an explicit assertion that this phase accepts no upload |
+| [x] | Three cross-phase effects of attaching the deferred keys, fixed here: a Phase 15 test that wrote `batch_id = 1`, a Phase 14 test that had been **skipped since it was written** (`class_sessions` did not exist) and turned out to be asking a Super Admin, and **D97**'s over-strict foreign-key manifest check |
+| [ ] | `TeacherService::linkEmployee()` writes `employee_id` with no foreign key — **deferred, not skipped**: Phase 7 creates `employees` and its migration attaches the key ([D-IN-1]). `uq_te_employee` already stops one employee being two teachers, and both sides of the link are audited |
+| [ ] | `timetable:verify-clashes` and the nightly generation command — **deferred to Phase 17**, which adds the scheduler block for attendance sweeps; a command with no scheduler entry is a command nobody runs |
+
 ### [ ] PHASE 17 — Student attendance + course progress
 ### [ ] PHASE 18 — Student fees, installments, discounts, scholarships (commission triggers)
 
@@ -567,6 +595,58 @@ admin screen, the public admission form and the four D60 manifests landed 2026-0
 ---
 
 ## 6. Change Log
+
+### 2026-09-21 — Phase 16: one clash authority, and three bookings that clashed with themselves
+
+**Overlap is the one rule MariaDB cannot hold for us.** A unique index says "these values may not
+repeat"; it cannot say "these two hours may not intersect". So the guard for a timetable is a lock and
+a service, not a constraint: `ScheduleClashDetector::check()` is the single overlap test in the system,
+every write opens a transaction and locks the teacher, room and batch rows in one fixed order before it
+asks, and the six unique indexes underneath catch only the cheap case — the same form submitted twice.
+Phase 19–23's exams and room-bearing meetings join that scope with one declaration each, which is what
+makes "a room is never double-booked" true for tables this phase has never heard of.
+
+**Three bookings turned out to clash with themselves, and the tests found all three.** A weekly rule
+and the dated classes it produces occupy the same hour — because the classes *are* that rule, dated —
+so editing a live slot collided with its own generated classes, and handing a class to a substitute
+collided with the slot it came from. One ignore pair cannot say "this booking and its parent", and the
+generated classes are as many as the horizon is long, so `SlotCandidate` gained `alsoIgnore` and
+`ignoreGeneratedBy`. The third was a demo: §2.16 defines a demo's `batch_id` as "sit in on this batch",
+and a sit-in is by definition the same teacher in the same room at the same hour as a class that is
+already there. Without `joiningBatchId`, the one thing that column exists for could never be booked.
+
+**The room backstop was stricter than the room rule.** The detector skips the classroom dimension for
+an online class and for a virtual room; the index knew only whether the booking was live. So two online
+batches naming one Zoom link were allowed by the rule and then refused by a 1062 nobody could explain
+(D94). `room_guard` is now 1 only while a booking is live *and* its mode needs a room, and a virtual
+room is refused for anything but an online class — which makes the two exempt exactly the same rows
+rather than nearly the same rows.
+
+**Capacity is a recount under a lock, and the number on the screen has no authority.** Two
+receptionists enrolling the last student queue on the batch row, and the second is told it is full.
+`batches.current_students` is a cache: one test corrupts it to 99 and watches the real seat still be
+given; another sets it to 0 and watches the recount repair it. Overbooking takes three separate yeses —
+the institute setting, the caller's flag, and a reason — and each missing one is refused with its own
+sentence, because "batch is full" with no numbers is a refusal somebody argues with rather than acts on.
+
+**A transfer leaves the past where it happened.** The old seat goes to `transferred_out` with its
+attendance intact and the new one starts empty, linked both ways. Moving the register across would say
+the student attended classes they were not enrolled for; deleting it would say they never attended at
+all. The fee side is handed to Phase 18 by name — this phase writes no money row (INV-I1).
+
+**Attaching the eight deferred keys broke three older tests, which is the point of attaching them.** A
+Phase 15 test wrote `batch_id = 1` into an admission; there was no batch 1, and until today nothing
+said so. A Phase 14 test had been **skipped since the day it was written**, waiting for
+`class_sessions` — it ran for the first time here and turned out to be asking a Super Admin, for whom
+`Gate::before` allows everything. And the foreign-key manifest check asked for a single-column index
+row where the manifest's own header says a leading column counts (D97). Each one is a thing that was
+already wrong and had nothing to notice it.
+
+**Files.** 7 migrations (`2026_09_14_1200xx`), 7 enums, 6 models in `app/Models/Institute/`, 3 DTOs in
+`app/DataObjects/Institute/`, 7 services in `app/Services/Institute/` (including the detector and two
+new exceptions), 5 policies, 8 controllers (6 admin, 2 teacher panel, 2 student panel) with 2 scoping
+concerns, 24 Blade views, 61 routes, 13 settings keys, the `classrooms` module, 5 test files and the
+four D60 manifests.
 
 ### 2026-09-21 — Phase 15: the admission pipeline, and four guards that had to be two
 
@@ -1838,6 +1918,13 @@ The two HIGH findings are both real and are being fixed now:
 
 | Date | What was tested | Command / method | Result |
 |---|---|---|---|
+| 2026-09-21 | Phase 16 schema | probe over `information_schema` on both databases | PASS — **639/639 each**: seven tables column by column, three generated guard columns, every named index and its uniqueness, 33 CHECKs, 30 foreign keys with their exact `ON DELETE`, and the assertion that `teachers.employee_id` still has none |
+| 2026-09-21 | Phase 16 constraints | behavioural probe inside a rolled-back transaction | PASS — **55/55**: every CHECK bites, `current_guard` frees on drop, `active_guard` frees on cancel, `uq_cs_generated` makes generation idempotent, `teacher_id` RESTRICT and `classroom_id` SET NULL behave as declared |
+| 2026-09-21 | `ScheduleClashDetector` | probe of the three dimensions, two exemptions and four day/date combinations | PASS — **38/38**, including the gap setting applying to teacher and room but never to a batch |
+| 2026-09-21 | The six services | probe against live data, rolled back | PASS — **69/69**: teacher status guards, room closure guards, batch transitions, capacity and overbooking, transfers, generation, the four class moves |
+| 2026-09-21 | Phase 16 screens | 38 GET routes through the HTTP kernel against live data | PASS — **38/38**, 0 failures: 29 admin screens, 6 teacher-panel, 3 student-panel |
+| 2026-09-21 | Institute suite | `DB_DATABASE=my_office_test php artisan test tests/Feature/Institute/` | PASS — **157 tests / 10,756 assertions**, 158 s (45 of them Phase 16's) |
+| 2026-09-21 | Phase 16 manifests | `--filter=SchedulingManifestTest` | PASS — 6 tests / 4,538 assertions; 61 routes and 29 GET screens matched against the live route table |
 | 2026-09-12 | PHP / Composer / MariaDB / Node availability | `php -v`, `composer --version`, `mysql -e "SELECT VERSION()"`, `node -v` | PASS — all present, MariaDB reachable |
 | 2026-09-12 | Front-end build | `npm run build` (during breeze install) | PASS — 59 modules, CSS 38.8 kB, JS 106.7 kB |
 | 2026-09-12 | Phase 1 install | `migrate:fresh --seed` | PASS first try — 14 migrations; 1 branch, 79 modules, 787 permissions, 18 roles, 95 settings, 18 users |

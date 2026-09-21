@@ -379,4 +379,53 @@ return [
         ['converted_admission_id'], ['branch_id'], ['course_id'], ['created_by'], ['updated_by'],
     ],
 
+
+    /*
+    |----------------------------------------------------------------------
+    | Phase 16 — teachers, rooms, batches, enrolment, the timetable, the classes
+    |----------------------------------------------------------------------
+    | The three `*_guard` columns are generated and appear inside the unique indexes that carry them:
+    | `current_guard` holds one active seat per student per batch, `active_guard` holds a live slot
+    | or class, and `room_guard` holds one that actually occupies a room — which is why an online
+    | class can share a meeting link and a physical one cannot share a door.
+    */
+    'teachers' => [
+        ['status', 'name'], ['branch_id', 'status'], ['is_public', 'sort_order'], ['teacher_code'],
+        ['user_id'], ['employee_id'], ['slug'], ['created_by'], ['updated_by'],
+    ],
+    'course_teacher' => [
+        ['course_id', 'teacher_id'], ['teacher_id'],
+    ],
+    'classrooms' => [
+        ['branch_id', 'is_active'], ['type', 'is_active'], ['code'], ['created_by'], ['updated_by'],
+    ],
+    'batches' => [
+        ['course_id', 'status'], ['teacher_id', 'status'], ['status', 'start_date'], ['branch_id', 'status'],
+        ['code'], ['classroom_id'], ['start_date'], ['created_by'], ['updated_by'],
+    ],
+    'student_batch_enrollments' => [
+        ['student_id', 'batch_id', 'current_guard'], ['batch_id', 'roll_number'], ['batch_id', 'status'],
+        ['student_id', 'status'], ['course_id', 'status'], ['transferred_to_id'], ['student_admission_id'],
+        ['enrolled_on'], ['transferred_from_id'], ['created_by'], ['updated_by'],
+    ],
+    'timetable_entries' => [
+        ['batch_id', 'day_of_week', 'start_time', 'effective_from', 'active_guard'],
+        ['teacher_id', 'day_of_week', 'start_time', 'effective_from', 'active_guard'],
+        ['classroom_id', 'day_of_week', 'start_time', 'effective_from', 'room_guard'],
+        ['teacher_id', 'day_of_week', 'is_active'], ['classroom_id', 'day_of_week', 'is_active'],
+        ['batch_id', 'day_of_week'], ['effective_from', 'effective_to'], ['branch_id', 'day_of_week'],
+        ['course_id'], ['created_by'], ['updated_by'],
+    ],
+    'class_sessions' => [
+        ['batch_id', 'session_date', 'start_time', 'active_guard'],
+        ['teacher_id', 'session_date', 'start_time', 'active_guard'],
+        ['classroom_id', 'session_date', 'start_time', 'room_guard'],
+        ['timetable_entry_id', 'session_date', 'active_guard'], ['session_date', 'status'],
+        ['batch_id', 'session_date'], ['teacher_id', 'session_date'], ['classroom_id', 'session_date'],
+        ['status', 'attendance_marked_at'], ['branch_id', 'session_date'], ['rescheduled_to_id'],
+        ['course_topic_id'], ['course_id'], ['timetable_entry_id'], ['original_teacher_id'],
+        ['course_lecture_id'], ['attendance_marked_by'], ['rescheduled_from_id'], ['created_by'],
+        ['updated_by'],
+    ],
+
 ];

@@ -276,6 +276,9 @@ class RoleSeeder extends Seeder
                     // nothing that could change what was agreed after money moved (INV-I2).
                     PermissionRegistry::permissionNamesFor('admissions', self::READ_MONEY),
                     PermissionRegistry::permissionNamesFor('students', self::READ),
+                    // phase-14-17 §4.4: a fee row carries a `batch_id`, so reading the batch list is
+                    // what turns "which class is this student paying for" into an answer.
+                    PermissionRegistry::permissionNamesFor('batches', self::READ),
                     // phase-07 §4.4. Deliberately **not** payroll.approve: whoever locks a run is not
                     // whoever pays it, and collapsing the two would let one person decide and disburse.
                     PermissionRegistry::permissionNamesFor('payroll', $this->abilitiesExcept('payroll', [
@@ -426,6 +429,9 @@ class RoleSeeder extends Seeder
                     // phase-14-17 §4.4: reads the inbox to follow up on an application it sourced;
                     // converting one is the front desk's act, not sales'.
                     PermissionRegistry::permissionNamesFor('student_applications', self::READ),
+                    // phase-14-17 §4.4: "when does the next batch start and is there a seat" is the
+                    // question every enquiry ends on. Reading it is not filling it.
+                    PermissionRegistry::permissionNamesFor('batches', self::READ),
                 ),
             ],
             [
@@ -472,6 +478,15 @@ class RoleSeeder extends Seeder
                         self::READ_EDIT,
                         [Ability::Approve, Ability::Reject, Ability::ChangeStatus, Ability::Export],
                     )),
+                    // phase-14-17 §4.4: the front desk seats a new admission, so it holds
+                    // `batches.assign` — the enrolment ability — without `create` or `edit`. Opening a
+                    // batch is the coordinator's act; filling one is the front desk's.
+                    PermissionRegistry::permissionNamesFor('batches', array_merge(
+                        self::READ,
+                        [Ability::Assign],
+                    )),
+                    // Reads the timetable to tell a walk-in when the class actually meets.
+                    PermissionRegistry::permissionNamesFor('timetable', self::READ),
                 ),
             ],
             [
@@ -534,6 +549,10 @@ class RoleSeeder extends Seeder
                     // phase-14-17 §4.4: reads admissions to know who is on which course, and holds no
                     // `view_financial` — a coordinator plans teaching, not money.
                     PermissionRegistry::permissionNamesFor('admissions', self::READ),
+                    // phase-14-17 §4.4: a coordinator books rooms and teachers onto a timetable, which
+                    // needs to READ both. Hiring, paying and retiring either one is somebody else's.
+                    PermissionRegistry::permissionNamesFor('classrooms', self::READ),
+                    PermissionRegistry::permissionNamesFor('teachers', self::READ),
                 ),
             ],
             [

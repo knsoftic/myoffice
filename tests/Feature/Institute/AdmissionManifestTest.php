@@ -216,10 +216,21 @@ final class AdmissionManifestTest extends TestCase
         );
 
         foreach ($keys as $key) {
-            $this->assertContains(
-                [(string) $key->c],
+            // F-9.2 asks that the column be INDEXED, and the manifest's own header says a prefix of a
+            // longer index counts as present. So the row this looks for is one the column LEADS, not
+            // a single-column one: `demo_classes.classroom_id` leads
+            // (classroom_id, scheduled_on, start_time, active_guard), which serves the key exactly as
+            // well and is the index the table actually has. Phase 16 attached the three keys that
+            // made the difference visible.
+            $columns = array_map(
+                static fn (array $list): string => $list[0],
                 $manifest[(string) $key->t] ?? [],
-                sprintf('F-9.2: the foreign key %s.%s has no index-manifest row of its own.', $key->t, $key->c),
+            );
+
+            $this->assertContains(
+                (string) $key->c,
+                $columns,
+                sprintf('F-9.2: the foreign key %s.%s leads no index-manifest row.', $key->t, $key->c),
             );
         }
     }

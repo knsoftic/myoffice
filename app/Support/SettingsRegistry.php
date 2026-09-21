@@ -9,6 +9,7 @@ use App\Enums\FixedCommissionRelease;
 use App\Enums\ProgressBasis;
 use App\Enums\StudentFeeType;
 use App\Enums\ThemePreference;
+use App\Enums\Weekday;
 use App\Models\Branch;
 use App\Models\User;
 use DateTime;
@@ -1281,6 +1282,25 @@ final class SettingsRegistry
             'KWD' => 'Kuwaiti Dinar (KWD)',
             'BHD' => 'Bahraini Dinar (BHD)',
         ];
+    }
+
+    /**
+     * The seven weekdays, in the order the configured week start puts them.
+     *
+     * Reading `Weekday::ordered()` rather than listing them keeps one definition of "the week" —
+     * the calendar's columns, the working-days picker and the clash predicates all read it.
+     *
+     * @return array<string, string>
+     */
+    public static function weekdayOptions(): array
+    {
+        $options = [];
+
+        foreach (Weekday::ordered() as $day) {
+            $options[$day->value] = $day->label();
+        }
+
+        return $options;
     }
 
     /**
@@ -3357,6 +3377,96 @@ final class SettingsRegistry
                 'help' => 'Minutes. Fills the end time when a demo is booked; the booking then holds that slot against clashes.',
                 'span' => 4,
                 'sort' => 66,
+            ],
+
+            /*
+            |--------------------------------------------------------------------------
+            | phase-14-17 §5 — batches, the timetable and how far ahead classes exist
+            |--------------------------------------------------------------------------
+            */
+            'auto_create_teacher_login' => [
+                'label' => 'Create a teacher login on hire',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Needs an email. Same rules as the student login: random password, delivered by notification, changed on first sign-in.',
+                'span' => 6,
+                'sort' => 70,
+            ],
+            'batch_default_capacity' => [
+                'label' => 'Default batch size',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['nullable', 'integer', 'min:1', 'max:500'],
+                'default' => 20,
+                'help' => 'Prefills a new batch. The enrolment check reads the batch, never this.',
+                'span' => 4,
+                'sort' => 71,
+            ],
+            'batch_allow_overbooking' => [
+                'label' => 'Allow a batch to be overbooked',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'When off, even a user holding Batches → assign cannot exceed capacity. When on, they can, with a reason that is recorded on the enrolment.',
+                'span' => 6,
+                'sort' => 72,
+            ],
+            'batch_near_capacity_threshold' => [
+                'label' => 'Warn when a batch reaches',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['nullable', 'integer', 'min:50', 'max:100'],
+                'default' => 90,
+                'help' => 'Percent of capacity. Fires the near-capacity notice so a second batch can be opened before the first one closes.',
+                'span' => 4,
+                'sort' => 73,
+            ],
+            'timetable_working_days' => [
+                'label' => 'Working days',
+                'type' => self::TYPE_MULTISELECT,
+                'rules' => ['required', 'array', 'min:1'],
+                'item_rules' => [
+                    '*' => ['string', 'distinct', 'in:monday,tuesday,wednesday,thursday,friday,saturday,sunday'],
+                ],
+                'default' => ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'],
+                'options' => [self::class, 'weekdayOptions'],
+                'help' => 'Both the columns the calendar draws and the days a timetable slot may be placed on.',
+                'span' => 6,
+                'sort' => 74,
+            ],
+            'timetable_day_start' => [
+                'label' => 'Teaching day starts',
+                'type' => self::TYPE_TIME,
+                'rules' => ['required', 'date_format:H:i'],
+                'default' => '08:00',
+                'span' => 3,
+                'sort' => 75,
+            ],
+            'timetable_day_end' => [
+                'label' => 'Teaching day ends',
+                'type' => self::TYPE_TIME,
+                'rules' => ['required', 'date_format:H:i'],
+                'default' => '22:00',
+                'help' => 'A slot outside these bounds is refused by the same rule the calendar draws.',
+                'span' => 3,
+                'sort' => 76,
+            ],
+            'timetable_slot_gap_minutes' => [
+                'label' => 'Minimum gap between two classes',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['nullable', 'integer', 'min:0', 'max:120'],
+                'default' => 0,
+                'help' => 'Minutes of travel or setup time enforced between two slots of the SAME teacher or room. Zero allows back-to-back classes; a batch is never given a gap.',
+                'span' => 4,
+                'sort' => 77,
+            ],
+            'session_generation_weeks_ahead' => [
+                'label' => 'Generate classes this far ahead',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['nullable', 'integer', 'min:1', 'max:52'],
+                'default' => 8,
+                'help' => 'Weeks. The nightly job materialises dated classes from the weekly rules up to this horizon, and a teacher cannot resign while they still own one.',
+                'span' => 4,
+                'sort' => 78,
             ],
 
             'fee_receipt_prefix' => [

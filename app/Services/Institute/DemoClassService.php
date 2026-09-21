@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Services\Institute;
 
+use App\DataObjects\Institute\SlotCandidate;
 use App\Enums\CourseInquiryStatus;
+use App\Enums\DeliveryMode;
 use App\Enums\DemoClassStatus;
 use App\Enums\DemoSubjectType;
 use App\Models\Institute\CourseInquiry;
@@ -13,6 +15,7 @@ use App\Models\Institute\Student;
 use App\Models\Institute\StudentApplication;
 use App\Models\User;
 use App\Services\Institute\Exceptions\CourseRuleException;
+use App\Services\Institute\Exceptions\ScheduleClashException;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
@@ -49,6 +52,7 @@ final class DemoClassService
     public function __construct(
         private readonly DatabaseManager $db,
         private readonly CourseInquiryService $inquiries,
+        private readonly ScheduleClashDetector $detector,
     ) {}
 
     /**
@@ -72,7 +76,7 @@ final class DemoClassService
 
         $on = Carbon::parse((string) ($data['scheduled_on'] ?? Carbon::now()->toDateString()))->toDateString();
 
-        $this->assertSlotIsFree($data, $on, $start);
+        $this->assertSlotIsFree($data, $on, $start, $end);
 
         try {
             return $this->db->transaction(function () use ($subject, $type, $column, $name, $phone, $data, $on, $start, $end, $actor): DemoClass {
@@ -154,7 +158,9 @@ final class DemoClassService
         $this->assertSlotIsFree([
             'teacher_id' => $slot['teacher_id'] ?? $demo->teacher_id,
             'classroom_id' => $slot['classroom_id'] ?? $demo->classroom_id,
-        ], $on, $start, ignore: $demo);
+            'batch_id' => $slot['batch_id'] ?? $demo->batch_id,
+            'delivery_mode' => $slot['delivery_mode'] ?? $demo->delivery_mode,
+        ], $on, $start, $end, ignore: $demo);
 
         return $this->db->transaction(function () use ($demo, $slot, $on, $start, $end, $reason, $actor): DemoClass {
             $demo->withReason($reason);
@@ -309,35 +315,46 @@ final class DemoClassService
     }
 
     /**
-     * The exact-slot check, in words, before the unique index says the same thing in a 1062.
+     * The real overlap check (phase-16 §6.7) — teacher and classroom, across every table that can
+     * hold a slot.
      *
-     * Phase 16's `ScheduleClashDetector` will widen this to overlapping ranges across classes and
-     * demos; this is deliberately only what can be checked honestly today.
+     * Phase 15 shipped this as an exact-start-time test because `timetable_entries` and
+     * `class_sessions` did not exist yet; Phase 16 built them and the detector that reads them, so
+     * this now asks the one authority. The two unique indexes underneath stay as the backstop for an
+     * identical form submitted twice.
+     *
+     * **A demo naming a batch is sitting in on it (§2.16)**, so that batch's own class is not a
+     * conflict — otherwise the one thing `batch_id` is for could never be booked.
      *
      * @param  array<string, mixed>  $data
      */
-    private function assertSlotIsFree(array $data, string $on, string $start, ?DemoClass $ignore = null): void
-    {
-        foreach (['teacher_id' => 'teacher', 'classroom_id' => 'room'] as $column => $label) {
-            $id = $data[$column] ?? null;
+    private function assertSlotIsFree(
+        array $data,
+        string $on,
+        string $start,
+        string $end,
+        ?DemoClass $ignore = null,
+    ): void {
+        $mode = $data['delivery_mode'] ?? null;
+        $mode = $mode instanceof DeliveryMode ? $mode : DeliveryMode::tryFrom((string) $mode);
 
-            if ($id === null) {
-                continue;
-            }
+        $candidate = new SlotCandidate(
+            teacherId: isset($data['teacher_id']) ? (int) $data['teacher_id'] : null,
+            classroomId: isset($data['classroom_id']) ? (int) $data['classroom_id'] : null,
+            // A demo is for one person: it never claims a batch's hour (§6.7 dimension 3).
+            batchId: null,
+            startsAt: Carbon::parse($on.' '.$start),
+            endsAt: Carbon::parse($on.' '.$end),
+            ignoreType: $ignore !== null ? SlotCandidate::TYPE_DEMO_CLASS : null,
+            ignoreId: $ignore?->getKey(),
+            deliveryMode: $mode,
+            joiningBatchId: isset($data['batch_id']) ? (int) $data['batch_id'] : null,
+        );
 
-            $taken = DemoClass::query()
-                ->scheduled()
-                ->where($column, $id)
-                ->where('scheduled_on', $on)
-                ->where('start_time', $start)
-                ->when($ignore !== null, fn ($q) => $q->whereKeyNot($ignore->getKey()))
-                ->exists();
+        $report = $this->detector->check($candidate);
 
-            if ($taken) {
-                throw CourseRuleException::refuse($column, sprintf(
-                    'That %s already has a demo at %s on %s.', $label, $start, $on,
-                ));
-            }
+        if (! $report->clean) {
+            throw ScheduleClashException::from($report, 'start_time');
         }
     }
 

@@ -4624,4 +4624,728 @@ return [
             .'server-side referral resolution as the admission form; a visitor names no partner (INV-I4).',
         'owner_phase' => 15,
     ],
+
+    /*
+    |----------------------------------------------------------------------
+    | Phase 16 — teachers, rooms, batches, the timetable and its classes
+    |----------------------------------------------------------------------
+    | 61 routes: 51 admin, 7 on the teacher panel, 3 on the student panel.
+    |
+    | **`batches.assign` is the enrolment ability, and it is not `edit`** (§4.2). Seating a student and
+    | transferring one both carry it; changing an enrolment's STATUS is `students.change_status`, because
+    | dropping or suspending somebody is a decision about the student rather than about the batch. That is
+    | why `admin.enrollments.*` are the two rows here whose permission belongs to another module.
+    |
+    | **All four class moves are `timetable.change_status`** — cancel, reschedule, substitute, mark held.
+    | Each one tells the roster something, and being allowed to build a timetable is not the same right as
+    | being allowed to call a class off the night before.
+    |
+    | **`admin.timetable.check-clash` is a GET that writes nothing.** It is what the form asks while
+    | somebody is still choosing an hour, so it carries `timetable.create` (knowing who is free is knowing
+    | the timetable) plus a throttle, and the real check runs again inside the transaction that writes.
+    |
+    | D87 applies to the 24 policy-guarded rows: `can:update,batch` is an ability on a model, so the row
+    | carries both the permission the policy requires and the method that also weighs the row's own state.
+    */
+
+    [
+        'route' => 'admin.batches.create',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:batches', 'can:batches.create'],
+        'permission' => 'batches.create',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.batches.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:batches', 'can:delete,batch'],
+        'permission' => 'batches.delete',
+        'policy' => 'BatchPolicy::delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.batches.edit',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:batches', 'can:update,batch'],
+        'permission' => 'batches.edit',
+        'policy' => 'BatchPolicy::update',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.batches.enrollments.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:batches', 'can:assign,batch'],
+        'permission' => 'batches.assign',
+        'policy' => 'BatchPolicy::assign',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.batches.export',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:batches', 'can:batches.export'],
+        'permission' => 'batches.export',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.batches.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:batches', 'can:batches.view_any'],
+        'permission' => 'batches.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.batches.print-roster',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:batches', 'can:print,batch'],
+        'permission' => 'batches.print',
+        'policy' => 'BatchPolicy::print',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.batches.recount',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:batches', 'can:update,batch'],
+        'permission' => 'batches.edit',
+        'policy' => 'BatchPolicy::update',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.batches.roster',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:batches', 'can:view,batch'],
+        'permission' => 'batches.view',
+        'policy' => 'BatchPolicy::view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.batches.show',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:batches', 'can:view,batch'],
+        'permission' => 'batches.view',
+        'policy' => 'BatchPolicy::view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.batches.status',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:batches', 'can:changeStatus,batch'],
+        'permission' => 'batches.change_status',
+        'policy' => 'BatchPolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.batches.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:batches', 'can:batches.create'],
+        'permission' => 'batches.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.batches.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:batches', 'can:update,batch'],
+        'permission' => 'batches.edit',
+        'policy' => 'BatchPolicy::update',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.class-sessions.cancel',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:timetable', 'can:changeStatus,session'],
+        'permission' => 'timetable.change_status',
+        'policy' => 'ClassSessionPolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.class-sessions.generate',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:timetable', 'can:timetable.create'],
+        'permission' => 'timetable.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.class-sessions.held',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:timetable', 'can:changeStatus,session'],
+        'permission' => 'timetable.change_status',
+        'policy' => 'ClassSessionPolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.class-sessions.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:timetable', 'can:timetable.view_any'],
+        'permission' => 'timetable.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.class-sessions.reschedule',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:timetable', 'can:changeStatus,session'],
+        'permission' => 'timetable.change_status',
+        'policy' => 'ClassSessionPolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.class-sessions.show',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:timetable', 'can:view,session'],
+        'permission' => 'timetable.view',
+        'policy' => 'ClassSessionPolicy::view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.class-sessions.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:timetable', 'can:timetable.create'],
+        'permission' => 'timetable.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.class-sessions.substitute',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:timetable', 'can:changeStatus,session'],
+        'permission' => 'timetable.change_status',
+        'policy' => 'ClassSessionPolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.classrooms.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:classrooms', 'can:delete,classroom'],
+        'permission' => 'classrooms.delete',
+        'policy' => 'ClassroomPolicy::delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.classrooms.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:classrooms', 'can:classrooms.view_any'],
+        'permission' => 'classrooms.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.classrooms.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:classrooms', 'can:classrooms.create'],
+        'permission' => 'classrooms.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.classrooms.toggle',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:classrooms', 'can:changeStatus,classroom'],
+        'permission' => 'classrooms.change_status',
+        'policy' => 'ClassroomPolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.classrooms.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:classrooms', 'can:update,classroom'],
+        'permission' => 'classrooms.edit',
+        'policy' => 'ClassroomPolicy::update',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.enrollments.status',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:batches', 'can:students.change_status'],
+        'permission' => 'students.change_status',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.enrollments.transfer',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:batches', 'can:batches.assign'],
+        'permission' => 'batches.assign',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.teachers.courses',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:teachers', 'can:assign,teacher'],
+        'permission' => 'teachers.assign',
+        'policy' => 'TeacherPolicy::assign',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.teachers.create',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:teachers', 'can:teachers.create'],
+        'permission' => 'teachers.create',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.teachers.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:teachers', 'can:delete,teacher'],
+        'permission' => 'teachers.delete',
+        'policy' => 'TeacherPolicy::delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.teachers.edit',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:teachers', 'can:update,teacher'],
+        'permission' => 'teachers.edit',
+        'policy' => 'TeacherPolicy::update',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.teachers.employee-link.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:teachers', 'can:update,teacher'],
+        'permission' => 'teachers.edit',
+        'policy' => 'TeacherPolicy::update',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.teachers.employee-link.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:teachers', 'can:update,teacher'],
+        'permission' => 'teachers.edit',
+        'policy' => 'TeacherPolicy::update',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.teachers.export',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:teachers', 'can:teachers.export'],
+        'permission' => 'teachers.export',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.teachers.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:teachers', 'can:teachers.view_any'],
+        'permission' => 'teachers.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.teachers.login.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:teachers', 'can:update,teacher'],
+        'permission' => 'teachers.edit',
+        'policy' => 'TeacherPolicy::update',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.teachers.show',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:teachers', 'can:view,teacher'],
+        'permission' => 'teachers.view',
+        'policy' => 'TeacherPolicy::view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.teachers.status',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:teachers', 'can:changeStatus,teacher'],
+        'permission' => 'teachers.change_status',
+        'policy' => 'TeacherPolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.teachers.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:teachers', 'can:teachers.create'],
+        'permission' => 'teachers.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.teachers.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:teachers', 'can:update,teacher'],
+        'permission' => 'teachers.edit',
+        'policy' => 'TeacherPolicy::update',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.teachers.workload',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:teachers', 'can:teachers.view_reports'],
+        'permission' => 'teachers.view_reports',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.timetable.check-clash',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:timetable', 'can:timetable.create', 'throttle:120,1'],
+        'permission' => 'timetable.create',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.timetable.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:timetable', 'can:delete,entry'],
+        'permission' => 'timetable.delete',
+        'policy' => 'TimetableEntryPolicy::delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.timetable.end',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:timetable', 'can:changeStatus,entry'],
+        'permission' => 'timetable.change_status',
+        'policy' => 'TimetableEntryPolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.timetable.export',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:timetable', 'can:timetable.export'],
+        'permission' => 'timetable.export',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.timetable.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:timetable', 'can:timetable.view_any'],
+        'permission' => 'timetable.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.timetable.print',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:timetable', 'can:timetable.print'],
+        'permission' => 'timetable.print',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.timetable.seed',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:timetable', 'can:timetable.create'],
+        'permission' => 'timetable.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.timetable.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:timetable', 'can:timetable.create'],
+        'permission' => 'timetable.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'admin.timetable.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:timetable', 'can:update,entry'],
+        'permission' => 'timetable.edit',
+        'policy' => 'TimetableEntryPolicy::update',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'student.batches.show',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:student', 'module:batches', 'can:student_portal.batches'],
+        'permission' => 'student_portal.batches',
+        'panel' => 'student',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'student.teachers.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:student', 'module:teachers', 'can:student_portal.teachers'],
+        'permission' => 'student_portal.teachers',
+        'panel' => 'student',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'student.timetable.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:student', 'module:timetable', 'can:student_portal.timetable'],
+        'permission' => 'student_portal.timetable',
+        'panel' => 'student',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'teacher.batches.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:teacher', 'module:batches', 'can:teacher_portal.batches'],
+        'permission' => 'teacher_portal.batches',
+        'panel' => 'teacher',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'teacher.batches.show',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:teacher', 'module:batches', 'can:teacher_portal.batches'],
+        'permission' => 'teacher_portal.batches',
+        'panel' => 'teacher',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'teacher.demo-classes.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:teacher', 'module:demo_classes', 'can:teacher_portal.demo_classes'],
+        'permission' => 'teacher_portal.demo_classes',
+        'panel' => 'teacher',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'teacher.demo-classes.status',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:teacher', 'module:demo_classes', 'can:teacher_portal.demo_classes'],
+        'permission' => 'teacher_portal.demo_classes',
+        'panel' => 'teacher',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'teacher.sessions.show',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:teacher', 'module:timetable', 'can:teacher_portal.timetable'],
+        'permission' => 'teacher_portal.timetable',
+        'panel' => 'teacher',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'teacher.students.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:teacher', 'module:students', 'can:teacher_portal.students'],
+        'permission' => 'teacher_portal.students',
+        'panel' => 'teacher',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
+    [
+        'route' => 'teacher.timetable.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:teacher', 'module:timetable', 'can:teacher_portal.timetable'],
+        'permission' => 'teacher_portal.timetable',
+        'panel' => 'teacher',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 16,
+    ],
+
 ];

@@ -246,7 +246,19 @@ final class AdmissionPipelineTest extends TestCase
         $admission = $this->admission(actor: $actor);
 
         $this->admissionService()->register($admission, $actor);
-        StudentAdmission::query()->whereKey($admission->getKey())->update(['batch_id' => 1]);
+
+        // A real batch: Phase 16 attached the foreign key this column always declared, so an invented
+        // id is now refused by the database rather than quietly accepted.
+        $batch = app(\App\Services\Institute\BatchService::class)->create([
+            'code' => 'FEE-RULE-1',
+            'name' => 'Fee rule batch',
+            'course_id' => $admission->course_id,
+            'start_date' => now()->toDateString(),
+            'student_capacity' => 10,
+            'delivery_mode' => 'physical',
+        ], $actor);
+
+        StudentAdmission::query()->whereKey($admission->getKey())->update(['batch_id' => $batch->getKey()]);
 
         $this->setting('institute.require_fee_before_activation', 'any_payment');
         $this->assertContains('nothing has been charged yet', $this->admissionService()->activationGaps($admission->refresh()));

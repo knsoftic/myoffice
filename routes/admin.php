@@ -58,6 +58,12 @@ use App\Http\Controllers\Admin\Finance\FinanceReportController;
 use App\Http\Controllers\Admin\Finance\IncomeController;
 use App\Http\Controllers\Admin\Finance\InvoiceController;
 use App\Http\Controllers\Admin\Institute\AdmissionController;
+use App\Http\Controllers\Admin\Institute\BatchController;
+use App\Http\Controllers\Admin\Institute\ClassroomController;
+use App\Http\Controllers\Admin\Institute\ClassSessionController;
+use App\Http\Controllers\Admin\Institute\EnrollmentController;
+use App\Http\Controllers\Admin\Institute\TeacherController;
+use App\Http\Controllers\Admin\Institute\TimetableController;
 use App\Http\Controllers\Admin\Institute\CourseCategoryController;
 use App\Http\Controllers\Admin\Institute\CourseInquiryController;
 use App\Http\Controllers\Admin\Institute\DemoClassController;
@@ -1854,6 +1860,133 @@ Route::prefix('admin')
             Route::post('admissions/{admission}/cancel', [AdmissionController::class, 'cancel'])->whereNumber('admission')->middleware('can:cancel,admission')->name('admissions.cancel');
             Route::post('admissions/{admission}/withdraw', [AdmissionController::class, 'withdraw'])->whereNumber('admission')->middleware('can:withdraw,admission')->name('admissions.withdraw');
             Route::post('admissions/{admission}/transfer', [AdmissionController::class, 'transfer'])->whereNumber('admission')->middleware('can:batches.assign')->name('admissions.transfer');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Teachers — phase-14-17 §7.5, §8.10
+        |----------------------------------------------------------------------
+        |
+        | `workload` is `view_reports` rather than `view`: a teacher's week, the
+        | classes they held and whether they filled in the register is a report
+        | about a person, and reading a profile is not the same right.
+        |
+        | The employee link is `edit` on both sides. It copies identity and
+        | salary across and locks the fields, so it is an edit of the teacher —
+        | not an `assign`, which here means attaching courses.
+        |
+        */
+        Route::middleware('module:teachers')->group(static function (): void {
+            Route::get('teachers', [TeacherController::class, 'index'])->middleware('can:teachers.view_any')->name('teachers.index');
+            Route::get('teachers/create', [TeacherController::class, 'create'])->middleware('can:teachers.create')->name('teachers.create');
+            Route::post('teachers', [TeacherController::class, 'store'])->middleware('can:teachers.create')->name('teachers.store');
+            Route::get('teachers/export/{format}', [TeacherController::class, 'export'])->middleware('can:teachers.export')->name('teachers.export');
+
+            Route::get('teachers/{teacher}', [TeacherController::class, 'show'])->whereNumber('teacher')->middleware('can:view,teacher')->name('teachers.show');
+            Route::get('teachers/{teacher}/edit', [TeacherController::class, 'edit'])->whereNumber('teacher')->middleware('can:update,teacher')->name('teachers.edit');
+            Route::put('teachers/{teacher}', [TeacherController::class, 'update'])->whereNumber('teacher')->middleware('can:update,teacher')->name('teachers.update');
+            Route::delete('teachers/{teacher}', [TeacherController::class, 'destroy'])->whereNumber('teacher')->middleware('can:delete,teacher')->name('teachers.destroy');
+
+            Route::get('teachers/{teacher}/workload', [TeacherController::class, 'workload'])->whereNumber('teacher')->middleware('can:teachers.view_reports')->name('teachers.workload');
+            Route::post('teachers/{teacher}/courses', [TeacherController::class, 'courses'])->whereNumber('teacher')->middleware('can:assign,teacher')->name('teachers.courses');
+            Route::post('teachers/{teacher}/status', [TeacherController::class, 'status'])->whereNumber('teacher')->middleware('can:changeStatus,teacher')->name('teachers.status');
+            Route::post('teachers/{teacher}/login', [TeacherController::class, 'createLogin'])->whereNumber('teacher')->middleware('can:update,teacher')->name('teachers.login.store');
+            Route::post('teachers/{teacher}/employee-link', [TeacherController::class, 'linkEmployee'])->whereNumber('teacher')->middleware('can:update,teacher')->name('teachers.employee-link.store');
+            Route::delete('teachers/{teacher}/employee-link', [TeacherController::class, 'unlinkEmployee'])->whereNumber('teacher')->middleware('can:update,teacher')->name('teachers.employee-link.destroy');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Classrooms — phase-14-17 §7.5, §8.10
+        |----------------------------------------------------------------------
+        |
+        | Its own module (§4.1) so a branch administrator can be given the rooms
+        | without the batches that fill them. Everything is done from the index:
+        | a room has six fields and does not need a page of its own.
+        |
+        */
+        Route::middleware('module:classrooms')->group(static function (): void {
+            Route::get('classrooms', [ClassroomController::class, 'index'])->middleware('can:classrooms.view_any')->name('classrooms.index');
+            Route::post('classrooms', [ClassroomController::class, 'store'])->middleware('can:classrooms.create')->name('classrooms.store');
+            Route::put('classrooms/{classroom}', [ClassroomController::class, 'update'])->whereNumber('classroom')->middleware('can:update,classroom')->name('classrooms.update');
+            Route::post('classrooms/{classroom}/toggle', [ClassroomController::class, 'toggle'])->whereNumber('classroom')->middleware('can:changeStatus,classroom')->name('classrooms.toggle');
+            Route::delete('classrooms/{classroom}', [ClassroomController::class, 'destroy'])->whereNumber('classroom')->middleware('can:delete,classroom')->name('classrooms.destroy');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Batches and enrolment — phase-14-17 §7.5, §8.11, §8.12
+        |----------------------------------------------------------------------
+        |
+        | **`batches.assign` is the enrolment ability** (§4.2). Seating a student
+        | and transferring one both carry it; changing an enrolment's *status* is
+        | `students.change_status`, because dropping or suspending somebody is a
+        | decision about the student rather than about the batch.
+        |
+        | There is no `enrollments.destroy`: a seat that was a mistake is
+        | `cancelled`, and one that ended is `dropped`. Both keep the register.
+        |
+        */
+        Route::middleware('module:batches')->group(static function (): void {
+            Route::get('batches', [BatchController::class, 'index'])->middleware('can:batches.view_any')->name('batches.index');
+            Route::get('batches/create', [BatchController::class, 'create'])->middleware('can:batches.create')->name('batches.create');
+            Route::post('batches', [BatchController::class, 'store'])->middleware('can:batches.create')->name('batches.store');
+            Route::get('batches/export/{format}', [BatchController::class, 'export'])->middleware('can:batches.export')->name('batches.export');
+
+            Route::get('batches/{batch}', [BatchController::class, 'show'])->whereNumber('batch')->middleware('can:view,batch')->name('batches.show');
+            Route::get('batches/{batch}/edit', [BatchController::class, 'edit'])->whereNumber('batch')->middleware('can:update,batch')->name('batches.edit');
+            Route::put('batches/{batch}', [BatchController::class, 'update'])->whereNumber('batch')->middleware('can:update,batch')->name('batches.update');
+            Route::delete('batches/{batch}', [BatchController::class, 'destroy'])->whereNumber('batch')->middleware('can:delete,batch')->name('batches.destroy');
+
+            Route::post('batches/{batch}/status', [BatchController::class, 'status'])->whereNumber('batch')->middleware('can:changeStatus,batch')->name('batches.status');
+            Route::get('batches/{batch}/roster', [BatchController::class, 'roster'])->whereNumber('batch')->middleware('can:view,batch')->name('batches.roster');
+            Route::get('batches/{batch}/print-roster', [BatchController::class, 'printRoster'])->whereNumber('batch')->middleware('can:print,batch')->name('batches.print-roster');
+            Route::post('batches/{batch}/recount', [BatchController::class, 'recount'])->whereNumber('batch')->middleware('can:update,batch')->name('batches.recount');
+
+            Route::post('batches/{batch}/enrollments', [EnrollmentController::class, 'store'])->whereNumber('batch')->middleware('can:assign,batch')->name('batches.enrollments.store');
+            Route::post('enrollments/{enrollment}/transfer', [EnrollmentController::class, 'transfer'])->whereNumber('enrollment')->middleware('can:batches.assign')->name('enrollments.transfer');
+            Route::post('enrollments/{enrollment}/status', [EnrollmentController::class, 'status'])->whereNumber('enrollment')->middleware('can:students.change_status')->name('enrollments.status');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Timetable and classes — phase-14-17 §7.6, §8.13, §8.14
+        |----------------------------------------------------------------------
+        |
+        | `check-clash` is a **GET**: it writes nothing, it is what the form calls
+        | as somebody picks an hour, and making it a POST would mean a CSRF token
+        | on a question. It carries `timetable.create` because knowing who is free
+        | is knowing the timetable.
+        |
+        | The literal segments (`print`, `export`, `generate`) are declared before
+        | the `{entry}` and `{session}` routes so a numeric constraint is never the
+        | thing deciding which one matched.
+        |
+        | All four session moves are `timetable.change_status` (§4.2): each one
+        | tells the roster something, and being allowed to build a timetable is not
+        | the same as being allowed to call a class off the night before.
+        |
+        */
+        Route::middleware('module:timetable')->group(static function (): void {
+            Route::get('timetable/check-clash', [TimetableController::class, 'checkClash'])->middleware(['can:timetable.create', 'throttle:120,1'])->name('timetable.check-clash');
+            Route::get('timetable/print/{view}', [TimetableController::class, 'print'])->middleware('can:timetable.print')->name('timetable.print');
+            Route::get('timetable/export/{format}', [TimetableController::class, 'export'])->middleware('can:timetable.export')->name('timetable.export');
+            Route::get('timetable/{view?}', [TimetableController::class, 'index'])->where('view', 'daily|weekly|teacher|batch|classroom')->middleware('can:timetable.view_any')->name('timetable.index');
+
+            Route::post('timetable', [TimetableController::class, 'store'])->middleware('can:timetable.create')->name('timetable.store');
+            Route::post('batches/{batch}/timetable/seed', [TimetableController::class, 'seed'])->whereNumber('batch')->middleware('can:timetable.create')->name('timetable.seed');
+            Route::put('timetable/{entry}', [TimetableController::class, 'update'])->whereNumber('entry')->middleware('can:update,entry')->name('timetable.update');
+            Route::post('timetable/{entry}/end', [TimetableController::class, 'end'])->whereNumber('entry')->middleware('can:changeStatus,entry')->name('timetable.end');
+            Route::delete('timetable/{entry}', [TimetableController::class, 'destroy'])->whereNumber('entry')->middleware('can:delete,entry')->name('timetable.destroy');
+
+            Route::get('class-sessions', [ClassSessionController::class, 'index'])->middleware('can:timetable.view_any')->name('class-sessions.index');
+            Route::post('class-sessions', [ClassSessionController::class, 'store'])->middleware('can:timetable.create')->name('class-sessions.store');
+            Route::post('class-sessions/generate', [ClassSessionController::class, 'generate'])->middleware('can:timetable.create')->name('class-sessions.generate');
+            Route::get('class-sessions/{session}', [ClassSessionController::class, 'show'])->whereNumber('session')->middleware('can:view,session')->name('class-sessions.show');
+            Route::post('class-sessions/{session}/cancel', [ClassSessionController::class, 'cancel'])->whereNumber('session')->middleware('can:changeStatus,session')->name('class-sessions.cancel');
+            Route::post('class-sessions/{session}/reschedule', [ClassSessionController::class, 'reschedule'])->whereNumber('session')->middleware('can:changeStatus,session')->name('class-sessions.reschedule');
+            Route::post('class-sessions/{session}/substitute', [ClassSessionController::class, 'substitute'])->whereNumber('session')->middleware('can:changeStatus,session')->name('class-sessions.substitute');
+            Route::post('class-sessions/{session}/held', [ClassSessionController::class, 'held'])->whereNumber('session')->middleware('can:changeStatus,session')->name('class-sessions.held');
         });
 
         /*

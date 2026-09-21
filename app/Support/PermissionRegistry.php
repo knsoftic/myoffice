@@ -772,7 +772,26 @@ final class PermissionRegistry
                 'icon' => 'presentation-chart-bar',
                 'is_core' => false,
                 'sort' => 590,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::ASSIGN, self::FILES, self::MONEY, self::RESTORE),
+                'abilities' => self::merge(
+                    self::CRUD_FULL,
+                    self::STATUS,
+                    self::ASSIGN,
+                    self::FILES,
+                    self::MONEY,
+                    self::REPORTS,
+                    self::LOGS,
+                    self::RESTORE,
+                ),
+            ],
+            // Phase 16 §4.1 — a room is booked by the timetable and by demo classes, so a branch
+            // admin can be given the rooms without being given the batches that fill them.
+            'classrooms' => [
+                'name' => 'Classrooms',
+                'group' => ModuleGroup::Institute,
+                'icon' => 'building-office-2',
+                'is_core' => false,
+                'sort' => 595,
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::RESTORE),
             ],
             'batches' => [
                 'name' => 'Batches',
@@ -780,7 +799,16 @@ final class PermissionRegistry
                 'icon' => 'squares-2x2',
                 'is_core' => false,
                 'sort' => 600,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::ASSIGN, self::RESTORE),
+                // `assign` is the enrollment / transfer ability (§4.2) — there is no
+                // `student_enrollments` module, and inventing one would add surface for no gain.
+                'abilities' => self::merge(
+                    self::CRUD_FULL,
+                    self::STATUS,
+                    self::ASSIGN,
+                    self::REPORTS,
+                    self::LOGS,
+                    self::RESTORE,
+                ),
             ],
             'timetable' => [
                 'name' => 'Timetable',
@@ -788,7 +816,15 @@ final class PermissionRegistry
                 'icon' => 'table-cells',
                 'is_core' => false,
                 'sort' => 610,
-                'abilities' => self::merge(self::CRUD, self::STATUS, self::ASSIGN, [Ability::Export, Ability::Print], self::RESTORE),
+                // `change_status` covers cancel / reschedule / substitute / mark held (§4.2).
+                'abilities' => self::merge(
+                    self::CRUD,
+                    self::STATUS,
+                    self::ASSIGN,
+                    [Ability::Export, Ability::Print],
+                    self::REPORTS,
+                    self::RESTORE,
+                ),
             ],
             'student_attendance' => [
                 'name' => 'Student Attendance',
@@ -1237,6 +1273,8 @@ final class PermissionRegistry
                     'exams',
                     'results',
                     'progress',
+                    // Phase 16 §4.3 — the name and public bio of their OWN teachers, nothing else.
+                    'teachers',
                     'certificates',
                     'fees',
                     'installments',
@@ -1272,6 +1310,11 @@ final class PermissionRegistry
                     'results',
                     'results_entry',
                     'student_progress',
+                    // Phase 16 §4.3 — separate from `student_progress` on purpose: a visiting trainer
+                    // may be allowed to read a register without being allowed to write it.
+                    'progress_mark',
+                    'demo_classes',
+                    'reports',
                     'meetings',
                     'messages',
                     'support_tickets',

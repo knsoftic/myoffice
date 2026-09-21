@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Feature\Concerns\InteractsWithRbac;
-use Tests\Feature\Institute\Concerns\BuildsCatalogue;
+use Tests\Feature\Institute\Concerns\BuildsSchedules;
 use Tests\TestCase;
 
 /**
@@ -28,7 +28,7 @@ use Tests\TestCase;
  */
 final class CourseOutlineTest extends TestCase
 {
-    use BuildsCatalogue;
+    use BuildsSchedules;
     use InteractsWithRbac;
     use RefreshDatabase;
 
@@ -187,25 +187,33 @@ final class CourseOutlineTest extends TestCase
     #[Test]
     public function the_policy_refuses_to_delete_a_topic_a_session_has_taught(): void
     {
-        // `class_sessions` ships with Phase 16. Until it does there is nothing that can reference a
-        // topic, so the guard has nothing to refuse — skipping is the honest answer, and this test
-        // starts working the day that table exists.
-        if (! $this->app['db']->getSchemaBuilder()->hasTable('class_sessions')) {
-            $this->markTestSkipped('class_sessions arrives with Phase 16 — the guard has nothing to refuse yet.');
-        }
-
+        // Phase 14 wrote this against a table that did not exist yet; Phase 16 built it, so the class
+        // is now a real one — generated from a real timetable slot on a real batch, which is the only
+        // way a class ever comes to carry a topic.
         $actor = $this->createSuperAdmin();
         $course = $this->draftCourse(actor: $actor);
         $topic = $this->outlineWith($course, $actor);
 
-        $this->app['db']->table('class_sessions')->insert([
-            'course_topic_id' => $topic->getKey(),
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        $batch = $this->batch($course, [], $actor);
+        $this->slot($batch, actor: $actor);
+
+        $session = \App\Models\Institute\ClassSession::query()
+            ->where('batch_id', $batch->getKey())
+            ->orderBy('session_date')
+            ->firstOrFail();
+
+        $session->forceFill(['course_topic_id' => $topic->getKey()])->save();
 
         $this->assertTrue($topic->fresh()->isReferenced());
-        $this->assertFalse($actor->can('delete', $topic->fresh()));
+
+        // Asked of somebody the policy actually runs for: `Gate::before` allows a Super Admin
+        // everything, so asking them would test the short-circuit rather than the rule.
+        $editor = $this->createUserWithPermissions([
+            'course_outline.view_any', 'course_outline.view', 'course_outline.edit', 'course_outline.delete',
+        ]);
+
+        $this->assertFalse($editor->can('delete', $topic->fresh()),
+            'a topic a class has taught is what the syllabus report points at');
     }
 
     /*
