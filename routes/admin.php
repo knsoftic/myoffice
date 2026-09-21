@@ -42,6 +42,7 @@ use App\Http\Controllers\Admin\Cms\TestimonialController;
 use App\Http\Controllers\Admin\Cms\WebsiteOverviewController;
 use App\Http\Controllers\Admin\Collaborator\CollaboratorController;
 use App\Http\Controllers\Admin\Collaborator\CommissionController;
+use App\Http\Controllers\Admin\Collaborator\CommissionDiscrepancyController;
 use App\Http\Controllers\Admin\Collaborator\CommissionRuleController;
 use App\Http\Controllers\Admin\Collaborator\PayoutAccountController;
 use App\Http\Controllers\Admin\Collaborator\PayoutController;
@@ -170,7 +171,14 @@ Route::prefix('admin')
             // The third argument is the limiter prefix. An unnamed `throttle:x,y` keys its counter
             // on the user alone, so every such route shared one bucket and five card refreshes
             // used up the mail test's three-a-minute allowance.
-            ->middleware(['can:dashboard.view', 'throttle:60,1,dashboard-widget'])
+            //
+            // **The ceiling scales with the number of cards, not with a round number.** One dashboard
+            // load is one request per visible widget, so 60 a minute was three loads when there were
+            // twenty cards — and phase-10-12 §8.12 added eight more. A Super Admin who reloads and
+            // then changes the date range would have been rate-limited out of their own dashboard.
+            // The per-widget query budget is what bounds the cost here; the limiter is only there to
+            // stop a loop.
+            ->middleware(['can:dashboard.view', 'throttle:240,1,dashboard-widget'])
             ->name('dashboard.widget');
 
         /*
@@ -1397,6 +1405,12 @@ Route::prefix('admin')
             // §8.8. `view_reports` rather than `view_any`: a skip report is about the *absence* of
             // money and reads across every partner at once.
             Route::get('commission-skips', [CommissionController::class, 'skips'])->middleware('can:collaborator_commissions.view_reports')->name('commission-skips.index');
+
+            // phase-10-12 sec 8.8. `accept` is the action that moves **no** money: it notes a decision
+            // and closes the row. Without it `over_released_amount` could never be cleared and the
+            // queue would grow for ever (spine R-6).
+            Route::get('commission-discrepancies', [CommissionDiscrepancyController::class, 'index'])->middleware('can:collaborator_commissions.view_any')->name('commission-discrepancies.index');
+            Route::post('commission-discrepancies/{entitlement}/accept', [CommissionDiscrepancyController::class, 'accept'])->whereNumber('entitlement')->middleware('can:collaborator_commissions.approve')->name('commission-discrepancies.accept');
         });
 
         /*

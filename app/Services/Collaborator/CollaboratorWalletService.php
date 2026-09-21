@@ -7,6 +7,7 @@ namespace App\Services\Collaborator;
 use App\DataObjects\Collaborator\AllocationDelta;
 use App\DataObjects\Collaborator\LedgerDelta;
 use App\DataObjects\Collaborator\WalletSnapshot;
+use App\Enums\CommissionStatus;
 use App\Enums\PayoutStatus;
 use App\Events\Collaborator\WalletRecalculated;
 use App\Models\Collaborator\Collaborator;
@@ -351,11 +352,86 @@ final class CollaboratorWalletService
         return Money::of((string) ($query->sum('a.amount') ?: Money::ZERO));
     }
 
+    /**
+     * What the business owes partners right now, company-wide (F-4.8, ND-6).
+     *
+     * `payable_total` from the §6.5.1 canonical query A with the collaborator predicate dropped, plus
+     * the pending bucket: everything earned and not yet paid out, whether or not it has been approved.
+     * That is the liability figure a dashboard means by "owed", and a business reading it wants the
+     * approval queue included — money it is going to owe the moment somebody presses approve is not a
+     * different kind of money.
+     *
+     * **One query, never a loop over wallets.** Summing the cached columns would make the number a sum
+     * of caches, each of which may have drifted; this is the ledger.
+     *
+     * @return array{owed: string, pending: string, payable: string, reserved: string}
+     */
+    public function liabilityTotals(?DateRange $range = null): array
+    {
+        $query = $this->db->table('collaborator_commission_ledger_entries')
+            ->selectRaw(sprintf(
+                'COALESCE(SUM(CASE WHEN status IN (%s) THEN signed_amount ELSE 0 END), 0) as pending',
+                $this->quotedList([CommissionStatus::Pending->value, CommissionStatus::Approved->value]),
+            ))
+            ->selectRaw(sprintf(
+                'COALESCE(SUM(CASE WHEN status IN (%s) THEN signed_amount ELSE 0 END), 0) as payable',
+                $this->quotedList([CommissionStatus::Available->value, CommissionStatus::Paid->value]),
+            ));
+
+        if ($range !== null) {
+            $range->applyDates($query, 'transaction_date');
+        }
+
+        $ledger = $query->first();
+
+        $reserved = Money::of((string) ($this->db->table('collaborator_payout_allocations as a')
+            ->join('collaborator_payouts as p', 'p.id', '=', 'a.payout_id')
+            ->where('a.is_released', 0)
+            ->whereIn('p.status', [
+                PayoutStatus::Requested->value, PayoutStatus::Pending->value, PayoutStatus::Approved->value,
+            ])
+            ->sum('a.amount') ?: Money::ZERO));
+
+        $paid = Money::of((string) ($this->db->table('collaborator_payout_allocations as a')
+            ->join('collaborator_payouts as p', 'p.id', '=', 'a.payout_id')
+            ->where('a.is_released', 0)
+            ->where('p.status', PayoutStatus::Paid->value)
+            ->sum('a.amount') ?: Money::ZERO));
+
+        $pending = Money::of((string) ($ledger->pending ?? Money::ZERO));
+        $payable = Money::of((string) ($ledger->payable ?? Money::ZERO));
+
+        // `available` is `payable - reserved - paid`, exactly as §6.5.1 defines it per partner.
+        $available = Money::sub(Money::sub($payable, $reserved), $paid);
+
+        return [
+            'owed' => Money::add(Money::add($pending, $available), $reserved),
+            'pending' => $pending,
+            'payable' => $available,
+            'reserved' => $reserved,
+        ];
+    }
+
     /*
     |--------------------------------------------------------------------------
     | Internals
     |--------------------------------------------------------------------------
     */
+
+    /**
+     * A comma-separated list of quoted enum values, for a CASE expression.
+     *
+     * @param  list<string>  $values
+     */
+    private function quotedList(array $values): string
+    {
+        return implode(', ', array_map(
+            // Enum-backed values only, and the caller passes cases rather than input. Quoted here so
+            // the expression can live inside a selectRaw with no bound-parameter ordering to thread.
+            static fn (string $value): string => "'".preg_replace('/[^a-z_]/', '', $value)."'",
+            $values,
+        ));
+    }
 
     /**
      * Spine §6.5.1 query A, verbatim. The only column summed is `signed_amount` (or, for the reversed

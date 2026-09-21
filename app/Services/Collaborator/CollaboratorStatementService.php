@@ -17,6 +17,7 @@ use App\Support\DateRange;
 use App\Support\Money;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\DatabaseManager;
+use Illuminate\Support\Collection;
 use LogicException;
 
 /**
@@ -125,6 +126,65 @@ class CollaboratorStatementService
         }
 
         return Money::of((string) ($query->sum('signed_amount') ?: Money::ZERO));
+    }
+
+    /**
+     * The accrued total split by purpose, over a range (§8.12's source chart).
+     *
+     * The same `SUM(signed_amount)` as {@see commissionAccruedTotal()}, grouped — so the slices add up
+     * to the published total by construction rather than by two queries that happen to agree.
+     *
+     * @return array<string, string> purpose value => signed total
+     */
+    public function commissionAccruedByPurpose(?Collaborator $collaborator, DateRange $range): array
+    {
+        $rows = $this->db->table('collaborator_commission_ledger_entries')
+            ->whereNot('status', CommissionStatus::Cancelled->value)
+            ->when($collaborator !== null, fn ($q) => $q->where('collaborator_id', $collaborator->getKey()))
+            ->whereBetween($this->db->raw('CAST(transaction_date AS CHAR)'), [
+                $range->start()->toDateString(),
+                $range->end()->toDateString(),
+            ])
+            ->groupBy('purpose')
+            ->selectRaw('purpose, COALESCE(SUM(signed_amount), 0) as total')
+            ->pluck('total', 'purpose');
+
+        $totals = [];
+
+        foreach (LedgerEntryPurpose::cases() as $purpose) {
+            $totals[$purpose->value] = Money::of((string) ($rows[$purpose->value] ?? Money::ZERO));
+        }
+
+        return $totals;
+    }
+
+    /**
+     * Who earned the most over a range (§8.12's leaderboard).
+     *
+     * One grouped query over the same column every other figure here sums, so a partner's place on the
+     * board is the same number their own statement balances to. Partners who netted nothing or less are
+     * dropped: a leaderboard is about who earned, and a row of zeros is noise.
+     *
+     * @return Collection<int, object{collaborator_id: int, total: string}>
+     */
+    public function topEarners(DateRange $range, int $limit = 5)
+    {
+        return $this->db->table('collaborator_commission_ledger_entries')
+            ->whereNot('status', CommissionStatus::Cancelled->value)
+            ->whereBetween($this->db->raw('CAST(transaction_date AS CHAR)'), [
+                $range->start()->toDateString(),
+                $range->end()->toDateString(),
+            ])
+            ->groupBy('collaborator_id')
+            ->havingRaw('COALESCE(SUM(signed_amount), 0) > 0')
+            ->orderByRaw('COALESCE(SUM(signed_amount), 0) DESC')
+            ->limit(max(1, min(25, $limit)))
+            ->selectRaw('collaborator_id, COALESCE(SUM(signed_amount), 0) as total')
+            ->get()
+            ->map(static fn (object $row): object => (object) [
+                'collaborator_id' => (int) $row->collaborator_id,
+                'total' => Money::of((string) $row->total),
+            ]);
     }
 
     /*

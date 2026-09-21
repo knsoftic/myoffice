@@ -546,6 +546,15 @@ final class Sidebar
                         'module' => 'collaborator_commissions',
                         'permission' => 'collaborator_commissions.view_reports',
                     ],
+                    // phase-10-12 §8.8. A discrepancy is a decision waiting for a person, and a
+                    // decision nobody can see from the sidebar is one that never gets made.
+                    [
+                        'label' => 'Discrepancies',
+                        'icon' => 'exclamation-triangle',
+                        'route' => 'admin.commission-discrepancies.index',
+                        'module' => 'collaborator_commissions',
+                        'permission' => 'collaborator_commissions.view_any',
+                    ],
                     [
                         'label' => 'Wallets',
                         'icon' => 'wallet',
