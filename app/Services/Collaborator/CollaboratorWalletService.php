@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Collaborator;
 
+use App\DataObjects\Collaborator\AllocationDelta;
 use App\DataObjects\Collaborator\LedgerDelta;
 use App\DataObjects\Collaborator\WalletSnapshot;
 use App\Enums\PayoutStatus;
@@ -106,6 +107,35 @@ final class CollaboratorWalletService
         if ($delta->isNew && $delta->entryId !== null) {
             $updates['last_entry_id'] = $delta->entryId;
             $updates['last_entry_at'] = $delta->entryAt ?? now();
+        }
+
+        $this->db->table($wallet->getTable())->where('id', $wallet->getKey())->update($updates);
+
+        $wallet->refresh();
+    }
+
+    /**
+     * Move the cache by what one payout movement just did (spine §6.5.1 part B).
+     *
+     * The allocation-side twin of {@see applyDelta()}. It exists separately because the identity
+     * splits there: `payable_total` comes from the ledger while `reserved` and `paid` come from live
+     * allocations, so an entry going `available -> paid` moves nothing on the ledger side and a real
+     * amount between the allocation buckets.
+     */
+    public function applyAllocationDelta(CollaboratorWallet $wallet, AllocationDelta $delta): void
+    {
+        $this->assertInTransaction('applyAllocationDelta');
+
+        $columns = $delta->columns();
+
+        if ($columns === []) {
+            return;
+        }
+
+        $updates = ['version' => $this->db->raw('version + 1'), 'updated_at' => now()];
+
+        foreach ($columns as $column => $change) {
+            $updates[$column] = $this->db->raw(sprintf('%s + %s', $column, $this->literal($change)));
         }
 
         $this->db->table($wallet->getTable())->where('id', $wallet->getKey())->update($updates);

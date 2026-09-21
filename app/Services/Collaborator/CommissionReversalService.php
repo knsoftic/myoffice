@@ -23,6 +23,7 @@ use App\Models\Collaborator\Collaborator;
 use App\Models\Collaborator\CollaboratorCommissionLedgerEntry;
 use App\Models\Finance\PaymentReversal;
 use App\Models\Institute\StudentFeePayment;
+use App\Models\User;
 use App\Services\Collaborator\Exceptions\CollaboratorRuleException;
 use App\Support\Collaborator\CommissionSettings;
 use App\Support\Format;
@@ -59,6 +60,7 @@ final class CommissionReversalService
         private readonly LedgerWriter $ledger,
         private readonly CommissionEntitlementService $entitlements,
         private readonly CollaboratorWalletService $wallets,
+        private readonly PayoutService $payouts,
     ) {}
 
     /**
@@ -275,8 +277,13 @@ final class CommissionReversalService
             return 0;
         }
 
+        // §6.6: release live allocations on in-flight payouts **first**, so a refund is never blocked
+        // by a pending withdrawal. Only then is the paid portion measured — releasing changes it.
+        $this->payouts->releaseForReversal($entry, $delta, $this->actor());
+
+        $entry->refresh();
+
         $paidPortion = $this->paidPortionOf($entry);
-        $this->assertNoInflightAllocations($entry);
 
         $reversible = Money::max(Money::ZERO, Money::sub(Money::sub((string) $entry->amount, $undone), $paidPortion));
         $reverseNow = Money::min($delta, $reversible);
@@ -506,39 +513,18 @@ final class CommissionReversalService
     }
 
     /**
-     * §6.6: "release live allocations on in-flight payouts first, so a refund is never blocked by a
-     * pending withdrawal". That release belongs to `PayoutService::releaseForReversal()`, which Phase
-     * 12 ships along with the only code that can create an allocation in the first place.
+     * Whoever is doing this, when there is one.
      *
-     * Until then no allocation can exist, so this is unreachable — and it throws rather than shrugging
-     * precisely because the day it becomes reachable is the day Phase 12 has wired the payout side
-     * without wiring this. A silent pass would under-reverse: the entry would look fully undone while
-     * a live allocation still counted it as spendable.
+     * A reversal usually runs in a queue worker with nobody signed in — the refund was approved by a
+     * person, and undoing the commission is the consequence. The allocation release records an actor
+     * when there is one and null when there is not, rather than inventing a system user that would
+     * read as somebody having pressed a button.
      */
-    private function assertNoInflightAllocations(CollaboratorCommissionLedgerEntry $entry): void
+    private function actor(): ?User
     {
-        $inflight = $this->db->table('collaborator_payout_allocations as a')
-            ->join('collaborator_payouts as p', 'p.id', '=', 'a.payout_id')
-            ->where('a.ledger_entry_id', $entry->getKey())
-            ->where('a.is_released', 0)
-            ->whereIn('p.status', [
-                PayoutStatus::Requested->value,
-                PayoutStatus::Pending->value,
-                PayoutStatus::Approved->value,
-            ])
-            ->exists();
+        $user = auth()->user();
 
-        if (! $inflight) {
-            return;
-        }
-
-        throw new LogicException(sprintf(
-            '%s is claimed by a payout that has not been paid, and releasing that allocation is '
-            .'`PayoutService::releaseForReversal()` — Phase 12. Wire it into '
-            .'CommissionReversalService::undo() before payouts can be created, or a refund will '
-            .'under-reverse while the allocation still counts the money as spendable.',
-            (string) $entry->reference,
-        ));
+        return $user instanceof User ? $user : null;
     }
 
     private function paymentColumn(Model $payment): string
