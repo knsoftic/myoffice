@@ -20,13 +20,16 @@ use App\Http\Requests\Project\SetProjectProgressRequest;
 use App\Http\Requests\Project\StoreProjectRequest;
 use App\Http\Requests\Project\UpdateProjectRequest;
 use App\Models\Crm\Client;
+use App\Models\Finance\ProjectPayment;
 use App\Models\Project\Project;
 use App\Models\User;
 use App\Services\Project\ProjectProgressService;
 use App\Services\Project\ProjectService;
 use App\Services\Project\ProjectValueService;
+use App\Support\Modules;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -144,11 +147,44 @@ final class ProjectController extends Controller
             'showMoney' => $showMoney,
             'derivedProgress' => $this->progress->derivedFor($project),
             'revisions' => $showMoney ? $this->values->history($project) : null,
+            // phase-11 §8.2: the payment trail. Gated on `projects.view_financial` **and** the
+            // payments module's own read permission, because a project manager who may see a project
+            // value has not thereby been given the right to read every receipt against it.
+            'payments' => $this->paymentTrail($project, $request),
             'taskCounts' => $this->taskCounts($project),
             'milestoneStatuses' => MilestoneStatus::options(),
             'memberRoles' => ProjectMemberRole::options(),
             'statuses' => $this->allowedStatusOptions($project),
         ]);
+    }
+
+    /**
+     * The money received against this project, newest first (phase-11 §8.2).
+     *
+     * Read-only and deliberately capped: the trail is context on a detail page, and somebody who needs
+     * the whole history has the register, which paginates and filters. Returns null — not an empty
+     * list — when the viewer may not see it, so the view can tell "nothing to show" from "not yours
+     * to see".
+     *
+     * @return Collection<int, ProjectPayment>|null
+     */
+    private function paymentTrail(Project $project, Request $request)
+    {
+        if ($request->user()?->can('project_payments.view_any') !== true) {
+            return null;
+        }
+
+        if (! Modules::enabled('project_payments')) {
+            return null;
+        }
+
+        return ProjectPayment::query()
+            ->where('project_id', $project->getKey())
+            ->with('milestone:id,title', 'collaborator:id,collaborator_code,name,company_name')
+            ->latest('paid_on')
+            ->latest('id')
+            ->limit(20)
+            ->get();
     }
 
     public function edit(Request $request, Project $project): View

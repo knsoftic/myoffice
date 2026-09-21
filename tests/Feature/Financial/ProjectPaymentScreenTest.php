@@ -179,6 +179,40 @@ final class ProjectPaymentScreenTest extends TestCase
         $this->assertWalletMatchesLedger($partner);
     }
 
+    /**
+     * §8.2's trail on the project detail page, and the distinction it has to keep.
+     *
+     * Somebody who may read a project is not thereby entitled to read every receipt against it, so the
+     * card is absent rather than empty for them — "nothing yet" and "not yours to see" are different
+     * facts and a page that rendered both as an empty list would be answering a question it was not
+     * asked.
+     */
+    #[Test]
+    public function the_project_detail_shows_a_payment_trail_only_to_whoever_may_read_receipts(): void
+    {
+        $partner = $this->projectPartner();
+        $project = $this->project($partner);
+        $payment = $this->pay($project, '50000.00');
+
+        $withoutReceipts = $this->createUserWithPermissions(['projects.view_any', 'projects.view']);
+
+        $this->actingAs($withoutReceipts)
+            ->get(route('admin.projects.show', $project))
+            ->assertOk()
+            ->assertDontSee('Payments received');
+
+        $withReceipts = $this->createUserWithPermissions([
+            'projects.view_any', 'projects.view',
+            'project_payments.view_any', 'project_payments.view',
+        ]);
+
+        $this->actingAs($withReceipts)
+            ->get(route('admin.projects.show', $project))
+            ->assertOk()
+            ->assertSee('Payments received')
+            ->assertSeeText((string) $payment->payment_no);
+    }
+
     /** F-6.1 — the slug is `project_payments`, never the `payments` umbrella. */
     #[Test]
     public function every_project_payment_route_carries_its_own_module_slug(): void

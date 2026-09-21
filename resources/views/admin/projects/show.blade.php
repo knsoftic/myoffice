@@ -92,6 +92,82 @@
                         <x-ui.button variant="secondary" size="sm" :href="route('admin.milestones.index', $project)">Manage milestones</x-ui.button>
                     </x-slot:footer>
                 </x-ui.card>
+
+                {{-- phase-11 §8.2: the payment trail. `$payments` is null — not empty — when the
+                     viewer may not read receipts, so "nothing yet" and "not yours to see" stay
+                     distinguishable rather than both rendering as an empty list. --}}
+                @if ($payments !== null)
+                    <x-ui.card title="Payments received">
+                        @if ($payments->isEmpty())
+                            <p class="text-sm text-slate-500 dark:text-slate-400">
+                                No client money recorded against this project yet.
+                            </p>
+                        @else
+                            <ul class="space-y-3">
+                                @foreach ($payments as $payment)
+                                    <li class="flex items-start justify-between gap-3 border-b border-slate-100 pb-2 last:border-0 dark:border-slate-800">
+                                        <div class="min-w-0">
+                                            @can('project_payments.view')
+                                                <a href="{{ route('admin.project-payments.show', $payment) }}"
+                                                   class="block font-mono text-xs font-semibold text-slate-900 hover:text-brand-700 dark:text-white dark:hover:text-brand-300">
+                                                    {{ $payment->payment_no }}
+                                                </a>
+                                            @else
+                                                <span class="block font-mono text-xs font-semibold text-slate-900 dark:text-white">{{ $payment->payment_no }}</span>
+                                            @endcan
+
+                                            <span class="block text-xs text-slate-500 dark:text-slate-400">
+                                                {{ app_date($payment->paid_on) }} · {{ $payment->payment_method->label() }}
+                                            </span>
+
+                                            @if ($payment->milestone)
+                                                <span class="block truncate text-xs text-slate-500 dark:text-slate-400">{{ $payment->milestone->title }}</span>
+                                            @endif
+
+                                            @if ($payment->collaborator)
+                                                <span class="block font-mono text-xs text-slate-400">{{ $payment->collaborator->collaborator_code }}</span>
+                                            @endif
+                                        </div>
+
+                                        <div class="shrink-0 text-right">
+                                            {{-- The **net** figure, not the gross: a trail that showed
+                                                 what arrived and hid what went back would be the wrong
+                                                 number to read at a glance. --}}
+                                            <span class="block text-sm font-semibold tabular-nums text-slate-900 dark:text-white">
+                                                {{ money($payment->net_received_amount) }}
+                                            </span>
+
+                                            @if (bccomp((string) $payment->refunded_amount, '0.00', 2) === 1)
+                                                <span class="block text-xs text-rose-600 dark:text-rose-400">
+                                                    {{ money($payment->refunded_amount) }} refunded
+                                                </span>
+                                            @endif
+
+                                            @if ($payment->status !== \App\Enums\ReceivedPaymentStatus::Cleared)
+                                                <x-ui.badge :color="$payment->status->color()" size="xs">{{ $payment->status->label() }}</x-ui.badge>
+                                            @elseif ($payment->is_advance)
+                                                <x-ui.badge color="sky" size="xs">advance</x-ui.badge>
+                                            @endif
+                                        </div>
+                                    </li>
+                                @endforeach
+                            </ul>
+
+                            @if ($payments->count() === 20)
+                                <p class="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                                    The twenty most recent. The register has the rest.
+                                </p>
+                            @endif
+                        @endif
+
+                        <x-slot:footer>
+                            <x-ui.button variant="secondary" size="sm"
+                                         :href="route('admin.project-payments.index', ['project' => $project->id])">
+                                Open the register
+                            </x-ui.button>
+                        </x-slot:footer>
+                    </x-ui.card>
+                @endif
             </div>
         </div>
     </div>
