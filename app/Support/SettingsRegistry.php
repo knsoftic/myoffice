@@ -3434,6 +3434,9 @@ final class SettingsRegistry
                 'rules' => ['required', 'integer', 'min:1'],
                 'default' => 1,
                 'help' => 'Locked in the same transaction as the expense, so two people recording at once cannot share a number.',
+                // D62: readonly, so the finance form never posts it. A stale save that rolled a counter
+                // back would hand the next voucher a number that already exists.
+                'readonly' => true,
                 'span' => 4,
                 'sort' => 220,
             ],
@@ -3450,6 +3453,9 @@ final class SettingsRegistry
                 'type' => self::TYPE_NUMBER,
                 'rules' => ['required', 'integer', 'min:1'],
                 'default' => 1,
+                // D62: readonly, so the finance form never posts it. A stale save that rolled a counter
+                // back would hand the next voucher a number that already exists.
+                'readonly' => true,
                 'span' => 4,
                 'sort' => 240,
             ],
