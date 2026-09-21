@@ -58,8 +58,8 @@
                                 <span class="text-slate-600 dark:text-slate-300">{{ $entry->day_of_week->label() }}</span>
                                 <span class="text-right">
                                     <span class="font-medium text-slate-700 dark:text-slate-200">
-                                        {{ \Illuminate\Support\Carbon::parse($entry->start_time)->format('H:i') }}
-                                        – {{ \Illuminate\Support\Carbon::parse($entry->end_time)->format('H:i') }}
+                                        {{ app_clock($entry->start_time) }}
+                                        – {{ app_clock($entry->end_time) }}
                                     </span>
                                     @if ($entry->classroom)
                                         <span class="block text-xs text-slate-400">{{ $entry->classroom->name }}</span>

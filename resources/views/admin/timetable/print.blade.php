@@ -32,8 +32,8 @@
                 <tr>
                     <td class="strong">{{ $entry->day_of_week->label() }}</td>
                     <td class="mono tiny">
-                        {{ \Illuminate\Support\Carbon::parse($entry->start_time)->format('H:i') }}
-                        – {{ \Illuminate\Support\Carbon::parse($entry->end_time)->format('H:i') }}
+                        {{ app_clock($entry->start_time) }}
+                        – {{ app_clock($entry->end_time) }}
                     </td>
                     <td>
                         {{ $entry->batch?->code ?? '—' }}

@@ -93,6 +93,16 @@ if (! function_exists('app_time')) {
     }
 }
 
+if (! function_exists('app_clock')) {
+    /**
+     * A wall-clock time from a `TIME` column — a class at 09:00 is 09:00, wherever it is read from.
+     */
+    function app_clock(mixed $value, ?string $format = null): string
+    {
+        return Format::clock($value, $format);
+    }
+}
+
 if (! function_exists('app_datetime')) {
     /**
      * Date and time together: app_datetime($activity->created_at) // '12 Sep 2026 03:45 PM'.

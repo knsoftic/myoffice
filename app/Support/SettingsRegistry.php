@@ -3328,6 +3328,16 @@ final class SettingsRegistry
                 'span' => 4,
                 'sort' => 61,
             ],
+            'admission_closed_message' => [
+                'label' => 'What the closed admission form says',
+                'type' => self::TYPE_TEXTAREA,
+                'rules' => ['nullable', 'string', 'max:500'],
+                'default' => '',
+                'help' => 'Shown on the public admission page while admissions are shut. Leave it empty for the '
+                    .'standard wording, which points the visitor at the contact page rather than a dead end.',
+                'span' => 12,
+                'sort' => 63,
+            ],
             'admission_form_require_batch' => [
                 'label' => 'The public form must name a batch',
                 'type' => self::TYPE_BOOLEAN,

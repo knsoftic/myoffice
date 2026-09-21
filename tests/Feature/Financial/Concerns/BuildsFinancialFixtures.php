@@ -19,6 +19,7 @@ use App\Enums\StudentFeeType;
 use App\Models\Collaborator\Collaborator;
 use App\Models\Collaborator\CollaboratorCommissionLedgerEntry;
 use App\Models\Collaborator\CollaboratorWallet;
+use App\Models\Institute\Student;
 use App\Models\Institute\StudentFee;
 use App\Models\Institute\StudentFeeInstallment;
 use App\Models\Institute\StudentFeePayment;
@@ -26,6 +27,7 @@ use App\Services\Collaborator\CommissionReconciliationService;
 use App\Services\Collaborator\CommissionRuleService;
 use App\Services\Collaborator\ReferralService;
 use App\Services\Finance\PaymentService;
+use App\Services\Institute\StudentService;
 use App\Support\Money;
 use Illuminate\Support\Carbon;
 
@@ -97,7 +99,7 @@ trait BuildsFinancialFixtures
         array $attributes = [],
     ): StudentFee {
         $this->fixtureSequence++;
-        $studentId = $attributes['student_id'] ?? (900000 + $this->fixtureSequence);
+        $studentId = $attributes['student_id'] ?? $this->fixtureStudent()->getKey();
 
         if ($collaborator !== null) {
             app(ReferralService::class)->attachSubject(
@@ -127,6 +129,23 @@ trait BuildsFinancialFixtures
         $fee->save();
 
         return $fee->refresh();
+    }
+
+    /**
+     * A real student row for a charge to belong to.
+     *
+     * These fixtures used to invent an id — `900000 + n` — because `students` did not exist when the
+     * spine was built and nothing could contradict them. Phases 15 and 16 created the table and
+     * attached the keys `student_fees`, `collaborator_referrals` and the commission ledger had always
+     * declared, so an invented id is now refused by the database rather than silently believed. It
+     * goes through `StudentService` like every other student, so the row has a real code.
+     */
+    protected function fixtureStudent(): Student
+    {
+        return app(StudentService::class)->create([
+            'name' => 'Fixture Student '.$this->fixtureSequence,
+            'phone' => '0399'.str_pad((string) $this->fixtureSequence, 7, '0', STR_PAD_LEFT),
+        ]);
     }
 
     /**

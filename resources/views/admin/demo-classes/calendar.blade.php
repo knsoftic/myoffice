@@ -23,7 +23,7 @@
                 @php($key = $day->toDateString())
                 <div class="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
                     <div class="mb-2 border-b border-slate-100 pb-2 dark:border-slate-800">
-                        <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">{{ $day->format('D') }}</div>
+                        <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">{{ app_date($day, 'D') }}</div>
                         <div class="text-sm font-medium text-slate-700 dark:text-slate-200">{{ app_date($day) }}</div>
                     </div>
 

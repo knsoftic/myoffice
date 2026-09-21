@@ -11,8 +11,8 @@
     <div class="flex items-start justify-between gap-2">
         <div class="min-w-0">
             <div class="font-medium text-slate-700 dark:text-slate-200">
-                {{ \Illuminate\Support\Carbon::parse($entry->start_time)->format('H:i') }}
-                – {{ \Illuminate\Support\Carbon::parse($entry->end_time)->format('H:i') }}
+                {{ app_clock($entry->start_time) }}
+                – {{ app_clock($entry->end_time) }}
             </div>
             @if ($showDay)
                 <div class="text-xs text-slate-400">{{ $entry->day_of_week->label() }}</div>

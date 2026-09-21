@@ -76,8 +76,8 @@
                         <tr>
                             <td class="px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-200">{{ $entry->day_of_week->label() }}</td>
                             <td class="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
-                                {{ \Illuminate\Support\Carbon::parse($entry->start_time)->format('H:i') }}
-                                – {{ \Illuminate\Support\Carbon::parse($entry->end_time)->format('H:i') }}
+                                {{ app_clock($entry->start_time) }}
+                                – {{ app_clock($entry->end_time) }}
                             </td>
                             <td class="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">{{ $entry->teacher?->name ?? 'The batch teacher' }}</td>
                             <td class="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">{{ $entry->classroom?->code ?? '—' }}</td>

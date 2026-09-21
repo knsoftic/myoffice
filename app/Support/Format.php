@@ -105,6 +105,44 @@ final class Format
     }
 
     /**
+     * A wall-clock time of day, from a `TIME` column — never converted.
+     *
+     * `time()` is for the time-of-day of an INSTANT, so it shifts into the display timezone. A `TIME`
+     * column is not an instant: "this class meets at 09:00" is 09:00 at the institute, and putting it
+     * through a timezone would move a morning class to the afternoon for anybody viewing from
+     * elsewhere. So this parses the value as a clock face and formats it as one.
+     *
+     * Pass a format for a machine context — `app_clock($t, 'H:i')` is what an `<input type="time">`
+     * requires, whatever the localization setting says a time should look like to a person.
+     */
+    public static function clock(mixed $value, ?string $format = null): string
+    {
+        if ($value === null || $value === '') {
+            return self::EMPTY;
+        }
+
+        if ($value instanceof DateTimeInterface) {
+            return $value->format($format ?? self::timeFormat());
+        }
+
+        $raw = trim((string) $value);
+
+        if (preg_match('/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/', $raw, $parts) !== 1) {
+            return self::EMPTY;
+        }
+
+        [$hours, $minutes, $seconds] = [(int) $parts[1], (int) $parts[2], (int) ($parts[3] ?? 0)];
+
+        if ($hours > 23 || $minutes > 59 || $seconds > 59) {
+            return self::EMPTY;
+        }
+
+        // A fixed date, so only the clock face survives: no timezone, no daylight saving, no drift.
+        return CarbonImmutable::create(2000, 1, 1, $hours, $minutes, $seconds, 'UTC')
+            ->format($format ?? self::timeFormat());
+    }
+
+    /**
      * Date and time together: '12 Sep 2026 03:45 PM'.
      */
     public static function dateTime(mixed $value, ?string $format = null): string

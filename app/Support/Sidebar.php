@@ -1356,6 +1356,15 @@ final class Sidebar
                         'permission' => 'teacher_portal.timetable',
                     ],
                     [
+                        // phase-16 §7.9: whether somebody turned up to a trial class is a fact only
+                        // the person who took it has, so the teacher needs to be able to reach it.
+                        'label' => 'Demo Classes',
+                        'icon' => 'video-camera',
+                        'route' => 'teacher.demo-classes.index',
+                        'module' => 'teacher_portal',
+                        'permission' => 'teacher_portal.demo_classes',
+                    ],
+                    [
                         'label' => 'Attendance',
                         'icon' => 'clipboard-document-check',
                         'route' => 'teacher.attendance.index',

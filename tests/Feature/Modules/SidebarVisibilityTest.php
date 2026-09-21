@@ -234,6 +234,16 @@ final class SidebarVisibilityTest extends TestCase
                 'Course Inquiries',
                 'Applications',
                 'Demo Classes',
+                // phase-14-17 §7.5-§7.6: scheduling. `Teachers` and `Classrooms` are their own
+                // entries — a room is its own module (§4.1), so a branch administrator can be given
+                // the rooms without the batches that fill them. `Batches` is a parent carrying the
+                // timetable and the dated classes it produces.
+                'Teachers',
+                'Classrooms',
+                'Batches',
+                'All Batches',
+                'Timetable',
+                'Classes',
                 // phase-10-12 §8.2. The money register sits in the **Institute** group, beside the
                 // charges it pays off — `student_fee_payments` is an Institute module, and it being
                 // what triggers commission is not a reason to file it under Collaborator. Its parent
@@ -337,14 +347,17 @@ final class SidebarVisibilityTest extends TestCase
 
             $this->assertContains('Dashboard', $labels, $role.' must always reach its own dashboard.');
 
-            // The client panel grew a real nav in Phase 5 and the collaborator panel in Phases 8-12;
-            // student and teacher still have only a dashboard until Phases 15-17 ship their routes.
+            // The client panel grew a real nav in Phase 5, the collaborator panel in Phases 8-12, and
+            // the student and teacher panels in Phase 16 — which shipped the batch, timetable and
+            // class routes those two read. Attendance and progress arrive with Phase 17.
             // Each entry must be one this account can actually open.
             $expectedLabels = match ($panel) {
                 PanelType::Client => ['Dashboard', 'My Projects', 'Milestones', 'Tasks', 'Documents', 'Files',
                     'Invoices', 'Payments', 'Meetings', 'Messages', 'Support', 'Notifications', 'My Profile'],
                 PanelType::Collaborator => ['Dashboard', 'My Projects', 'Wallet', 'Commissions', 'Payouts',
                     'Statements'],
+                PanelType::Student => ['Dashboard', 'Timetable'],
+                PanelType::Teacher => ['Dashboard', 'My Batches', 'My Students', 'Timetable', 'Demo Classes'],
                 default => ['Dashboard'],
             };
 

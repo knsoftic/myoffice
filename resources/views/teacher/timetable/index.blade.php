@@ -25,8 +25,8 @@
                     @php($key = $day->toDateString())
                     <div class="border-r border-slate-200/70 last:border-r-0 dark:border-slate-800">
                         <div class="border-b border-slate-200/70 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/60">
-                            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{{ $day->format('D') }}</div>
-                            <div class="text-xs text-slate-400">{{ $day->format('d M') }}</div>
+                            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{{ app_date($day, 'D') }}</div>
+                            <div class="text-xs text-slate-400">{{ app_date($day, 'd M') }}</div>
                         </div>
                         <div class="space-y-2 p-2">
                             @forelse ($sessions[$key] ?? [] as $session)
@@ -68,8 +68,8 @@
                             @foreach ($entries[$day->value] as $entry)
                                 <div class="rounded-lg border border-slate-200/70 p-2.5 text-sm dark:border-slate-800">
                                     <div class="font-medium text-slate-700 dark:text-slate-200">
-                                        {{ \Illuminate\Support\Carbon::parse($entry->start_time)->format('H:i') }}
-                                        – {{ \Illuminate\Support\Carbon::parse($entry->end_time)->format('H:i') }}
+                                        {{ app_clock($entry->start_time) }}
+                                        – {{ app_clock($entry->end_time) }}
                                     </div>
                                     <div class="text-xs text-slate-500 dark:text-slate-400">{{ $entry->batch?->code }}</div>
                                     @if ($entry->classroom)

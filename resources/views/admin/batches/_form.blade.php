@@ -43,9 +43,9 @@
                          :value="old('end_date', $batch->end_date?->toDateString())"
                          help="Leave empty for open-ended." />
         <x-ui.form.input name="start_time" label="From" type="time"
-                         :value="old('start_time', $batch->start_time ? \Illuminate\Support\Carbon::parse($batch->start_time)->format('H:i') : null)" />
+                         :value="old('start_time', $batch->start_time ? app_clock($batch->start_time, 'H:i') : null)" />
         <x-ui.form.input name="end_time" label="To" type="time"
-                         :value="old('end_time', $batch->end_time ? \Illuminate\Support\Carbon::parse($batch->end_time)->format('H:i') : null)" />
+                         :value="old('end_time', $batch->end_time ? app_clock($batch->end_time, 'H:i') : null)" />
     </div>
 
     <div class="mt-4">

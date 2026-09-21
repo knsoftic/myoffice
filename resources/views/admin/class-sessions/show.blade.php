@@ -119,7 +119,7 @@
                         <dd class="text-slate-700 dark:text-slate-200">
                             @if ($session->entry)
                                 {{ $session->entry->day_of_week->label() }}
-                                {{ \Illuminate\Support\Carbon::parse($session->entry->start_time)->format('H:i') }}
+                                {{ app_clock($session->entry->start_time) }}
                             @else
                                 <span class="text-slate-400">A one-off — no weekly rule behind it</span>
                             @endif
@@ -173,9 +173,9 @@
                         <x-ui.form.input name="session_date" label="New date" type="date" required
                                          :value="$session->session_date->toDateString()" />
                         <x-ui.form.input name="start_time" label="From" type="time" required
-                                         :value="\Illuminate\Support\Carbon::parse($session->start_time)->format('H:i')" />
+                                         :value="app_clock($session->start_time, 'H:i')" />
                         <x-ui.form.input name="end_time" label="To" type="time" required
-                                         :value="\Illuminate\Support\Carbon::parse($session->end_time)->format('H:i')" />
+                                         :value="app_clock($session->end_time, 'H:i')" />
                     </div>
 
                     <x-ui.form.select name="classroom_id" label="Room" placeholder="Keep the same room">

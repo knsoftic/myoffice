@@ -82,8 +82,8 @@
                         <li class="flex items-center justify-between gap-2">
                             <span class="text-slate-600 dark:text-slate-300">{{ $entry->day_of_week->label() }}</span>
                             <span class="font-medium text-slate-700 dark:text-slate-200">
-                                {{ \Illuminate\Support\Carbon::parse($entry->start_time)->format('H:i') }}
-                                – {{ \Illuminate\Support\Carbon::parse($entry->end_time)->format('H:i') }}
+                                {{ app_clock($entry->start_time) }}
+                                – {{ app_clock($entry->end_time) }}
                             </span>
                         </li>
                     @endforeach
