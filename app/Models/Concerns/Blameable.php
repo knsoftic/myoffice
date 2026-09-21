@@ -19,9 +19,15 @@ use Throwable;
  * resolves to null and the columns are simply left alone. An explicitly assigned value is
  * never overwritten, so seeders and imports can attribute rows to whoever they like.
  *
- * Only apply this trait to tables that actually carry both columns (every business table
+ * Only apply this trait to tables that actually carry the columns (every business table
  * does — see CLAUDE.md §3). There is deliberately no schema lookup here: one extra query
  * per model boot is not worth paying for on every request.
+ *
+ * **An append-only table carries `created_by` and no `updated_by`**, because it has no updates to
+ * attribute (D16, D19). Such a model overrides {@see updatedByColumn()} to return null, and this trait
+ * then stamps only the creator. Without that, the first write made by a signed-in user — rather than a
+ * queue worker, which is how these rows are usually written — fails on an unknown column, and it fails
+ * inside a money transaction.
  */
 trait Blameable
 {
@@ -38,6 +44,10 @@ trait Blameable
             }
 
             foreach ([static::createdByColumn(), static::updatedByColumn()] as $column) {
+                if ($column === null) {
+                    continue;
+                }
+
                 if ($model->getAttribute($column) === null) {
                     $model->setAttribute($column, $actor);
                 }
@@ -51,6 +61,11 @@ trait Blameable
             }
 
             $column = static::updatedByColumn();
+
+            // An append-only table has no updates to attribute, and no column to attribute them to.
+            if ($column === null) {
+                return;
+            }
 
             // Respect a value the caller set on purpose.
             if ($model->isDirty($column)) {
@@ -80,11 +95,15 @@ trait Blameable
     /**
      * The user who last changed the row.
      *
+     * On an append-only table this is the **creator**, and that is not a fallback — it is the answer.
+     * The row was written once and never changed, so the person who wrote it is the last person who
+     * touched it.
+     *
      * @return BelongsTo<User, $this>
      */
     public function editor(): BelongsTo
     {
-        return $this->belongsTo(User::class, static::updatedByColumn());
+        return $this->belongsTo(User::class, static::updatedByColumn() ?? static::createdByColumn());
     }
 
     /**
@@ -96,9 +115,10 @@ trait Blameable
     }
 
     /**
-     * Column holding the last editor id. Override to rename it for one model.
+     * Column holding the last editor id. Override to rename it — or to return **null** on an
+     * append-only table, which has no updates to attribute and no column to hold them (D16, D19).
      */
-    protected static function updatedByColumn(): string
+    protected static function updatedByColumn(): ?string
     {
         return 'updated_by';
     }

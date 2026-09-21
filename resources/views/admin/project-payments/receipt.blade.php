@@ -15,7 +15,7 @@
     <div class="mx-auto max-w-2xl rounded-xl border border-slate-200 bg-white p-8 print:border-0 print:p-0 dark:border-slate-700 dark:bg-slate-900">
         <div class="flex items-start justify-between border-b border-slate-200 pb-4 dark:border-slate-700">
             <div>
-                <h2 class="text-lg font-semibold text-slate-900 dark:text-white">{{ setting('company.company_name', config('app.name')) }}</h2>
+                <h2 class="text-lg font-semibold text-slate-900 dark:text-white">{{ setting('company.name', config('app.name')) }}</h2>
                 <p class="text-sm text-slate-500 dark:text-slate-400">Payment receipt</p>
             </div>
             <div class="text-right">

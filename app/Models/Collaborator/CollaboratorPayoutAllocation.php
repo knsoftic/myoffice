@@ -77,6 +77,19 @@ class CollaboratorPayoutAllocation extends Model
         return ['active_guard'];
     }
 
+    /**
+     * Append-only: there is no `updated_by` column, because there is no update to attribute.
+     *
+     * The one field that ever changes on an allocation is its release, and that is recorded by
+     * `released_by` / `released_at` / `release_reason` — three columns that say *what* changed and not
+     * merely that somebody touched the row. A generic `updated_by` beside them would be the weaker of
+     * two records of the same fact.
+     */
+    protected static function updatedByColumn(): ?string
+    {
+        return null;
+    }
+
     public function moduleSlug(): string
     {
         return 'collaborator_payouts';

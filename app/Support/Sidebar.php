@@ -549,14 +549,14 @@ final class Sidebar
                     [
                         'label' => 'Wallets',
                         'icon' => 'wallet',
-                        'route' => 'admin.collaborator-wallets.index',
+                        'route' => 'admin.wallets.index',
                         'module' => 'collaborator_wallets',
                         'permission' => 'collaborator_wallets.view_any',
                     ],
                     [
                         'label' => 'Payouts',
                         'icon' => 'banknotes',
-                        'route' => 'admin.collaborator-payouts.index',
+                        'route' => 'admin.payouts.index',
                         'module' => 'collaborator_payouts',
                         'permission' => 'collaborator_payouts.view_any',
                     ],

@@ -43,7 +43,12 @@ use App\Http\Controllers\Admin\Cms\WebsiteOverviewController;
 use App\Http\Controllers\Admin\Collaborator\CollaboratorController;
 use App\Http\Controllers\Admin\Collaborator\CommissionController;
 use App\Http\Controllers\Admin\Collaborator\CommissionRuleController;
+use App\Http\Controllers\Admin\Collaborator\PayoutAccountController;
+use App\Http\Controllers\Admin\Collaborator\PayoutController;
 use App\Http\Controllers\Admin\Collaborator\ReferralVisitController;
+use App\Http\Controllers\Admin\Collaborator\StatementController;
+use App\Http\Controllers\Admin\Collaborator\WalletController;
+use App\Http\Controllers\Admin\Collaborator\WalletReconciliationController;
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\Finance\FeePaymentController;
 use App\Http\Controllers\Admin\Finance\ProjectPaymentController;
@@ -1409,5 +1414,105 @@ Route::prefix('admin')
             Route::get('collaborators/{collaborator}/commission-rules/preview', [CommissionRuleController::class, 'preview'])->whereNumber('collaborator')->middleware(['can:collaborator_commission_settings.create', 'throttle:60,1'])->name('commission-rules.preview');
             Route::post('collaborators/{collaborator}/commission-rules', [CommissionRuleController::class, 'store'])->whereNumber('collaborator')->middleware('can:collaborator_commission_settings.create')->name('commission-rules.store');
             Route::post('commission-rules/{rule}/close', [CommissionRuleController::class, 'close'])->whereNumber('rule')->middleware('can:collaborator_commission_settings.create')->name('commission-rules.close');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Partner wallets — phase-10-12 §7.4, §8.5
+        |----------------------------------------------------------------------
+        |
+        | A wallet is a cache of the ledger, so there is no create, no edit and
+        | no destroy: the only two writes are "recompute it from the ledger" and
+        | "stop paying this partner for now", and each carries the permission
+        | that matches what it actually does. Recalculate is
+        | `wallet_reconciliation.change_status` because it *is* a repair; freeze
+        | is `collaborator_payouts.change_status` because it stops payouts and
+        | touches no figure at all.
+        |
+        */
+        Route::middleware('module:collaborator_wallets')->group(static function (): void {
+            Route::get('collaborator-wallets', [WalletController::class, 'index'])->middleware('can:collaborator_wallets.view_any')->name('wallets.index');
+            // `withTrashed`: a partner can be soft-deleted while money still references them (spine §6.6 row 2).
+            // The debt does not disappear when the relationship does, so the wallet stays reachable.
+            Route::get('collaborator-wallets/{collaborator}', [WalletController::class, 'show'])->whereNumber('collaborator')->withTrashed()->middleware('can:collaborator_wallets.view')->name('wallets.show');
+            Route::post('collaborator-wallets/{collaborator}/recalculate', [WalletController::class, 'recalculate'])->whereNumber('collaborator')->withTrashed()->middleware('can:wallet_reconciliation.change_status')->name('wallets.recalculate');
+            Route::post('collaborator-wallets/{collaborator}/freeze', [WalletController::class, 'freeze'])->whereNumber('collaborator')->withTrashed()->middleware('can:collaborator_payouts.change_status')->name('wallets.freeze');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Reconciliation history — phase-10-12 §7.4, §8.9
+        |----------------------------------------------------------------------
+        |
+        | `run` is throttled hard: eight checks per partner over the whole table
+        | is the most expensive read in this module, and the button is one
+        | somebody presses again when the page feels slow.
+        |
+        */
+        Route::middleware('module:wallet_reconciliation')->group(static function (): void {
+            Route::get('wallet-reconciliations', [WalletReconciliationController::class, 'index'])->middleware('can:wallet_reconciliation.view_any')->name('wallet-reconciliations.index');
+            Route::post('wallet-reconciliations/run', [WalletReconciliationController::class, 'run'])->middleware(['can:wallet_reconciliation.change_status', 'throttle:3,1'])->name('wallet-reconciliations.run');
+            Route::get('wallet-reconciliations/{reconciliation}', [WalletReconciliationController::class, 'show'])->whereNumber('reconciliation')->middleware('can:wallet_reconciliation.view')->name('wallet-reconciliations.show');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Payouts - phase-10-12 sec 7.4, 8.6
+        |----------------------------------------------------------------------
+        |
+        | There is no `destroy`: sec 120.9 needs payout history to survive, and
+        | withdrawing one is a **status** that releases its allocations. The
+        | literal paths (`create`, `plan`, `export`) are declared before
+        | `{payout}` so the numeric constraint is never the thing deciding.
+        |
+        | `cancel-after-payment` carries two permissions because it is the only
+        | backward money transition in the design (spine R-7): settled money
+        | re-entering a spendable balance.
+        |
+        */
+        Route::middleware('module:collaborator_payouts')->group(static function (): void {
+            Route::get('payouts', [PayoutController::class, 'index'])->middleware('can:collaborator_payouts.view_any')->name('payouts.index');
+            Route::get('payouts/create', [PayoutController::class, 'create'])->middleware('can:collaborator_payouts.create')->name('payouts.create');
+            // Read-only: it claims nothing and writes nothing, so it is deliberately a GET.
+            Route::get('payouts/plan', [PayoutController::class, 'plan'])->middleware(['can:collaborator_payouts.create', 'throttle:60,1'])->name('payouts.plan');
+            Route::get('payouts/export/{format}', [PayoutController::class, 'export'])->middleware('can:collaborator_payouts.export')->name('payouts.export');
+            Route::post('payouts', [PayoutController::class, 'store'])->middleware('can:collaborator_payouts.create')->name('payouts.store');
+            Route::get('payouts/{payout}', [PayoutController::class, 'show'])->whereNumber('payout')->middleware('can:collaborator_payouts.view')->name('payouts.show');
+            Route::get('payouts/{payout}/voucher', [PayoutController::class, 'voucher'])->whereNumber('payout')->middleware('can:collaborator_payouts.print')->name('payouts.voucher');
+            Route::post('payouts/{payout}/approve', [PayoutController::class, 'approve'])->whereNumber('payout')->middleware('can:collaborator_payouts.approve')->name('payouts.approve');
+            Route::post('payouts/{payout}/reject', [PayoutController::class, 'reject'])->whereNumber('payout')->middleware('can:collaborator_payouts.reject')->name('payouts.reject');
+            Route::post('payouts/{payout}/mark-paid', [PayoutController::class, 'markPaid'])->whereNumber('payout')->middleware('can:collaborator_payouts.change_status')->name('payouts.mark-paid');
+            Route::post('payouts/{payout}/cancel', [PayoutController::class, 'cancel'])->whereNumber('payout')->middleware('can:collaborator_payouts.change_status')->name('payouts.cancel');
+            Route::post('payouts/{payout}/cancel-after-payment', [PayoutController::class, 'cancelAfterPayment'])->whereNumber('payout')->middleware(['can:collaborator_payouts.change_status', 'can:collaborator_payouts.approve'])->name('payouts.cancel-after-payment');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Payout destinations - phase-10-12 sec 7.4, spine sec 2.15
+        |----------------------------------------------------------------------
+        |
+        | Masked display only. No ability anywhere decrypts `details_encrypted`
+        | (INV-C6), which is why the module declares no `view_financial`: there
+        | is nothing here to unmask.
+        |
+        */
+        Route::middleware('module:collaborator_payout_accounts')->group(static function (): void {
+            Route::get('collaborators/{collaborator}/payout-accounts', [PayoutAccountController::class, 'index'])->whereNumber('collaborator')->middleware('can:collaborator_payouts.view')->name('payout-accounts.index');
+            Route::post('payout-accounts/{account}/verify', [PayoutAccountController::class, 'verify'])->whereNumber('account')->middleware('can:collaborator_payouts.approve')->name('payout-accounts.verify');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Statements - phase-10-12 sec 7.4, 8.7
+        |----------------------------------------------------------------------
+        |
+        | One builder, four presenters ([D-IMP-7]). `view_financial` gates the
+        | screen and `export` gates the three files, because taking a partner's
+        | balances out of the system is a different act from looking at them.
+        |
+        */
+        Route::middleware('module:collaborator_commissions')->group(static function (): void {
+            Route::get('collaborators/{collaborator}/statement', [StatementController::class, 'show'])->whereNumber('collaborator')->withTrashed()->middleware('can:collaborator_commissions.view_financial')->name('statements.show');
+            Route::get('collaborators/{collaborator}/statement/export/{format}', [StatementController::class, 'export'])->whereNumber('collaborator')->withTrashed()->middleware('can:collaborator_commissions.export')->name('statements.export');
         });
     });

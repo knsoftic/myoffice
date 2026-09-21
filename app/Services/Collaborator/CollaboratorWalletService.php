@@ -76,6 +76,20 @@ final class CollaboratorWalletService
     }
 
     /**
+     * The cached row as it stands, without locking anything. Null when the partner never earned.
+     *
+     * The read-only twin of {@see lockFor()}, for screens and reports. It deliberately does **not**
+     * create the row: a wallet appears the first time money does, and a GET request that wrote a row
+     * would mean every list screen quietly populating a table nobody asked it to.
+     */
+    public function for(Collaborator $collaborator): ?CollaboratorWallet
+    {
+        return CollaboratorWallet::query()
+            ->where('collaborator_id', $collaborator->getKey())
+            ->first();
+    }
+
+    /**
      * Move the cache by what one ledger row just did.
      *
      * Called only from {@see LedgerWriter} and (from Phase 12) `PayoutService`, always inside their
