@@ -40,6 +40,10 @@ class DatabaseSeeder extends Seeder
             SuperAdminSeeder::class,
             DemoUserSeeder::class,
             WebsiteCmsSeeder::class,
+            // phase-13 §2.3. After the settings seeder, because the reserved `salaries` category is
+            // what `RecordPayrollExpense` posts into and a fresh install should have it before
+            // anything can try.
+            FinanceCategorySeeder::class,
         ]);
     }
 }

@@ -50,7 +50,7 @@ final class ProjectController extends Controller
 
         $projects = Project::query()
             ->whereIn('id', $projectIds)
-            ->when($showClient, fn ($q) => $q->with('client:id,company_name,contact_person'))
+            ->when($showClient, fn ($q) => $q->with('client:id,name,company_name'))
             ->when($request->filled('q'), function ($q) use ($request): void {
                 $term = '%'.trim((string) $request->input('q')).'%';
 

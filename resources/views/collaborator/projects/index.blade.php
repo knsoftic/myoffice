@@ -46,7 +46,7 @@
 
                     @if ($showClient)
                         <td class="px-4 py-3 text-slate-600 dark:text-slate-300">
-                            {{ $project->client?->company_name ?? $project->client?->contact_person ?? '—' }}
+                            {{ $project->client?->company_name ?? $project->client?->name ?? "—" }}
                         </td>
                     @endif
 
