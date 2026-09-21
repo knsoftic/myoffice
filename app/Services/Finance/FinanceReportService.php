@@ -377,6 +377,262 @@ class FinanceReportService
 
     /*
     |--------------------------------------------------------------------------
+    | The narrow readers the dashboard cards use (§8.15)
+    |--------------------------------------------------------------------------
+    |
+    | The four reports answer the questions a report asks. A card asks smaller ones — "how many are
+    | overdue", "what is waiting for approval" — and each is still a SUM over money. They live here
+    | because **no widget contains its own SUM**: a card that ran its own query would eventually
+    | disagree with the report beside it, and nobody would know which was right.
+    |
+    */
+
+    /**
+     * Outstanding receivables as at today, net of what the client has already paid.
+     *
+     * @return array{available: bool, invoices: int, outstanding: string, credits: string, net: string}
+     */
+    public function outstandingReceivables(?User $viewer = null): array
+    {
+        if (! $this->may($viewer, 'invoices')) {
+            return ['available' => false, 'invoices' => 0, 'outstanding' => Money::ZERO,
+                'credits' => Money::ZERO, 'net' => Money::ZERO];
+        }
+
+        $row = $this->db->table('invoices')
+            ->whereIn('status', [InvoiceStatus::Sent->value, InvoiceStatus::Partial->value, InvoiceStatus::Overdue->value])
+            ->where('balance_amount', '>', 0)
+            ->whereNull('deleted_at')
+            ->selectRaw('COUNT(*) as invoices, COALESCE(SUM(balance_amount), 0) as outstanding')
+            ->first();
+
+        // Money already in hand that nobody has attached to an invoice. Showing the debt without it
+        // would overstate what the business is actually owed.
+        $credits = $this->may($viewer, 'project_payments')
+            ? Money::of((string) ($this->db->table('project_payments')
+                ->whereNull('invoice_id')
+                ->whereNot('status', ReceivedPaymentStatus::Voided->value)
+                ->sum('net_received_amount') ?: Money::ZERO))
+            : Money::ZERO;
+
+        $outstanding = Money::of((string) ($row->outstanding ?? Money::ZERO));
+
+        return [
+            'available' => true,
+            'invoices' => (int) ($row->invoices ?? 0),
+            'outstanding' => $outstanding,
+            'credits' => $credits,
+            'net' => Money::sub($outstanding, $credits),
+        ];
+    }
+
+    /**
+     * What is past its due date and still unpaid, with the oldest one named.
+     *
+     * @return array{available: bool, count: int, amount: string, oldest_due: ?string, worst: ?object}
+     */
+    public function overdueInvoices(?User $viewer = null): array
+    {
+        if (! $this->may($viewer, 'invoices')) {
+            return ['available' => false, 'count' => 0, 'amount' => Money::ZERO, 'oldest_due' => null, 'worst' => null];
+        }
+
+        $today = Carbon::now(Format::timezone())->startOfDay()->toDateString();
+
+        $base = fn () => $this->db->table('invoices as i')
+            ->leftJoin('clients as c', 'c.id', '=', 'i.client_id')
+            ->whereIn('i.status', [InvoiceStatus::Sent->value, InvoiceStatus::Partial->value, InvoiceStatus::Overdue->value])
+            ->where('i.balance_amount', '>', 0)
+            ->where('i.due_date', '<', $today)
+            ->whereNull('i.deleted_at');
+
+        $totals = $base()->selectRaw('COUNT(*) as entries, COALESCE(SUM(i.balance_amount), 0) as amount,
+            MIN(i.due_date) as oldest_due')->first();
+
+        $worst = $base()
+            ->select('i.id', 'i.invoice_number', 'i.due_date', 'i.balance_amount',
+                'c.name as client_name', 'c.company_name')
+            ->orderBy('i.due_date')
+            ->first();
+
+        return [
+            'available' => true,
+            'count' => (int) ($totals->entries ?? 0),
+            'amount' => Money::of((string) ($totals->amount ?? Money::ZERO)),
+            'oldest_due' => $totals->oldest_due ?? null,
+            'worst' => $worst,
+        ];
+    }
+
+    /**
+     * Every invoice status in the range, counted and totalled.
+     *
+     * @return array{available: bool, rows: list<array{status: InvoiceStatus, count: int, amount: string}>, total: int}
+     */
+    public function invoiceStatusBreakdown(DateRange $range, ?User $viewer = null): array
+    {
+        if (! $this->may($viewer, 'invoices')) {
+            return ['available' => false, 'rows' => [], 'total' => 0];
+        }
+
+        $counts = $this->db->table('invoices')
+            ->whereNull('deleted_at')
+            ->tap(fn ($q) => $range->applyDates($q, 'issue_date'))
+            ->groupBy('status')
+            ->selectRaw('status, COUNT(*) as entries, COALESCE(SUM(total_amount), 0) as amount')
+            ->get()
+            ->keyBy('status');
+
+        $rows = [];
+
+        // Every case, in the enum's own order, so the card does not reshuffle itself as statuses come
+        // and go — and a zero row still says "none of these".
+        foreach (InvoiceStatus::cases() as $status) {
+            $row = $counts->get($status->value);
+
+            $rows[] = [
+                'status' => $status,
+                'count' => (int) ($row->entries ?? 0),
+                'amount' => Money::of((string) ($row->amount ?? Money::ZERO)),
+            ];
+        }
+
+        return [
+            'available' => true,
+            'rows' => $rows,
+            'total' => array_sum(array_column($rows, 'count')),
+        ];
+    }
+
+    /**
+     * Claims waiting for somebody to agree them — money the business may be about to owe.
+     *
+     * @return array{available: bool, count: int, amount: string, oldest: ?string}
+     */
+    public function pendingExpenseApprovals(?User $viewer = null): array
+    {
+        if (! $this->may($viewer, 'expenses')) {
+            return ['available' => false, 'count' => 0, 'amount' => Money::ZERO, 'oldest' => null];
+        }
+
+        $row = $this->db->table('expenses')
+            ->where('status', ExpenseStatus::Pending->value)
+            ->whereNull('deleted_at')
+            ->selectRaw('COUNT(*) as entries, COALESCE(SUM(net_amount), 0) as amount, MIN(expense_date) as oldest')
+            ->first();
+
+        return [
+            'available' => true,
+            'count' => (int) ($row->entries ?? 0),
+            'amount' => Money::of((string) ($row->amount ?? Money::ZERO)),
+            'oldest' => $row->oldest ?? null,
+        ];
+    }
+
+    /**
+     * Income against expenses, month by month, for the trend card.
+     *
+     * Both series are cash on their own value dates — the same basis the reports use — so the chart and
+     * the profit-and-loss statement tell one story rather than two similar ones.
+     *
+     * @return array{available: bool, labels: list<string>, income: list<string>, expenses: list<string>, profit: list<string>}
+     */
+    public function incomeVsExpenseByMonth(int $months = 12, ?User $viewer = null): array
+    {
+        $months = max(1, min(36, $months));
+
+        if (! $this->may($viewer, 'income') && ! $this->may($viewer, 'expenses')) {
+            return ['available' => false, 'labels' => [], 'income' => [], 'expenses' => [], 'profit' => []];
+        }
+
+        $start = Carbon::now(Format::timezone())->startOfMonth()->subMonths($months - 1);
+
+        $labels = [];
+        $keys = [];
+
+        for ($i = 0; $i < $months; $i++) {
+            $month = $start->copy()->addMonths($i);
+            $keys[] = $month->format('Y-m');
+            $labels[] = $month->format('M y');
+        }
+
+        $income = $this->monthlySums('incomes', 'received_on', 'net_amount', $start,
+            fn ($q) => $q->where('status', IncomeStatus::Recorded->value)->whereNull('deleted_at'),
+            $this->may($viewer, 'income'));
+
+        $projects = $this->monthlySums('project_payments', 'paid_on', 'net_received_amount', $start,
+            fn ($q) => $q->whereNot('status', ReceivedPaymentStatus::Voided->value),
+            $this->may($viewer, 'project_payments'));
+
+        $fees = $this->monthlySums('student_fee_payments', 'paid_on', 'net_received_amount', $start,
+            fn ($q) => $q->whereNot('status', ReceivedPaymentStatus::Voided->value),
+            $this->may($viewer, 'student_fee_payments'));
+
+        $spent = $this->monthlySums('expenses', 'expense_date', 'net_amount', $start,
+            fn ($q) => $q->where('status', ExpenseStatus::Approved->value)->whereNull('deleted_at'),
+            $this->may($viewer, 'expenses'));
+
+        $in = [];
+        $out = [];
+        $profit = [];
+
+        foreach ($keys as $key) {
+            $received = Money::sum([
+                $income[$key] ?? Money::ZERO,
+                $projects[$key] ?? Money::ZERO,
+                $fees[$key] ?? Money::ZERO,
+            ]);
+            $paid = $spent[$key] ?? Money::ZERO;
+
+            $in[] = $received;
+            $out[] = $paid;
+            $profit[] = Money::sub($received, $paid);
+        }
+
+        return [
+            'available' => true,
+            'labels' => $labels,
+            'income' => $in,
+            'expenses' => $out,
+            'profit' => $profit,
+        ];
+    }
+
+    /**
+     * `Y-m => total` for one table, or an empty map when the reader may not see it.
+     *
+     * @return array<string, string>
+     */
+    private function monthlySums(
+        string $table,
+        string $dateColumn,
+        string $amountColumn,
+        Carbon $start,
+        callable $constrain,
+        bool $allowed,
+    ): array {
+        if (! $allowed) {
+            return [];
+        }
+
+        $rows = $this->db->table($table)
+            ->where($dateColumn, '>=', $start->toDateString())
+            ->tap($constrain)
+            ->groupByRaw("DATE_FORMAT({$dateColumn}, '%Y-%m')")
+            ->selectRaw("DATE_FORMAT({$dateColumn}, '%Y-%m') as period, COALESCE(SUM({$amountColumn}), 0) as total")
+            ->get();
+
+        $map = [];
+
+        foreach ($rows as $row) {
+            $map[(string) $row->period] = Money::of((string) $row->total);
+        }
+
+        return $map;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | Internals
     |--------------------------------------------------------------------------
     */

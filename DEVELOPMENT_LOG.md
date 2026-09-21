@@ -191,6 +191,10 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D77 | **A rejected commission gives its promise back, through `unclaim()` — deliberately not `unrelease()`.** | R7 of the new reconciler found it: rejecting a commission cancelled the entry and left `released_amount` standing, so a PKR 2,000 fixed commission whose first instalment was rejected could afterwards only ever reach PKR 1,333 — money quietly lost to an act that was supposed to cost nothing but that instalment. `unrelease()` is the reversal side and raises `reversed_amount` to mirror a debit row; a rejection writes no debit, so reusing it would claim an undoing with no evidence anywhere in the ledger, which R7 would then report as a broken promise. |
 | D78 | **The dashboard widget endpoint's rate limit scales with the number of cards** (60/min → 240/min). | One dashboard load is one request per visible widget. Sixty a minute was three loads at twenty cards, and §8.12 added eight more — a Super Admin who reloaded and then changed the date range would have been rate-limited out of their own dashboard. The per-widget query budget (`DashboardQueryBudgetTest`) is what bounds the cost here; the limiter exists to stop a loop, not to ration normal use. |
 | D75 | **G3 asks `ReceivedPaymentStatus::earnsCommission()`, not `countsAsReceived()`.** The new method adds `refunded` to the two the old one allows. | The two questions differ by exactly one case and the difference is load-bearing. "Is this money the business has?" excludes a fully refunded receipt, correctly. "Does this receipt reach the commission engine?" includes it, because the receipt earns and its reversal posts the offsetting debit — which is what makes the order of the two jobs irrelevant. Sharing one method would mean a refund that overtook its own earning silently cancelled it, and the partner's statement would then show neither side of a transaction that really happened. |
+| D79 | **`InvoiceService::issue()` guards on `invoice_number`, not on the status.** | The contract says "refused when `status <> draft`", and that is not the same rule: `statusFor()` returns `draft` while `sent_at` is null, so an invoice issued a minute ago is still a draft. Issuing it again therefore succeeded — it reserved a second number, **overwrote the first**, and left a gap in the series. The demo data made it visible (INV000002, INV000004, INV000006 for three invoices) because `markSent()` re-issues anything it sees as a draft. The thing the rule is actually about is the number, so that is what is tested; D42's "assigned once at issue, never reused" is now literally true rather than nearly true. |
+| D80 | **There is no `App\Support\AgingCalculator`; `AgingBucket::forDays()` is the one implementation.** | §6.9 names a calculator class whose whole content would be a `match` the enum already owns. Two classes answering "which bucket is 47 days" is exactly the duplication the rest of the phase argues against — the SQL, the CSV and the screen all call the enum, so there is one definition, which is what the contract line wanted. |
+| D82 | **A sidebar item may advertise a *list* of permissions, and-ed, and the consistency test compares the whole rule.** | `PermissionStringConsistencyTest` found it the moment the payments register shipped: the route carries `can:payments.view_any` **and** `can:payments.view_financial` — the register's whole content is amounts, so a version of it without them would be a list of reference numbers — while the item advertised only the first. That is a visible link that 403s, which is the exact failure the test exists to catch, and the test was comparing `[$permission]` against the route's full list so it could only ever pass for single-permission routes. Widening the rule is the fix; narrowing the route would have been the bug. |
+| D81 | **dompdf is not installed, so `pdf` renders the print HTML and every PDF route answers 404.** | §6.8 specifies `InvoicePdfService` over dompdf. Installing a rendering engine is a dependency decision, not a Phase 13 one, and a service that returned an empty file or an HTML blob named `.pdf` would be worse than an honest refusal: somebody would attach it to an email. The print layout is shipped and is the document — `layouts/print.blade.php` is deliberately self-contained (inline CSS, an inlined logo, no Vite and no CDN) precisely so that dompdf can render it unchanged the day it arrives. |
 
 ---
 
@@ -466,6 +470,31 @@ waiting on a table that does not exist yet.**
 | [x] | The eight §8.12 dashboard widgets, each reading through the wallet or statement service (INV-26) and each tested against the service call it reads |
 | [ ] | `collaborator.students.index` (§57) — **blocked, not skipped**: there is no `students` table until the institute phases, and a screen over a table that does not exist would be a placeholder pretending to be a feature. Everything else in §7.5 is built |
 ### [ ] PHASE 13 — Software-house finance: invoices, payments, expenses, income
+
+Contract: [`docs/phases/phase-13.md`](docs/phases/phase-13.md) · **schema, services, every admin
+screen, the client panel, the public link, the reports and the nine dashboard cards landed
+2026-09-21. Three items are outstanding and each is waiting on something outside this phase.**
+
+| | Item |
+|---|---|
+| [x] | Seven tables, ten enums and the §2.7 invoice arithmetic as a pure function (`InvoiceCalculator`) — 81/81 schema checks on both databases |
+| [x] | `InvoiceService`, `ExpenseService`, `IncomeService`, `FinanceReportService` and the four §99 reports, all on a cash basis with `meta` naming the date column and the sources the reader may not see |
+| [x] | **D79**: `issue()` now guards on `invoice_number` rather than the status. A status-only guard let `markSent()` re-issue an invoice and spend a second number — the series had gaps at 2, 4, 6 for three invoices |
+| [x] | Admin screens: the invoice register, builder, detail, print; the expense register, approval queue, form and detail; other income; payment methods; finance categories; the four report screens and their print/CSV — 38 screens rendered against live data, 0 failures |
+| [x] | `layouts/print.blade.php` (F-4.14) — A4, self-contained CSS, an inlined logo, `tabular-nums` money, no navigation, rich text through `RichText::sanitize()`. Every later printable document extends it |
+| [x] | `App\Services\Reporting\ReportExporter` (F-4.14), namespaced `Reporting` because phases 18 and 19–23 export non-finance reports through it; the meta block travels with every file |
+| [x] | The §32 gateway-ready abstraction: `PaymentGateway`, `ManualGateway` (which **throws** rather than returning a quiet failure), `PaymentGatewayManager` (a named exception for an unknown driver, never a silent fallback) and `PaymentMethodService` — the one source of every method dropdown |
+| [x] | `PaymentMethodSeeder` — §32's four methods plus an **inactive** gateway placeholder, idempotent and additive (D65) |
+| [x] | Five finance policies. The permission opens the door; the document's state decides what is behind it — an issued invoice is cancelled not deleted, a decided expense is voided not edited, nobody approves their own claim, `salaries` can be neither removed nor switched off |
+| [x] | The cross-source payments register (§8.13): three `UNION ALL` sub-selects paginated by the database, with a source the reader may not see **absent from the union** and named on screen |
+| [x] | Client panel invoices through `ClientPortalRegistry` (D31) — an allow-list of columns, never a draft, another client's id a **404** — and the signed public link, where a draft, a rotated token, an unknown token and the setting switched off all answer 404 |
+| [x] | The nine §8.15 dashboard cards, each reading `FinanceReportService` (D28) — the narrow readers live in the service so **no widget contains its own `SUM`** |
+| [x] | The two D60 manifests: 68 route-guard rows read straight off the live route table (a written rationale on each of the two public rows), and 33 screen rows whose params closures all resolve. Phases 5–12 never appended theirs; that carry-over is still open |
+| [x] | Three of §10.5's four scheduled commands: `invoices:mark-overdue` (01:05), `invoices:reconcile-balances` (02:10, reports and **does not** repair) and `expenses:flag-stale-approvals` (Monday 08:00, which decides nothing) |
+| [ ] | `invoices:send-reminders` — **deferred with `InvoiceDeliveryService` (D81)**: the reminder is an email, and the delivery service the contract specifies attaches a PDF that does not exist yet |
+| [ ] | `RecordPayrollExpense` (D44) — **blocked, not skipped**: `PayrollRunPaid` does not exist until Phase 7's payroll ships. Without it §99's profit and loss is short by the whole payroll, and the reserved `salaries` category is already in place waiting for it |
+| [ ] | `InvoicePdfService` / `InvoiceDeliveryService` — **deferred with a reason (D81)**: dompdf is not installed. The print layout is the document; the PDF routes answer 404 rather than serving an HTML blob named `.pdf` |
+
 ### [ ] PHASE 14 — Institute: course categories, courses, outline (modules / topics / lectures)
 ### [ ] PHASE 15 — Inquiries, online admission, admission workflow, registration
 ### [ ] PHASE 16 — Teachers, batches, timetable, demo classes
@@ -485,6 +514,94 @@ waiting on a table that does not exist yet.**
 ---
 
 ## 6. Change Log
+
+### 2026-09-21 — Phase 13: every finance screen, and a number that was being spent twice
+
+**The bug the demo data found.** Seeding four invoices produced INV000002, INV000004 and INV000006 —
+a gap between every one of them. `issue()` refused anything whose `status` was not `draft`, exactly as
+the contract words it, but `statusFor()` returns `draft` while `sent_at` is null. So an invoice issued
+a minute ago is still a draft to that check, `markSent()` re-issued it, and the second call reserved a
+new number and **overwrote the number already assigned** — a number that may have been on a screen, a
+printout or an email. D42 says "assigned once at issue, never reused"; the guard is now the
+`invoice_number` column, which is the thing the rule is about, and re-issuing raises a named refusal.
+Two tests pin it: the second `issue()` throws, and `markSent()` on an issued invoice leaves both the
+number and the counter untouched.
+
+**The screens.** Thirty-eight admin screens, rendered against live data through the HTTP kernel rather
+than eyeballed: the invoice register, builder, detail and print; the expense register, its approval
+queue, form and detail; other income; payment methods; finance categories; the four report screens
+with their print and CSV; the cross-source payments register. Zero failures. The Blade compiler
+catches syntax; only a render catches a column that does not exist.
+
+**What the print layout is for.** `layouts/print.blade.php` is deliberately self-contained — inline
+CSS, the logo read from disk and base64-inlined, nothing from Vite or a CDN. dompdf has no bundler and
+no network, so a layout that depended on either would look right on screen and come out unstyled in
+the copy the client receives: the one failure mode nobody sees before the client does. It ships now
+because four later phases extend it, and it is ready for dompdf the day dompdf is installed.
+
+**Money columns are absent, not blank.** `FinanceVisibility` removes a withheld field from the set
+entirely, so a reader without `view_financial` gets a register with no Balance header rather than a
+Balance column full of dashes — and the CSV is refused outright, because a finance export without
+amounts is a list of reference numbers. The report hub goes further: it lists only the reports the
+route would actually open, because a card that advertises something and then says no reads as a bug
+rather than as a decision.
+
+**The union that tells you what it left out.** The payments register merges project payments, student
+fees and other income in the database, and a source the reader may not see is **not in the union** —
+not filtered afterwards, not zeroed. The screen names the ones it dropped. A partial total read as a
+full one is worse than a refusal, because somebody will quote it.
+
+**The gateway that refuses rather than pretends.** §32 asks for a gateway-*ready* architecture, so the
+interface, the manager and one driver ship and no integration does. `ManualGateway::charge()` throws
+`GatewayNotConfiguredException` instead of returning a failed result: a caller that believed a charge
+had been attempted could mark an invoice paid on the strength of a no-op. `PaymentGatewayManager`
+throws a named exception for an unknown driver rather than falling back to manual, because a method
+configured for "stripe" that quietly behaved like an offline one would take a payment nobody could
+later find.
+
+**No widget has its own `SUM`.** The nine dashboard cards read `FinanceReportService`; the questions a
+card asks that a report does not — how many are overdue, what is waiting for approval — became narrow
+readers on the service. A card with its own query is a second answer to the same question, and nobody
+would know which was right. One test asserts the revenue and expense cards equal the reports they link
+to, to the paisa.
+
+**Three commands that decide nothing.** `invoices:mark-overdue` calls the same `recomputeStatus()`
+every payment path calls, over `sent`, `partial` *and* `overdue`, so an extended due date moves a row
+back out again — a job that only marked things overdue would leave a corrected invoice wearing a red
+badge until the next payment touched it. `invoices:reconcile-balances` checks D40's three cached
+columns against the receipts and **reports** rather than repairing: drift is evidence of something
+upstream, and rewriting the column quietly erases the evidence while leaving the cause.
+`expenses:flag-stale-approvals` sends a list to the people who can act on it and approves nothing — an
+auto-approval after a fortnight would turn the approval step into a delay.
+
+The reconciler also shipped with the bug it exists to catch. A `return` inside its `chunkById`
+callback left the whole batch rather than skipping one clean invoice, so the first run reported "1
+invoice checked" and looked perfect on a database with three. A reconciler that quietly checks less
+than it claims is worse than no reconciler, because it is evidence of correctness that was never
+gathered. It is a `continue` now, and a test with two invoices — one drifted, one clean — proves the
+second one is still reached.
+
+**What is deferred, and why.** `RecordPayrollExpense` is blocked on `PayrollRunPaid`, which Phase 7
+has not shipped; the reserved `salaries` category is already in place and refuses both deletion and
+deactivation so that the listener has somewhere to post the day it exists. The PDF services are
+deferred because dompdf is not installed (D81) — the print view is the document, and the PDF routes
+answer 404 rather than serving an HTML blob with a `.pdf` name that somebody would attach to an email.
+`invoices:send-reminders` waits with them, because the reminder is an email and the delivery service
+the contract specifies attaches that PDF.
+
+**A visible link that 403s.** `PermissionStringConsistencyTest` failed the moment the payments
+register shipped: the route carries `payments.view_any` **and** `payments.view_financial`, the sidebar
+item advertised only the first, and a link that leads to a refusal is precisely what that test exists
+to catch. The route is right — a register whose whole content is amounts is not worth opening without
+them — so the sidebar learned to and a list, and the test now compares the whole rule instead of the
+first name of it (D82). It could previously only pass for single-permission routes, so it was also
+the first thing to widen.
+
+**Also.** `AgingBucket::forDays()` is the only bucket rule, so §6.9's `AgingCalculator` was not built
+(D80). `PaymentMethodSeeder` ships §32's four methods plus an inactive gateway placeholder, claiming
+the default only when nobody holds it — `uq_pm_default` permits exactly one, and a seeder that claimed
+it unconditionally would fail its second run on an installation where somebody had moved it.
+
 
 ### 2026-09-21 — Phase 12: payouts, the reconciler, the statement, and every screen over them
 

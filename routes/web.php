@@ -8,6 +8,7 @@ use App\Http\Controllers\Site\ContactController;
 use App\Http\Controllers\Site\HomeController;
 use App\Http\Controllers\Site\PortfolioController;
 use App\Http\Controllers\Site\PreviewController;
+use App\Http\Controllers\Site\PublicInvoiceController;
 use App\Http\Controllers\Site\ReferralController;
 use App\Http\Controllers\Site\RobotsController;
 use App\Http\Controllers\Site\ServiceController;
@@ -126,5 +127,30 @@ Route::post('contact', [ContactController::class, 'store'])->middleware(['site',
 Route::post('referral/validate', [ReferralController::class, 'validateCode'])
     ->middleware('throttle:10,1')
     ->name('site.referral.validate');
+
+/*
+|--------------------------------------------------------------------------
+| phase-13 §7.8 — the signed, client-facing invoice link
+|--------------------------------------------------------------------------
+| Bound on `public_token` (40 random characters), with Laravel's signed-URL check carrying the expiry
+| from `finance.invoice_public_link_days`, so a link dies of old age on its own. No `site` gate: an
+| invoice is a document a client was sent, and closing the marketing site for maintenance must not
+| take their copy of it away.
+|
+| Everything that could be a refusal is a 404 — a draft, a cancelled invoice, a rotated token, an
+| expired signature, the setting switched off. A 403 would confirm to a stranger that something exists
+| behind the link they guessed, and the point of the token is that they learn nothing.
+|
+| It reads one document: no payment, no comment, no upload, no login prompt, no other invoice.
+*/
+Route::middleware(['signed', 'invoice_link'])->group(function (): void {
+    Route::get('invoices/{token}', [PublicInvoiceController::class, 'show'])
+        ->middleware('throttle:30,1')
+        ->name('site.invoices.view');
+
+    Route::get('invoices/{token}/pdf', [PublicInvoiceController::class, 'pdf'])
+        ->middleware('throttle:10,1')
+        ->name('site.invoices.pdf');
+});
 
 require __DIR__.'/auth.php';

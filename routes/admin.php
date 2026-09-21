@@ -51,7 +51,14 @@ use App\Http\Controllers\Admin\Collaborator\StatementController;
 use App\Http\Controllers\Admin\Collaborator\WalletController;
 use App\Http\Controllers\Admin\Collaborator\WalletReconciliationController;
 use App\Http\Controllers\Admin\DashboardController;
+use App\Http\Controllers\Admin\Finance\ExpenseController;
 use App\Http\Controllers\Admin\Finance\FeePaymentController;
+use App\Http\Controllers\Admin\Finance\FinanceCategoryController;
+use App\Http\Controllers\Admin\Finance\FinanceReportController;
+use App\Http\Controllers\Admin\Finance\IncomeController;
+use App\Http\Controllers\Admin\Finance\InvoiceController;
+use App\Http\Controllers\Admin\Finance\PaymentMethodController;
+use App\Http\Controllers\Admin\Finance\PaymentRegisterController;
 use App\Http\Controllers\Admin\Finance\ProjectPaymentController;
 use App\Http\Controllers\Admin\Hr\AttendanceController;
 use App\Http\Controllers\Admin\Hr\AttendanceCorrectionController;
@@ -1428,6 +1435,181 @@ Route::prefix('admin')
             Route::get('collaborators/{collaborator}/commission-rules/preview', [CommissionRuleController::class, 'preview'])->whereNumber('collaborator')->middleware(['can:collaborator_commission_settings.create', 'throttle:60,1'])->name('commission-rules.preview');
             Route::post('collaborators/{collaborator}/commission-rules', [CommissionRuleController::class, 'store'])->whereNumber('collaborator')->middleware('can:collaborator_commission_settings.create')->name('commission-rules.store');
             Route::post('commission-rules/{rule}/close', [CommissionRuleController::class, 'close'])->whereNumber('rule')->middleware('can:collaborator_commission_settings.create')->name('commission-rules.close');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Invoices - phase-13 sec 7.1
+        |----------------------------------------------------------------------
+        |
+        | `delete` exists and is narrowed by the controller to an unissued draft
+        | with no payment: an issued invoice is cancelled and keeps its number,
+        | because a reused number makes two documents answer to one reference.
+        |
+        | Emailing is `change_status`, not an invented `send` ability - it IS the
+        | act that moves a draft to sent, and the spine set that precedent by
+        | mapping "run a reconciliation" onto the same case.
+        |
+        | The two apply routes carry the **pair** D43 names: `invoices.edit` and
+        | `project_payments.link_invoice`. There is no `project_payments.edit` in
+        | the registry and this phase does not ask for one.
+        |
+        */
+        Route::middleware('module:invoices')->group(static function (): void {
+            Route::get('invoices', [InvoiceController::class, 'index'])->middleware('can:invoices.view_any')->name('invoices.index');
+            Route::get('invoices/create', [InvoiceController::class, 'create'])->middleware('can:invoices.create')->name('invoices.create');
+            // Computes and writes nothing, so the figure being typed and the figure stored are one number.
+            Route::post('invoices/totals/preview', [InvoiceController::class, 'previewTotals'])->middleware(['can:invoices.create', 'throttle:60,1'])->name('invoices.totals.preview');
+            Route::get('invoices/export/{format}', [InvoiceController::class, 'export'])->middleware(['can:invoices.export', 'can:invoices.view_financial'])->name('invoices.export');
+            Route::post('invoices', [InvoiceController::class, 'store'])->middleware('can:invoices.create')->name('invoices.store');
+
+            Route::get('invoices/{invoice}', [InvoiceController::class, 'show'])->whereNumber('invoice')->middleware('can:invoices.view')->name('invoices.show');
+            Route::get('invoices/{invoice}/edit', [InvoiceController::class, 'edit'])->whereNumber('invoice')->middleware('can:invoices.edit')->name('invoices.edit');
+            Route::put('invoices/{invoice}', [InvoiceController::class, 'update'])->whereNumber('invoice')->middleware('can:invoices.edit')->name('invoices.update');
+            Route::delete('invoices/{invoice}', [InvoiceController::class, 'destroy'])->whereNumber('invoice')->middleware('can:invoices.delete')->name('invoices.destroy');
+
+            Route::get('invoices/{invoice}/print', [InvoiceController::class, 'print'])->whereNumber('invoice')->middleware(['can:invoices.print', 'can:invoices.view_financial'])->name('invoices.print');
+
+            Route::post('invoices/{invoice}/issue', [InvoiceController::class, 'issue'])->whereNumber('invoice')->middleware('can:invoices.change_status')->name('invoices.issue');
+            Route::post('invoices/{invoice}/send', [InvoiceController::class, 'send'])->whereNumber('invoice')->middleware(['can:invoices.change_status', 'throttle:10,1'])->name('invoices.send');
+            Route::post('invoices/{invoice}/cancel', [InvoiceController::class, 'cancel'])->whereNumber('invoice')->middleware('can:invoices.change_status')->name('invoices.cancel');
+            Route::post('invoices/{invoice}/replace', [InvoiceController::class, 'replace'])->whereNumber('invoice')->middleware('can:invoices.create')->name('invoices.replace');
+            Route::post('invoices/{invoice}/duplicate', [InvoiceController::class, 'duplicate'])->whereNumber('invoice')->middleware('can:invoices.create')->name('invoices.duplicate');
+            Route::post('invoices/{invoice}/public-link/rotate', [InvoiceController::class, 'rotatePublicLink'])->whereNumber('invoice')->middleware('can:invoices.change_status')->name('invoices.public-link.rotate');
+
+            Route::post('invoices/{invoice}/payments/{payment}/apply', [InvoiceController::class, 'applyPayment'])->whereNumber('invoice')->whereNumber('payment')->middleware(['can:invoices.edit', 'can:project_payments.link_invoice'])->name('invoices.payments.apply');
+            Route::delete('invoices/{invoice}/payments/{payment}/apply', [InvoiceController::class, 'unapplyPayment'])->whereNumber('invoice')->whereNumber('payment')->middleware(['can:invoices.edit', 'can:project_payments.link_invoice'])->name('invoices.payments.unapply');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Expenses - phase-13 sec 7.2
+        |----------------------------------------------------------------------
+        |
+        | Three abilities for three genuinely different jobs: `create` is anybody
+        | claiming a cost, `approve` is somebody agreeing it is the company's,
+        | and `change_status` is voiding one already agreed. The receipt is
+        | streamed by its own route, which re-runs the permission chain (D21).
+        |
+        */
+        Route::middleware('module:expenses')->group(static function (): void {
+            Route::get('expenses', [ExpenseController::class, 'index'])->middleware('can:expenses.view_any')->name('expenses.index');
+            Route::get('expenses/approvals', [ExpenseController::class, 'approvals'])->middleware('can:expenses.approve')->name('expenses.approvals');
+            Route::get('expenses/create', [ExpenseController::class, 'create'])->middleware('can:expenses.create')->name('expenses.create');
+            Route::get('expenses/export/{format}', [ExpenseController::class, 'export'])->middleware(['can:expenses.export', 'can:expenses.view_financial'])->name('expenses.export');
+            Route::post('expenses', [ExpenseController::class, 'store'])->middleware('can:expenses.create')->name('expenses.store');
+            Route::post('expenses/bulk-approve', [ExpenseController::class, 'bulkApprove'])->middleware(['can:expenses.approve', 'throttle:10,1'])->name('expenses.bulk-approve');
+
+            Route::get('expenses/{expense}', [ExpenseController::class, 'show'])->whereNumber('expense')->middleware('can:expenses.view')->name('expenses.show');
+            Route::get('expenses/{expense}/edit', [ExpenseController::class, 'edit'])->whereNumber('expense')->middleware('can:expenses.edit')->name('expenses.edit');
+            Route::put('expenses/{expense}', [ExpenseController::class, 'update'])->whereNumber('expense')->middleware('can:expenses.edit')->name('expenses.update');
+            Route::delete('expenses/{expense}', [ExpenseController::class, 'destroy'])->whereNumber('expense')->middleware('can:expenses.delete')->name('expenses.destroy');
+            Route::get('expenses/{expense}/receipt', [ExpenseController::class, 'receipt'])->whereNumber('expense')->middleware('can:expenses.download')->name('expenses.receipt');
+
+            Route::post('expenses/{expense}/approve', [ExpenseController::class, 'approve'])->whereNumber('expense')->middleware('can:expenses.approve')->name('expenses.approve');
+            Route::post('expenses/{expense}/reject', [ExpenseController::class, 'reject'])->whereNumber('expense')->middleware('can:expenses.reject')->name('expenses.reject');
+            Route::post('expenses/{expense}/void', [ExpenseController::class, 'void'])->whereNumber('expense')->middleware('can:expenses.change_status')->name('expenses.void');
+            Route::post('expenses/{expense}/reversals', [ExpenseController::class, 'storeReversal'])->whereNumber('expense')->middleware('can:expenses.change_status')->name('expenses.reversals.store');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Other income - phase-13 sec 7.3
+        |----------------------------------------------------------------------
+        |
+        | Money in that is neither a project payment nor a student fee. Those
+        | belong to the spine and fire the commission engine; a row here fires
+        | nothing, which is why the category list holds neither kind.
+        |
+        */
+        Route::middleware('module:income')->group(static function (): void {
+            Route::get('income', [IncomeController::class, 'index'])->middleware('can:income.view_any')->name('income.index');
+            Route::get('income/create', [IncomeController::class, 'create'])->middleware('can:income.create')->name('income.create');
+            Route::get('income/export/{format}', [IncomeController::class, 'export'])->middleware(['can:income.export', 'can:income.view_financial'])->name('income.export');
+            Route::post('income', [IncomeController::class, 'store'])->middleware('can:income.create')->name('income.store');
+
+            Route::get('income/{income}', [IncomeController::class, 'show'])->whereNumber('income')->middleware('can:income.view')->name('income.show');
+            Route::get('income/{income}/edit', [IncomeController::class, 'edit'])->whereNumber('income')->middleware('can:income.edit')->name('income.edit');
+            Route::put('income/{income}', [IncomeController::class, 'update'])->whereNumber('income')->middleware('can:income.edit')->name('income.update');
+            Route::delete('income/{income}', [IncomeController::class, 'destroy'])->whereNumber('income')->middleware('can:income.delete')->name('income.destroy');
+            Route::get('income/{income}/receipt', [IncomeController::class, 'receipt'])->whereNumber('income')->middleware('can:income.download')->name('income.receipt');
+
+            Route::post('income/{income}/void', [IncomeController::class, 'void'])->whereNumber('income')->middleware('can:income.change_status')->name('income.void');
+            Route::post('income/{income}/reversals', [IncomeController::class, 'storeReversal'])->whereNumber('income')->middleware('can:income.change_status')->name('income.reversals.store');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Payment methods and finance categories - phase-13 sec 7.4
+        |----------------------------------------------------------------------
+        |
+        | Neither module declares `view_financial`, and neither holds an amount.
+        | The encrypted gateway config is reachable through `edit` alone and is
+        | rendered nowhere: a screen that could show it would make the
+        | encryption decorative.
+        |
+        */
+        Route::middleware('module:payment_methods')->group(static function (): void {
+            Route::get('payment-methods', [PaymentMethodController::class, 'index'])->middleware('can:payment_methods.view_any')->name('payment-methods.index');
+            Route::get('payment-methods/create', [PaymentMethodController::class, 'create'])->middleware('can:payment_methods.create')->name('payment-methods.create');
+            Route::post('payment-methods', [PaymentMethodController::class, 'store'])->middleware('can:payment_methods.create')->name('payment-methods.store');
+            Route::get('payment-methods/{method}/edit', [PaymentMethodController::class, 'edit'])->whereNumber('method')->middleware('can:payment_methods.edit')->name('payment-methods.edit');
+            Route::put('payment-methods/{method}', [PaymentMethodController::class, 'update'])->whereNumber('method')->middleware('can:payment_methods.edit')->name('payment-methods.update');
+            Route::delete('payment-methods/{method}', [PaymentMethodController::class, 'destroy'])->whereNumber('method')->middleware('can:payment_methods.delete')->name('payment-methods.destroy');
+            Route::post('payment-methods/{method}/toggle', [PaymentMethodController::class, 'toggle'])->whereNumber('method')->middleware('can:payment_methods.change_status')->name('payment-methods.toggle');
+            Route::post('payment-methods/{method}/default', [PaymentMethodController::class, 'setDefault'])->whereNumber('method')->middleware('can:payment_methods.edit')->name('payment-methods.default');
+        });
+
+        Route::middleware('module:finance_categories')->group(static function (): void {
+            Route::get('finance-categories', [FinanceCategoryController::class, 'index'])->middleware('can:finance_categories.view_any')->name('finance-categories.index');
+            Route::post('finance-categories', [FinanceCategoryController::class, 'store'])->middleware('can:finance_categories.create')->name('finance-categories.store');
+            Route::post('finance-categories/reorder', [FinanceCategoryController::class, 'reorder'])->middleware('can:finance_categories.edit')->name('finance-categories.reorder');
+            Route::put('finance-categories/{category}', [FinanceCategoryController::class, 'update'])->whereNumber('category')->middleware('can:finance_categories.edit')->name('finance-categories.update');
+            Route::delete('finance-categories/{category}', [FinanceCategoryController::class, 'destroy'])->whereNumber('category')->middleware('can:finance_categories.delete')->name('finance-categories.destroy');
+            Route::post('finance-categories/{category}/toggle', [FinanceCategoryController::class, 'toggle'])->whereNumber('category')->middleware('can:finance_categories.change_status')->name('finance-categories.toggle');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | The cross-source payments register - phase-13 sec 7.5
+        |----------------------------------------------------------------------
+        |
+        | Read-only, and gated by its own umbrella module. Every write action on
+        | a row deep-links to the register that owns it: the rules about voiding
+        | a project payment live with the spine and the rules about refunding a
+        | fee receipt live with fees, and a second place to do either would
+        | eventually disagree with the first.
+        |
+        | `view_financial` is required to open it at all, because the register's
+        | whole content is amounts - a version of it without them would be a
+        | list of reference numbers.
+        |
+        */
+        Route::middleware('module:payments')->group(static function (): void {
+            Route::get('payments', [PaymentRegisterController::class, 'index'])->middleware(['can:payments.view_any', 'can:payments.view_financial'])->name('payments.index');
+            Route::get('payments/export/{format}', [PaymentRegisterController::class, 'export'])->middleware(['can:payments.export', 'can:payments.view_financial'])->name('payments.export');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Finance reports - phase-13 sec 7.6
+        |----------------------------------------------------------------------
+        |
+        | Double-gated (sec 4.5 rule 4): the hub needs `reports.view_reports`,
+        | and each report additionally needs its source module's `view_reports`
+        | **and** `view_financial`, resolved from
+        | `FinanceReportType::permissions()` so the routes and the hub cards read
+        | one definition. The literal `{report}` values are checked by the
+        | controller, which 404s an unknown one.
+        |
+        */
+        Route::middleware('module:reports')->group(static function (): void {
+            Route::get('reports/finance', [FinanceReportController::class, 'index'])->middleware('can:reports.view_reports')->name('reports.finance.index');
+            Route::get('reports/finance/income', [FinanceReportController::class, 'show'])->defaults('report', 'income')->middleware(['can:income.view_reports', 'can:income.view_financial'])->name('reports.finance.income');
+            Route::get('reports/finance/expenses', [FinanceReportController::class, 'show'])->defaults('report', 'expenses')->middleware(['can:expenses.view_reports', 'can:expenses.view_financial'])->name('reports.finance.expenses');
+            Route::get('reports/finance/profit-loss', [FinanceReportController::class, 'show'])->defaults('report', 'profit-loss')->middleware(['can:income.view_reports', 'can:income.view_financial', 'can:expenses.view_financial'])->name('reports.finance.profit-loss');
+            Route::get('reports/finance/receivables-aging', [FinanceReportController::class, 'show'])->defaults('report', 'receivables-aging')->middleware(['can:invoices.view_reports', 'can:invoices.view_financial'])->name('reports.finance.receivables-aging');
+            Route::get('reports/finance/{report}/export/{format}', [FinanceReportController::class, 'export'])->middleware(['can:reports.view_reports', 'throttle:20,1'])->name('reports.finance.export');
         });
 
         /*

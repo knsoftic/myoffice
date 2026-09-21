@@ -106,24 +106,28 @@ final class PermissionStringConsistencyTest extends TestCase
 
         foreach ($this->sidebarItems() as $panel => $items) {
             foreach ($items as $item) {
-                $permission = $item['permission'] ?? null;
+                // An item may and two permissions, exactly as a route may carry two `can:` entries
+                // (phase-13 §7.5). Every name in the rule is checked, not just the first.
+                $permission = Sidebar::permissionOf($item);
 
-                if (! is_string($permission) || $permission === '') {
+                if ($permission === null) {
                     continue;
                 }
 
-                $checked++;
+                foreach ((array) $permission as $name) {
+                    $checked++;
 
-                $this->assertContains(
-                    $permission,
-                    $seeded,
-                    sprintf(
-                        'The %s sidebar item "%s" gates on "%s", which is not a seeded permission.',
-                        $panel,
-                        (string) ($item['label'] ?? '?'),
-                        $permission,
-                    )
-                );
+                    $this->assertContains(
+                        $name,
+                        $seeded,
+                        sprintf(
+                            'The %s sidebar item "%s" gates on "%s", which is not a seeded permission.',
+                            $panel,
+                            (string) ($item['label'] ?? '?'),
+                            $name,
+                        )
+                    );
+                }
             }
         }
 
@@ -144,9 +148,9 @@ final class PermissionStringConsistencyTest extends TestCase
         foreach ($this->sidebarItems() as $panel => $items) {
             foreach ($items as $item) {
                 $name = $item['route'] ?? null;
-                $permission = $item['permission'] ?? null;
+                $permission = Sidebar::permissionOf($item);
 
-                if (! is_string($name) || ! is_string($permission) || ! Route::has($name)) {
+                if (! is_string($name) || $permission === null || ! Route::has($name)) {
                     continue;
                 }
 
@@ -156,9 +160,12 @@ final class PermissionStringConsistencyTest extends TestCase
 
                 $compared++;
 
+                // The whole rule, not its first name: a route carrying two `can:` entries and an item
+                // advertising one of them is a visible link that 403s, which is what this asserts
+                // against.
                 $this->assertSame(
                     $guarded[$name],
-                    [$permission],
+                    array_values((array) $permission),
                     sprintf(
                         'The %s sidebar item "%s" advertises a different permission from the route %s it links to.',
                         $panel,

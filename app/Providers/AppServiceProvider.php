@@ -167,6 +167,7 @@ use App\Support\DashboardRegistry;
 use App\Support\Inquiry\CrmLeadInquiryTarget;
 use App\Support\Modules;
 use App\Support\Portal\Sections\DocumentsSection;
+use App\Support\Portal\Sections\InvoicesSection;
 use App\Support\Portal\Sections\MilestonesSection;
 use App\Support\Portal\Sections\NotificationsSection;
 use App\Support\Portal\Sections\ProjectsSection;
@@ -182,6 +183,16 @@ use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
+use App\Models\Finance\Expense;
+use App\Models\Finance\FinanceCategory;
+use App\Models\Finance\Income;
+use App\Models\Finance\Invoice;
+use App\Models\Finance\PaymentMethodOption;
+use App\Policies\Finance\ExpensePolicy;
+use App\Policies\Finance\FinanceCategoryPolicy;
+use App\Policies\Finance\IncomePolicy;
+use App\Policies\Finance\InvoicePolicy;
+use App\Policies\Finance\PaymentMethodPolicy;
 use Illuminate\Support\ServiceProvider;
 use Throwable;
 
@@ -273,6 +284,16 @@ class AppServiceProvider extends ServiceProvider
         // visible to anybody who may see the module — so the narrowing that matters is the partner's own
         // record in their own panel, and `forceDelete` is refused outright for everybody (INV-C5).
         Collaborator::class => CollaboratorPolicy::class,
+
+        // phase-13 §4.5: one policy per finance model. The permission opens the door; the document's
+        // own state decides what is behind it — an issued invoice is cancelled rather than deleted, a
+        // decided expense is voided rather than edited, and the reserved `salaries` category can be
+        // neither removed nor switched off.
+        Invoice::class => InvoicePolicy::class,
+        Expense::class => ExpensePolicy::class,
+        Income::class => IncomePolicy::class,
+        PaymentMethodOption::class => PaymentMethodPolicy::class,
+        FinanceCategory::class => FinanceCategoryPolicy::class,
     ];
 
     /**
@@ -430,6 +451,9 @@ class AppServiceProvider extends ServiceProvider
                 new ProjectsSection,
                 new MilestonesSection,
                 new TasksSection,
+                // phase-13 §8.12 contributes the same way: registered here, never by redeclaring a
+                // `client.*` route name.
+                new InvoicesSection,
             ];
 
             foreach ($sections as $section) {

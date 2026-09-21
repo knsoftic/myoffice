@@ -3,6 +3,7 @@
 use App\Http\Middleware\CachePublicResponse;
 use App\Http\Middleware\CaptureReferral;
 use App\Http\Middleware\EnsureClientContext;
+use App\Http\Middleware\EnsureInvoicePublicLinkEnabled;
 use App\Http\Middleware\EnsureModuleEnabled;
 use App\Http\Middleware\EnsurePanelAccess;
 use App\Http\Middleware\EnsurePublicSiteAvailable;
@@ -111,6 +112,9 @@ return Application::configure(basePath: dirname(__DIR__))
             // routes/site-pages.php and never to a panel group: a signed-in member of staff following a
             // partner's link is not a referral, and recording one would file a visit under their own
             // user id for the resolver to argue with later. It is a no-op without the query parameter.
+            // phase-13 §7.8: the public invoice link is a setting, and switching it off must actually
+            // close the door. 404, never 403 — the same answer a rotated token and a draft get.
+            'invoice_link' => EnsureInvoicePublicLinkEnabled::class,
             'capture_referral' => CaptureReferral::class,
             'role' => RoleMiddleware::class,
             'permission' => PermissionMiddleware::class,

@@ -193,3 +193,36 @@ Schedule::command('financial:verify-constraints', ['--quiet-when-ok'])->dailyAt(
 Schedule::command('collaborators:reconcile-wallets', ['--run-type=scheduled'])
     ->dailyAt('01:30')
     ->withoutOverlapping();
+
+/*
+|--------------------------------------------------------------------------
+| Finance (phase-13 §10.5)
+|--------------------------------------------------------------------------
+| The command lives in app/Console/Commands/Finance and is auto-discovered.
+|
+| invoices:mark-overdue exists only to let the clock move a status. It computes nothing of its own —
+| it calls the same InvoiceService::recomputeStatus() every payment path calls — and it runs over
+| `sent`, `partial` **and** `overdue`, so the one call that moves a row into overdue also moves it back
+| out when somebody extends the due date. A job that only marked things overdue would leave a corrected
+| invoice wearing a red badge until the next payment happened to touch it.
+|
+| It touches no payment, no reversal, no ledger row and no wallet: the three amount columns are moved
+| only by the events that actually move cash.
+|
+| Times are in app.schedule_timezone, which falls back to app.timezone = UTC (D61).
+*/
+Schedule::command('invoices:mark-overdue')->dailyAt('01:05')->withoutOverlapping();
+
+/*
+| invoices:reconcile-balances is the other half of D40's argument. The three amount columns are a cache
+| of one query over `project_payments`, and a cache is only trustworthy while something checks it - the
+| failure mode is silent, because nothing raises when a column drifts. It reports and **does not
+| repair**: drift is evidence of something that went wrong upstream, and quietly rewriting the column
+| erases the evidence while leaving the cause in place.
+|
+| expenses:flag-stale-approvals decides nothing. An auto-approval after a fortnight would turn the
+| approval step into a delay, and an auto-rejection would decide against an employee on a timetable; the
+| whole output is a list sent to the people who can actually act on it.
+*/
+Schedule::command('invoices:reconcile-balances', ['--quiet-when-ok'])->dailyAt('02:10')->withoutOverlapping();
+Schedule::command('expenses:flag-stale-approvals')->weeklyOn(1, '08:00')->withoutOverlapping();

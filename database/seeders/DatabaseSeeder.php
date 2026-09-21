@@ -44,6 +44,9 @@ class DatabaseSeeder extends Seeder
             // what `RecordPayrollExpense` posts into and a fresh install should have it before
             // anything can try.
             FinanceCategorySeeder::class,
+            // phase-13 §2.2. §32's four methods plus the inactive gateway placeholder, so no finance
+            // form ever renders an empty method dropdown on a fresh install.
+            PaymentMethodSeeder::class,
         ]);
     }
 }

@@ -194,11 +194,24 @@ class InvoiceService
      *
      * A zero invoice cannot be issued, and neither can an empty one — `paid` would then be reachable by
      * arithmetic accident, and a client would receive a bill for nothing.
+     *
+     * **The guard is the number, not the status.** An invoice that has been issued but not yet sent is
+     * still `draft` by {@see statusFor()} (nothing has gone to the client), so a status-only check let
+     * `issue()` run a second time: it reserved another number, overwrote the first — which may already
+     * have been printed — and left a gap in the series. `invoice_number` is the thing the rule is
+     * actually about, so that is what is tested.
      */
     public function issue(Invoice $invoice, User $actor, bool $markSent = false): Invoice
     {
         return $this->db->transaction(function () use ($invoice, $actor, $markSent): Invoice {
             $locked = $this->lock($invoice);
+
+            if ($locked->invoice_number !== null) {
+                throw InvoiceRuleException::refuse('invoice_number', sprintf(
+                    '%s already carries a number. A number is assigned once and for ever.',
+                    $locked->invoice_number,
+                ));
+            }
 
             if ($locked->status !== InvoiceStatus::Draft) {
                 throw InvoiceRuleException::refuse('status', sprintf(
@@ -251,7 +264,9 @@ class InvoiceService
         return $this->db->transaction(function () use ($invoice, $recipients, $actor): Invoice {
             $locked = $this->lock($invoice);
 
-            if ($locked->status === InvoiceStatus::Draft) {
+            // Again the number rather than the status: an invoice issued a minute ago is still `draft`
+            // until this method stamps `sent_at`, and re-issuing it would hand it a second number.
+            if ($locked->invoice_number === null) {
                 $locked = $this->lock($this->issue($locked, $actor));
             }
 

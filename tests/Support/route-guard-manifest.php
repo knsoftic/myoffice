@@ -2575,4 +2575,772 @@ return [
         'rationale' => 'Public website route (INV-15): the site answers without a permission; the site_module gate and the publish state decide what is visible.',
         'owner_phase' => 4,
     ],
+
+    /*
+    |----------------------------------------------------------------------
+    | Phase 13 - software-house finance (68 routes)
+    |----------------------------------------------------------------------
+    | Every admin route additionally carries `auth`, `active`, `panel:admin` from the Phase 1 sec 8 file
+    | group; `module:*` is stated per block. Multiple `can:` entries on one route are and-ed, and the
+    | pairing is deliberate: a money module's `view_financial` gates its amounts separately from
+    | `view_any`, so an export or a report that is nothing but figures demands both.
+    |
+    | The two public rows carry no `can:` and say why. Authorisation there is the signed token, and the
+    | four ways of getting it wrong - a draft, a cancelled invoice, a rotated token, the feature
+    | switched off - all answer 404 rather than confirming that anything exists.
+    */
+
+    [
+        'route' => 'admin.expenses.approvals',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:expenses', 'can:expenses.approve'],
+        'permission' => 'expenses.approve',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.expenses.approve',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:expenses', 'can:expenses.approve'],
+        'permission' => 'expenses.approve',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.expenses.bulk-approve',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:expenses', 'can:expenses.approve', 'throttle:10,1'],
+        'permission' => 'expenses.approve',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.expenses.create',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:expenses', 'can:expenses.create'],
+        'permission' => 'expenses.create',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.expenses.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:expenses', 'can:expenses.delete'],
+        'permission' => 'expenses.delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.expenses.edit',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:expenses', 'can:expenses.edit'],
+        'permission' => 'expenses.edit',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.expenses.export',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:expenses', 'can:expenses.export', 'can:expenses.view_financial'],
+        'permission' => 'expenses.export + expenses.view_financial',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.expenses.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:expenses', 'can:expenses.view_any'],
+        'permission' => 'expenses.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.expenses.receipt',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:expenses', 'can:expenses.download'],
+        'permission' => 'expenses.download',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.expenses.reject',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:expenses', 'can:expenses.reject'],
+        'permission' => 'expenses.reject',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.expenses.reversals.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:expenses', 'can:expenses.change_status'],
+        'permission' => 'expenses.change_status',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.expenses.show',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:expenses', 'can:expenses.view'],
+        'permission' => 'expenses.view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.expenses.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:expenses', 'can:expenses.create'],
+        'permission' => 'expenses.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.expenses.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:expenses', 'can:expenses.edit'],
+        'permission' => 'expenses.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.expenses.void',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:expenses', 'can:expenses.change_status'],
+        'permission' => 'expenses.change_status',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.finance-categories.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:finance_categories', 'can:finance_categories.delete'],
+        'permission' => 'finance_categories.delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.finance-categories.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:finance_categories', 'can:finance_categories.view_any'],
+        'permission' => 'finance_categories.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.finance-categories.reorder',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:finance_categories', 'can:finance_categories.edit'],
+        'permission' => 'finance_categories.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.finance-categories.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:finance_categories', 'can:finance_categories.create'],
+        'permission' => 'finance_categories.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.finance-categories.toggle',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:finance_categories', 'can:finance_categories.change_status'],
+        'permission' => 'finance_categories.change_status',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.finance-categories.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:finance_categories', 'can:finance_categories.edit'],
+        'permission' => 'finance_categories.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.income.create',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:income', 'can:income.create'],
+        'permission' => 'income.create',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.income.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:income', 'can:income.delete'],
+        'permission' => 'income.delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.income.edit',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:income', 'can:income.edit'],
+        'permission' => 'income.edit',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.income.export',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:income', 'can:income.export', 'can:income.view_financial'],
+        'permission' => 'income.export + income.view_financial',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.income.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:income', 'can:income.view_any'],
+        'permission' => 'income.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.income.receipt',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:income', 'can:income.download'],
+        'permission' => 'income.download',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.income.reversals.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:income', 'can:income.change_status'],
+        'permission' => 'income.change_status',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.income.show',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:income', 'can:income.view'],
+        'permission' => 'income.view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.income.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:income', 'can:income.create'],
+        'permission' => 'income.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.income.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:income', 'can:income.edit'],
+        'permission' => 'income.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.income.void',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:income', 'can:income.change_status'],
+        'permission' => 'income.change_status',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.invoices.cancel',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:invoices', 'can:invoices.change_status'],
+        'permission' => 'invoices.change_status',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.invoices.create',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:invoices', 'can:invoices.create'],
+        'permission' => 'invoices.create',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.invoices.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:invoices', 'can:invoices.delete'],
+        'permission' => 'invoices.delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.invoices.duplicate',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:invoices', 'can:invoices.create'],
+        'permission' => 'invoices.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.invoices.edit',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:invoices', 'can:invoices.edit'],
+        'permission' => 'invoices.edit',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.invoices.export',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:invoices', 'can:invoices.export', 'can:invoices.view_financial'],
+        'permission' => 'invoices.export + invoices.view_financial',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.invoices.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:invoices', 'can:invoices.view_any'],
+        'permission' => 'invoices.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.invoices.issue',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:invoices', 'can:invoices.change_status'],
+        'permission' => 'invoices.change_status',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.invoices.payments.apply',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:invoices', 'can:invoices.edit', 'can:project_payments.link_invoice'],
+        'permission' => 'invoices.edit + project_payments.link_invoice',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.invoices.payments.unapply',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:invoices', 'can:invoices.edit', 'can:project_payments.link_invoice'],
+        'permission' => 'invoices.edit + project_payments.link_invoice',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.invoices.print',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:invoices', 'can:invoices.print', 'can:invoices.view_financial'],
+        'permission' => 'invoices.print + invoices.view_financial',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.invoices.public-link.rotate',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:invoices', 'can:invoices.change_status'],
+        'permission' => 'invoices.change_status',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.invoices.replace',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:invoices', 'can:invoices.create'],
+        'permission' => 'invoices.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.invoices.send',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:invoices', 'can:invoices.change_status', 'throttle:10,1'],
+        'permission' => 'invoices.change_status',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.invoices.show',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:invoices', 'can:invoices.view'],
+        'permission' => 'invoices.view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.invoices.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:invoices', 'can:invoices.create'],
+        'permission' => 'invoices.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.invoices.totals.preview',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:invoices', 'can:invoices.create', 'throttle:60,1'],
+        'permission' => 'invoices.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.invoices.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:invoices', 'can:invoices.edit'],
+        'permission' => 'invoices.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.payment-methods.create',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:payment_methods', 'can:payment_methods.create'],
+        'permission' => 'payment_methods.create',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.payment-methods.default',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:payment_methods', 'can:payment_methods.edit'],
+        'permission' => 'payment_methods.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.payment-methods.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:payment_methods', 'can:payment_methods.delete'],
+        'permission' => 'payment_methods.delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.payment-methods.edit',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:payment_methods', 'can:payment_methods.edit'],
+        'permission' => 'payment_methods.edit',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.payment-methods.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:payment_methods', 'can:payment_methods.view_any'],
+        'permission' => 'payment_methods.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.payment-methods.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:payment_methods', 'can:payment_methods.create'],
+        'permission' => 'payment_methods.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.payment-methods.toggle',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:payment_methods', 'can:payment_methods.change_status'],
+        'permission' => 'payment_methods.change_status',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.payment-methods.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:payment_methods', 'can:payment_methods.edit'],
+        'permission' => 'payment_methods.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.payments.export',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:payments', 'can:payments.export', 'can:payments.view_financial'],
+        'permission' => 'payments.export + payments.view_financial',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.payments.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:payments', 'can:payments.view_any', 'can:payments.view_financial'],
+        'permission' => 'payments.view_any + payments.view_financial',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.reports.finance.expenses',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:reports', 'can:expenses.view_reports', 'can:expenses.view_financial'],
+        'permission' => 'expenses.view_reports + expenses.view_financial',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.reports.finance.export',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:reports', 'can:reports.view_reports', 'throttle:20,1'],
+        'permission' => 'reports.view_reports',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.reports.finance.income',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:reports', 'can:income.view_reports', 'can:income.view_financial'],
+        'permission' => 'income.view_reports + income.view_financial',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.reports.finance.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:reports', 'can:reports.view_reports'],
+        'permission' => 'reports.view_reports',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.reports.finance.profit-loss',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:reports', 'can:income.view_reports', 'can:income.view_financial', 'can:expenses.view_financial'],
+        'permission' => 'income.view_reports + income.view_financial + expenses.view_financial',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'admin.reports.finance.receivables-aging',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:reports', 'can:invoices.view_reports', 'can:invoices.view_financial'],
+        'permission' => 'invoices.view_reports + invoices.view_financial',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'site.invoices.pdf',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'signed', 'invoice_link', 'throttle:10,1'],
+        'permission' => null,
+        'panel' => 'public',
+        'state_changing' => false,
+        'rationale' => 'The same gate as site.invoices.view. dompdf is not installed in this release (D81), so it '
+            .'answers 404 rather than streaming an HTML blob with a .pdf name.',
+        'owner_phase' => 13,
+    ],
+
+    [
+        'route' => 'site.invoices.view',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'signed', 'invoice_link', 'throttle:30,1'],
+        'permission' => null,
+        'panel' => 'public',
+        'state_changing' => false,
+        'rationale' => 'The client-facing copy of their own invoice. Authorisation is the 40-character public_token plus '
+            .'Laravel\'s signed-URL check, which carries the expiry from finance.invoice_public_link_days; '
+            .'invoice_link 404s when the feature is switched off, and a draft, a cancelled invoice and a '
+            .'rotated token are 404s too. It reads one document - no payment, no comment, no upload, and no '
+            .'other invoice is reachable from it.',
+        'owner_phase' => 13,
+    ],
+
 ];

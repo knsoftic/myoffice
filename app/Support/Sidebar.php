@@ -476,12 +476,16 @@ final class Sidebar
                         'module' => 'invoices',
                         'permission' => 'invoices.view_any',
                     ],
+                    // phase-13 §7.5. Two permissions, and-ed, because the route demands both: the
+                    // register's whole content is amounts, so a version of it without them would be a
+                    // list of reference numbers. Advertising only `view_any` would be a visible link
+                    // that 403s.
                     [
                         'label' => 'Payments',
                         'icon' => 'credit-card',
                         'route' => 'admin.payments.index',
                         'module' => 'payments',
-                        'permission' => 'payments.view_any',
+                        'permission' => ['payments.view_any', 'payments.view_financial'],
                     ],
                     [
                         'label' => 'Expenses',
@@ -489,6 +493,16 @@ final class Sidebar
                         'route' => 'admin.expenses.index',
                         'module' => 'expenses',
                         'permission' => 'expenses.view_any',
+                    ],
+                    // phase-13 §8.8. Its own entry rather than a tab: a claim waiting for a decision
+                    // is work somebody has to notice, and a queue nobody can see from the sidebar is a
+                    // queue that grows.
+                    [
+                        'label' => 'Expense Approvals',
+                        'icon' => 'check-badge',
+                        'route' => 'admin.expenses.approvals',
+                        'module' => 'expenses',
+                        'permission' => 'expenses.approve',
                     ],
                     [
                         'label' => 'Income',
@@ -503,6 +517,24 @@ final class Sidebar
                         'route' => 'admin.payment-methods.index',
                         'module' => 'payment_methods',
                         'permission' => 'payment_methods.view_any',
+                    ],
+                    // phase-13 §2.3. The module holds no amount, so somebody who maintains the list
+                    // never has to be given sight of a figure to do it.
+                    [
+                        'label' => 'Finance Categories',
+                        'icon' => 'tag',
+                        'route' => 'admin.finance-categories.index',
+                        'module' => 'finance_categories',
+                        'permission' => 'finance_categories.view_any',
+                    ],
+                    // phase-13 §7.6. Double-gated at the route: the hub opens on
+                    // `reports.view_reports`, and each report needs its source module's pair.
+                    [
+                        'label' => 'Finance Reports',
+                        'icon' => 'chart-bar',
+                        'route' => 'admin.reports.finance.index',
+                        'module' => 'reports',
+                        'permission' => 'reports.view_reports',
                     ],
                 ],
             ],
@@ -1494,10 +1526,16 @@ final class Sidebar
             return null;
         }
 
-        $permission = isset($item['permission']) ? (string) $item['permission'] : null;
+        // A list is and-ed, exactly as multiple `can:` entries on one route are. An item that
+        // advertised only the first of a route's two permissions would be a visible link that 403s —
+        // which is the whole failure `PermissionStringConsistencyTest` exists to catch. The cross-source
+        // payments register is the first route in the system that needs two (phase-13 §7.5).
+        $permission = self::permissionOf($item);
 
-        if ($permission !== null && ! self::allows($user, $permission)) {
-            return null;
+        foreach ((array) ($permission ?? []) as $required) {
+            if (! self::allows($user, (string) $required)) {
+                return null;
+            }
         }
 
         // Gate 4: a condition the permission cannot express. Employee self-service is the first case —
@@ -1545,6 +1583,32 @@ final class Sidebar
         $resolved['active'] = self::isActive($resolved);
 
         return $resolved;
+    }
+
+    /**
+     * The item's permission rule: one name, a list of names that are and-ed, or null.
+     *
+     * @param  array<string, mixed>  $item
+     * @return string|list<string>|null
+     */
+    public static function permissionOf(array $item): string|array|null
+    {
+        $permission = $item['permission'] ?? null;
+
+        if (is_array($permission)) {
+            $names = array_values(array_filter(array_map(
+                static fn (mixed $name): string => (string) $name,
+                $permission,
+            ), static fn (string $name): bool => $name !== ''));
+
+            return $names === [] ? null : $names;
+        }
+
+        if (is_string($permission) && $permission !== '') {
+            return $permission;
+        }
+
+        return null;
     }
 
     private static function allows(User $user, string $permission): bool
