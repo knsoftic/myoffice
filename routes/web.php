@@ -8,6 +8,7 @@ use App\Http\Controllers\Site\ContactController;
 use App\Http\Controllers\Site\HomeController;
 use App\Http\Controllers\Site\PortfolioController;
 use App\Http\Controllers\Site\PreviewController;
+use App\Http\Controllers\Site\AdmissionController as SiteAdmissionController;
 use App\Http\Controllers\Site\CourseController as SiteCourseController;
 use App\Http\Controllers\Site\PublicInvoiceController;
 use App\Http\Controllers\Site\ReferralController;
@@ -158,6 +159,51 @@ Route::middleware(['capture_referral', 'site', 'site_module:courses', 'site.prev
             ->whereNumber('resource')
             ->name('site.courses.resource');
     });
+
+/*
+|--------------------------------------------------------------------------
+| phase-14-17 §7.10 — the public admission form (§67)
+|--------------------------------------------------------------------------
+| `site_module:` rather than `module:` — §7.10's table writes the latter, but
+| INV-15 is explicit that a disabled content module answers a PLAIN 404 on a
+| public route: a 403 tells a visitor and a crawler that the feature exists
+| and is merely shut to them. Phase 14's course pages already use it.
+|
+| Never `site.cache`: the form carries a CSRF token, a one-time idempotency
+| ULID and a referral field, and a cached copy of any of the three is a form
+| that cannot be submitted or that attributes the wrong partner.
+|
+| `admission.open` renders the "admissions are closed" page with a 200 and a
+| noindex rather than a 404 — the institute exists, it is simply not taking
+| admissions today, and a 404 would tell a visitor the page was never real.
+| A staff user holding `admissions.create` passes through and sees a ribbon
+| naming the state, which is how somebody checks the form before opening it.
+|
+| The thank-you page is bound on `application_number` and is **signed**, so a
+| number that is guessable by design cannot be walked.
+*/
+Route::middleware(['capture_referral', 'site', 'site_module:students', 'site.preview', 'admission.open'])
+    ->group(static function (): void {
+        Route::get('admission', [SiteAdmissionController::class, 'create'])->name('site.admission.create');
+        Route::post('admission', [SiteAdmissionController::class, 'store'])
+            ->middleware('throttle:5,1')
+            ->name('site.admission.store');
+    });
+
+Route::get('admission/submitted/{application:application_number}', [SiteAdmissionController::class, 'submitted'])
+    ->middleware(['signed', 'site'])
+    ->name('site.admission.submitted');
+
+/*
+|--------------------------------------------------------------------------
+| phase-14-17 §7.10 — the public course enquiry (§86)
+|--------------------------------------------------------------------------
+| POST only: the form itself is a block on the course page, and a GET here
+| would be a second admission form nobody maintains.
+*/
+Route::post('course-inquiries', [SiteAdmissionController::class, 'storeInquiry'])
+    ->middleware(['capture_referral', 'site', 'site_module:course_inquiries', 'throttle:5,1'])
+    ->name('site.course-inquiries.store');
 
 /*
 |--------------------------------------------------------------------------

@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\CachePublicResponse;
 use App\Http\Middleware\CaptureReferral;
+use App\Http\Middleware\EnsureAdmissionFormOpen;
 use App\Http\Middleware\EnsureClientContext;
 use App\Http\Middleware\EnsureInvoicePublicLinkEnabled;
 use App\Http\Middleware\EnsureModuleEnabled;
@@ -115,6 +116,10 @@ return Application::configure(basePath: dirname(__DIR__))
             // phase-13 §7.8: the public invoice link is a setting, and switching it off must actually
             // close the door. 404, never 403 — the same answer a rotated token and a draft get.
             'invoice_link' => EnsureInvoicePublicLinkEnabled::class,
+            // phase-14-17 §7.10: the public admission form's own gate. Closed answers 200 with a
+            // noindex rather than 404 — the page exists, admissions are simply shut today — and a
+            // staff user holding `admissions.create` passes through to preview it.
+            'admission.open' => EnsureAdmissionFormOpen::class,
             'capture_referral' => CaptureReferral::class,
             'role' => RoleMiddleware::class,
             'permission' => PermissionMiddleware::class,

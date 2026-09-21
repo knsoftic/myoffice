@@ -205,15 +205,6 @@ class StudentApplication extends Model
         });
     }
 
-    /**
-     * The public thank-you page is bound on the number, not the id — and the URL is signed, so the
-     * number cannot be enumerated even though it is guessable.
-     */
-    public function getRouteKeyName(): string
-    {
-        return 'application_number';
-    }
-
     /*
     |--------------------------------------------------------------------------
     | Relations

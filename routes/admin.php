@@ -57,9 +57,14 @@ use App\Http\Controllers\Admin\Finance\FinanceCategoryController;
 use App\Http\Controllers\Admin\Finance\FinanceReportController;
 use App\Http\Controllers\Admin\Finance\IncomeController;
 use App\Http\Controllers\Admin\Finance\InvoiceController;
+use App\Http\Controllers\Admin\Institute\AdmissionController;
 use App\Http\Controllers\Admin\Institute\CourseCategoryController;
+use App\Http\Controllers\Admin\Institute\CourseInquiryController;
+use App\Http\Controllers\Admin\Institute\DemoClassController;
 use App\Http\Controllers\Admin\Institute\CourseController;
 use App\Http\Controllers\Admin\Institute\CourseOutlineController;
+use App\Http\Controllers\Admin\Institute\StudentApplicationController;
+use App\Http\Controllers\Admin\Institute\StudentController;
 use App\Http\Controllers\Admin\Finance\PaymentMethodController;
 use App\Http\Controllers\Admin\Finance\PaymentRegisterController;
 use App\Http\Controllers\Admin\Finance\ProjectPaymentController;
@@ -1704,6 +1709,151 @@ Route::prefix('admin')
             Route::post('course-topics/{topic}/assignments', [CourseOutlineController::class, 'storeAssignment'])->whereNumber('topic')->middleware('can:course_outline.create')->name('course-topic-assignments.store');
             Route::put('course-topic-assignments/{blueprint}', [CourseOutlineController::class, 'updateAssignment'])->whereNumber('blueprint')->middleware('can:course_outline.edit')->name('course-topic-assignments.update');
             Route::delete('course-topic-assignments/{blueprint}', [CourseOutlineController::class, 'destroyAssignment'])->whereNumber('blueprint')->middleware('can:course_outline.delete')->name('course-topic-assignments.destroy');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Course inquiries — phase-14-17 §7.3, §8.5
+        |----------------------------------------------------------------------
+        |
+        | The counsellor's queue. `promote` and `convert` carry the permission of
+        | the module they cross into rather than this one: promoting writes a
+        | `student_applications` row and converting writes a student and an
+        | admission, and a permission that opened a door into another module
+        | would make that module's boundary decorative.
+        |
+        | The funnel report is `view_reports`, not `view_any`: the conversion
+        | rate is a management number, and working the queue is a job.
+        |
+        */
+        Route::middleware('module:course_inquiries')->group(static function (): void {
+            Route::get('course-inquiries', [CourseInquiryController::class, 'index'])->middleware('can:course_inquiries.view_any')->name('course-inquiries.index');
+            Route::get('course-inquiries/create', [CourseInquiryController::class, 'create'])->middleware('can:course_inquiries.create')->name('course-inquiries.create');
+            Route::post('course-inquiries', [CourseInquiryController::class, 'store'])->middleware('can:course_inquiries.create')->name('course-inquiries.store');
+            // Declared before `{inquiry}` so "reports" and "export" are never read as an id.
+            Route::get('course-inquiries/reports/funnel', [CourseInquiryController::class, 'funnel'])->middleware('can:course_inquiries.view_reports')->name('course-inquiries.funnel');
+            Route::get('course-inquiries/export/{format}', [CourseInquiryController::class, 'export'])->middleware('can:course_inquiries.export')->name('course-inquiries.export');
+
+            Route::get('course-inquiries/{inquiry}', [CourseInquiryController::class, 'show'])->whereNumber('inquiry')->middleware('can:view,inquiry')->name('course-inquiries.show');
+            Route::put('course-inquiries/{inquiry}', [CourseInquiryController::class, 'update'])->whereNumber('inquiry')->middleware('can:update,inquiry')->name('course-inquiries.update');
+            Route::delete('course-inquiries/{inquiry}', [CourseInquiryController::class, 'destroy'])->whereNumber('inquiry')->middleware('can:delete,inquiry')->name('course-inquiries.destroy');
+
+            Route::post('course-inquiries/{inquiry}/follow-ups', [CourseInquiryController::class, 'storeFollowUp'])->whereNumber('inquiry')->middleware('can:logFollowUp,inquiry')->name('course-inquiries.follow-ups.store');
+            Route::post('course-inquiries/{inquiry}/assign', [CourseInquiryController::class, 'assign'])->whereNumber('inquiry')->middleware('can:assign,inquiry')->name('course-inquiries.assign');
+            Route::post('course-inquiries/{inquiry}/status', [CourseInquiryController::class, 'status'])->whereNumber('inquiry')->middleware('can:changeStatus,inquiry')->name('course-inquiries.status');
+            Route::post('course-inquiries/{inquiry}/promote', [CourseInquiryController::class, 'promote'])->whereNumber('inquiry')->middleware('can:promote,inquiry')->name('course-inquiries.promote');
+            Route::post('course-inquiries/{inquiry}/convert', [CourseInquiryController::class, 'convert'])->whereNumber('inquiry')->middleware('can:convert,inquiry')->name('course-inquiries.convert');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | The §67 application inbox — phase-14-17 §7.3, §8.6
+        |----------------------------------------------------------------------
+        |
+        | Its own module (§4.1) so a receptionist can triage without holding
+        | `students.create`. There is no destroy route and there never will be:
+        | the module declares no `delete` ability, because a public submission is
+        | evidence somebody asked and is rejected or marked duplicate, not
+        | removed.
+        |
+        */
+        Route::middleware('module:student_applications')->group(static function (): void {
+            Route::get('student-applications', [StudentApplicationController::class, 'index'])->middleware('can:student_applications.view_any')->name('student-applications.index');
+            Route::get('student-applications/export/{format}', [StudentApplicationController::class, 'export'])->middleware('can:student_applications.export')->name('student-applications.export');
+            Route::get('student-applications/{application}', [StudentApplicationController::class, 'show'])->whereNumber('application')->middleware('can:view,application')->name('student-applications.show');
+
+            Route::post('student-applications/{application}/claim', [StudentApplicationController::class, 'claim'])->whereNumber('application')->middleware('can:claim,application')->name('student-applications.claim');
+            Route::post('student-applications/{application}/duplicate', [StudentApplicationController::class, 'duplicate'])->whereNumber('application')->middleware('can:markDuplicate,application')->name('student-applications.duplicate');
+            Route::post('student-applications/{application}/reject', [StudentApplicationController::class, 'reject'])->whereNumber('application')->middleware('can:reject,application')->name('student-applications.reject');
+            Route::post('student-applications/{application}/withdraw', [StudentApplicationController::class, 'withdraw'])->whereNumber('application')->middleware('can:withdraw,application')->name('student-applications.withdraw');
+            Route::post('student-applications/{application}/convert', [StudentApplicationController::class, 'convert'])->whereNumber('application')->middleware('can:convert,application')->name('student-applications.convert');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Demo classes — phase-14-17 §7.3, §8.9
+        |----------------------------------------------------------------------
+        |
+        | A demo holds a teacher and a room for an hour, so booking one is a
+        | scheduling act and the two `active_guard` unique indexes are what stop
+        | two people arriving at one door. `slip` is `print`, which is a
+        | different right from booking.
+        |
+        */
+        Route::middleware('module:demo_classes')->group(static function (): void {
+            Route::get('demo-classes', [DemoClassController::class, 'index'])->middleware('can:demo_classes.view_any')->name('demo-classes.index');
+            Route::get('demo-classes/calendar', [DemoClassController::class, 'calendar'])->middleware('can:demo_classes.view_any')->name('demo-classes.calendar');
+            Route::post('demo-classes', [DemoClassController::class, 'store'])->middleware('can:demo_classes.create')->name('demo-classes.store');
+
+            Route::get('demo-classes/{demo}/slip', [DemoClassController::class, 'slip'])->whereNumber('demo')->middleware('can:print,demo')->name('demo-classes.slip');
+            Route::put('demo-classes/{demo}', [DemoClassController::class, 'update'])->whereNumber('demo')->middleware('can:update,demo')->name('demo-classes.update');
+            Route::post('demo-classes/{demo}/reschedule', [DemoClassController::class, 'reschedule'])->whereNumber('demo')->middleware('can:reschedule,demo')->name('demo-classes.reschedule');
+            Route::post('demo-classes/{demo}/status', [DemoClassController::class, 'status'])->whereNumber('demo')->middleware('can:changeStatus,demo')->name('demo-classes.status');
+            Route::post('demo-classes/{demo}/convert', [DemoClassController::class, 'convert'])->whereNumber('demo')->middleware('can:convert,demo')->name('demo-classes.convert');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Students — phase-14-17 §7.4, §8.7
+        |----------------------------------------------------------------------
+        |
+        | A student with fees, receipts, enrolments or attendance is never
+        | deletable: four foreign keys refuse it, and the policy refuses first so
+        | the screen can explain. `merge` carries `delete` rather than `edit`,
+        | because one of the two records stops existing.
+        |
+        */
+        Route::middleware('module:students')->group(static function (): void {
+            Route::get('students', [StudentController::class, 'index'])->middleware('can:students.view_any')->name('students.index');
+            Route::get('students/create', [StudentController::class, 'create'])->middleware('can:students.create')->name('students.create');
+            Route::post('students', [StudentController::class, 'store'])->middleware('can:students.create')->name('students.store');
+            Route::get('students/export/{format}', [StudentController::class, 'export'])->middleware('can:students.export')->name('students.export');
+            Route::post('students/import', [StudentController::class, 'import'])->middleware('can:students.import')->name('students.import');
+
+            Route::get('students/{student}', [StudentController::class, 'show'])->whereNumber('student')->middleware('can:view,student')->name('students.show');
+            Route::get('students/{student}/edit', [StudentController::class, 'edit'])->whereNumber('student')->middleware('can:update,student')->name('students.edit');
+            Route::put('students/{student}', [StudentController::class, 'update'])->whereNumber('student')->middleware('can:update,student')->name('students.update');
+            Route::delete('students/{student}', [StudentController::class, 'destroy'])->whereNumber('student')->middleware('can:delete,student')->name('students.destroy');
+
+            Route::post('students/{student}/status', [StudentController::class, 'status'])->whereNumber('student')->middleware('can:changeStatus,student')->name('students.status');
+            Route::post('students/{student}/login', [StudentController::class, 'createLogin'])->whereNumber('student')->middleware('can:createLogin,student')->name('students.login.store');
+            Route::post('students/{student}/merge', [StudentController::class, 'merge'])->whereNumber('student')->middleware('can:merge,student')->name('students.merge');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Admissions — phase-14-17 §7.4, §8.8
+        |----------------------------------------------------------------------
+        |
+        | §68's pipeline as a stepper. Each step carries the permission of what
+        | it actually does: `fees` is `student_fees.create` because Phase 18
+        | writes the charge, and `batch` / `transfer` are `batches.assign`
+        | because Phase 16 owns the seat. This phase holds the stage column and
+        | delegates both.
+        |
+        | `figures` is `admissions.edit` and is refused by the policy once the
+        | figures are locked — a correction after the first charge is a fee
+        | adjustment, which leaves its own row (INV-I2).
+        |
+        */
+        Route::middleware('module:admissions')->group(static function (): void {
+            Route::get('admissions', [AdmissionController::class, 'index'])->middleware('can:admissions.view_any')->name('admissions.index');
+            Route::get('admissions/create', [AdmissionController::class, 'create'])->middleware('can:admissions.create')->name('admissions.create');
+            Route::post('admissions', [AdmissionController::class, 'store'])->middleware('can:admissions.create')->name('admissions.store');
+            Route::get('admissions/export/{format}', [AdmissionController::class, 'export'])->middleware('can:admissions.export')->name('admissions.export');
+
+            Route::get('admissions/{admission}', [AdmissionController::class, 'show'])->whereNumber('admission')->middleware('can:view,admission')->name('admissions.show');
+            Route::get('admissions/{admission}/print', [AdmissionController::class, 'print'])->whereNumber('admission')->middleware('can:print,admission')->name('admissions.print');
+            Route::put('admissions/{admission}/figures', [AdmissionController::class, 'figures'])->whereNumber('admission')->middleware('can:updateFigures,admission')->name('admissions.figures');
+
+            Route::post('admissions/{admission}/register', [AdmissionController::class, 'register'])->whereNumber('admission')->middleware('can:changeStatus,admission')->name('admissions.register');
+            Route::post('admissions/{admission}/fees', [AdmissionController::class, 'fees'])->whereNumber('admission')->middleware('can:student_fees.create')->name('admissions.fees');
+            Route::post('admissions/{admission}/batch', [AdmissionController::class, 'batch'])->whereNumber('admission')->middleware('can:batches.assign')->name('admissions.batch');
+            Route::post('admissions/{admission}/activate', [AdmissionController::class, 'activate'])->whereNumber('admission')->middleware('can:changeStatus,admission')->name('admissions.activate');
+            Route::post('admissions/{admission}/complete', [AdmissionController::class, 'complete'])->whereNumber('admission')->middleware('can:changeStatus,admission')->name('admissions.complete');
+            Route::post('admissions/{admission}/cancel', [AdmissionController::class, 'cancel'])->whereNumber('admission')->middleware('can:cancel,admission')->name('admissions.cancel');
+            Route::post('admissions/{admission}/withdraw', [AdmissionController::class, 'withdraw'])->whereNumber('admission')->middleware('can:withdraw,admission')->name('admissions.withdraw');
+            Route::post('admissions/{admission}/transfer', [AdmissionController::class, 'transfer'])->whereNumber('admission')->middleware('can:batches.assign')->name('admissions.transfer');
         });
 
         /*
