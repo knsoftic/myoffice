@@ -882,7 +882,33 @@ final class PermissionRegistry
                 'abilities' => self::merge(
                     self::READ,
                     [Ability::Create, Ability::Print, Ability::Export],
+                    // phase-18 §4.2 (Q2, F-6.9): spine §6.6 row 6 and FT-39 both require "the module's
+                    // `approve` ability" to post a receipt older than `finance.backdate_limit_days`,
+                    // and spine §4.1 never granted the module one — so the rule they state could not be
+                    // enforced by the gate they name. No role gains it by default, so the back-date
+                    // window tightens rather than loosens.
+                    self::APPROVE,
                     self::STATUS, self::MONEY, self::REPORTS, self::LOGS,
+                ),
+            ],
+            'fee_reminders' => [
+                'name' => 'Fee Reminders',
+                'group' => ModuleGroup::Institute,
+                'icon' => 'bell-alert',
+                'is_core' => false,
+                'sort' => 650,
+                // phase-18 §4.1. "Tell a student they owe money" is a different act from editing a fee:
+                // a Receptionist may do the first and must not do the second, and folding the two into
+                // `student_fees.edit` would have meant granting the second to get the first.
+                //
+                // No `edit` and no `delete`. A sent reminder is a log row — it cannot be edited into
+                // having said something else, and deleting it would remove the one piece of evidence a
+                // student disputing being chased would want. D19 is why the table has no `deleted_at`
+                // either.
+                'abilities' => self::merge(
+                    self::READ,
+                    [Ability::Create],
+                    self::LOGS,
                 ),
             ],
             'installments' => [
@@ -1456,6 +1482,10 @@ final class PermissionRegistry
         // one; a receipt belongs to a fee charge and a project payment to a project.
         'wallet_reconciliation' => ['collaborator_wallets'],
         'student_fee_payments' => ['student_fees'],
+        // A reminder is about a charge, and `Gate::before` denies every ability of a disabled
+        // module — without this edge, switching `student_fees` off would leave the reminder
+        // screens reachable and pointed at nothing.
+        'fee_reminders' => ['student_fees'],
         'project_payments' => ['projects'],
         'payment_reversals' => ['project_payments'],
         'collaborator_referral_visits' => ['collaborators'],

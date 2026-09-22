@@ -42,6 +42,7 @@ use App\Services\Collaborator\CommissionEntitlementService;
 use App\Services\Collaborator\CommissionRuleService;
 use App\Services\Collaborator\ReferralService;
 use App\Services\Finance\Exceptions\PaymentRuleException;
+use App\Services\Institute\StudentFeeService;
 use App\Support\Collaborator\CommissionSettings;
 use App\Support\Format;
 use App\Support\Money;
@@ -824,57 +825,30 @@ final class PaymentService
     }
 
     /**
-     * Recompute the charge's caches from their canonical SQL, under the lock the caller is holding.
+     * Recompute the charge's caches — **by asking Phase 18, which owns them** (phase-18 §2.3, §6.4.1).
      *
-     * Derived rather than incremented, so a cache that has drifted for any reason — a historical
-     * import, a half-applied release, a reversal approved out of order — is repaired by the next
-     * receipt instead of drifting further. `discount_amount`, `scholarship_amount` and `net_amount`
-     * belong to Phase 18's `StudentFeeService` and are deliberately left alone: this method knows
-     * about money arriving, not about what was charged.
+     * This method used to do the arithmetic itself and derive the status through a private
+     * `chargeStatus()`. By the time Phase 18 shipped, the two definitions had drifted in three ways,
+     * none of them a typo:
+     *
+     *   · a charge covered entirely by a scholarship (`net 0.00`, nothing received) never reached
+     *     `paid` — it fell past every branch to the due-date one and read `pending` or `overdue`;
+     *   · a part-paid charge past its due date always read `partial`, never `overdue`;
+     *   · `refunded_amount` was summed from `payment_reversals` including reversals of **voided**
+     *     receipts, counting money that never counted.
+     *
+     * That is what happens when one question has two answers in two files, and it is why
+     * `StudentFeeService::deriveStatus()` is now the only one — called by the payment path, the
+     * discount path and the nightly sweeper alike. It also owns `discount_amount`,
+     * `scholarship_amount` and `net_amount`, which this method never wrote.
+     *
+     * `StudentFeeService` is resolved rather than injected because it depends on this service for
+     * `transferPayment()`: two constructors that need each other cannot both be built. Resolving at
+     * the point of use breaks the cycle without either side pretending it is independent.
      */
     private function recomputeCharge(StudentFee $charge): void
     {
-        $paid = (string) (StudentFeePayment::query()
-            ->where('student_fee_id', $charge->getKey())
-            ->whereNot('status', ReceivedPaymentStatus::Voided->value)
-            ->sum('amount') ?: Money::ZERO);
-
-        $refunded = (string) (PaymentReversal::query()
-            ->whereIn('student_fee_payment_id', StudentFeePayment::query()
-                ->where('student_fee_id', $charge->getKey())
-                ->select('id'))
-            ->whereNot('approval_status', ReversalApprovalStatus::Rejected->value)
-            ->sum('amount') ?: Money::ZERO);
-
-        $paid = Money::of($paid);
-        $refunded = Money::of($refunded);
-        $net = Money::of((string) $charge->net_amount);
-        $balance = Money::sub($net, Money::sub($paid, $refunded));
-
-        $charge->forceFill([
-            'paid_amount' => $paid,
-            'refunded_amount' => $refunded,
-            'balance_amount' => $balance,
-            'status' => $this->chargeStatus($charge, $balance, $paid, $refunded),
-        ])->save();
-    }
-
-    private function chargeStatus(StudentFee $charge, string $balance, string $paid, string $refunded): string
-    {
-        if ($charge->status === StudentFeeStatus::Cancelled) {
-            return StudentFeeStatus::Cancelled->value;
-        }
-
-        $net = Money::sub($paid, $refunded);
-
-        return match (true) {
-            Money::isNegative($balance) => StudentFeeStatus::Overpaid->value,
-            Money::isZero($balance) && Money::isPositive($net) => StudentFeeStatus::Paid->value,
-            Money::isZero($net) && Money::isPositive($refunded) => StudentFeeStatus::Refunded->value,
-            Money::isPositive($net) => StudentFeeStatus::Partial->value,
-            $charge->due_date !== null && $charge->due_date->lessThan(Carbon::now(Format::timezone())->startOfDay()) => StudentFeeStatus::Overdue->value,
-            default => StudentFeeStatus::Pending->value,
-        };
+        app(StudentFeeService::class)->recomputeCaches($charge);
     }
 
     /**

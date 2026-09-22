@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Enums\RemainderPlacement;
 use App\Enums\Cms\SitemapChangeFrequency;
 use App\Enums\FixedCommissionRelease;
 use App\Enums\ProgressBasis;
@@ -3631,6 +3632,134 @@ final class SettingsRegistry
                 'readonly' => true,
                 'span' => 4,
                 'sort' => 130,
+            ],
+
+
+            // phase-18 §5 — the ten fee keys, all into the existing `institute` group. Nothing here is
+            // a new group and nothing redefines a key Phase 2 or the spine already declared
+            // (`fee_receipt_prefix`, `fee_record_prefix`, both counters, `installment_reminder_days`,
+            // `finance.backdate_limit_days` and every `collaborator.*` commission key are used as they
+            // stand). Validation comes from `rulesFor('institute')`, so the settings Form Request needs
+            // no duplicate list.
+            'fee_due_days' => [
+                'label' => 'Default payment window',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'between:1,28'],
+                'default' => 7,
+                'help' => 'How long after it is raised a charge falls due, when the admission, the batch or '
+                    .'the wizard gives no date of its own.',
+                'suffix' => 'days',
+                'span' => 4,
+                'sort' => 140,
+            ],
+            'monthly_fee_due_day' => [
+                'label' => 'Monthly fee falls due on',
+                'type' => self::TYPE_NUMBER,
+                // Capped at 28 rather than 31 so the due day exists in February as well. The generator
+                // clamps to the month end anyway, but a setting that silently means something different
+                // in one month of the year is a setting nobody can reason about.
+                'rules' => ['required', 'integer', 'between:1,28'],
+                'default' => 5,
+                'help' => 'Day of the month a generated monthly fee is due.',
+                'span' => 4,
+                'sort' => 150,
+            ],
+            'fee_overdue_grace_days' => [
+                'label' => 'Grace before a fee counts as overdue',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'between:0,60'],
+                'default' => 0,
+                'help' => 'Days after the due date before the nightly sweep marks a charge or an installment '
+                    .'overdue. 0 marks it the next day.',
+                'suffix' => 'days',
+                'span' => 4,
+                'sort' => 160,
+            ],
+            'installment_remainder_placement' => [
+                'label' => 'Rounding remainder goes to',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string', 'in:first,last'],
+                'default' => RemainderPlacement::Last->value,
+                // `Largest` is deliberately not offered: every line of a generated plan is the same size
+                // before the remainder is placed, so "largest" and "first" would be the same button.
+                'options' => [
+                    RemainderPlacement::First->value => 'The first installment',
+                    RemainderPlacement::Last->value => 'The last installment',
+                ],
+                'help' => 'A fee that will not divide evenly leaves a few paisa. 10,000.00 over three is '
+                    .'3,333.33 · 3,333.33 · 3,333.34 with the remainder last. The split is exact either way.',
+                'span' => 4,
+                'sort' => 170,
+            ],
+            'discount_approval_required' => [
+                'label' => 'A discount needs an approver',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'When on, every discount names who approved it, that person must hold the discount '
+                    .'approval permission, and nobody may approve their own unless they hold it themselves.',
+                'span' => 4,
+                'sort' => 180,
+            ],
+            'discount_max_percentage' => [
+                'label' => 'Largest percentage discount',
+                'type' => self::TYPE_DECIMAL,
+                'rules' => ['required', 'numeric', 'between:0,100'],
+                'default' => '100.0000',
+                'help' => 'Caps a percentage discount before the database CHECK has to. 100 allows a full waiver.',
+                'suffix' => '%',
+                'span' => 4,
+                'sort' => 190,
+            ],
+            'fee_structure_fee_types' => [
+                'label' => 'Heads the fee wizard offers',
+                'type' => self::TYPE_MULTISELECT,
+                'rules' => ['required', 'array', 'min:1'],
+                'default' => [
+                    StudentFeeType::AdmissionFee->value,
+                    StudentFeeType::RegistrationFee->value,
+                    StudentFeeType::CourseFee->value,
+                ],
+                'options' => StudentFeeType::options(),
+                'help' => 'Which heads the fee-structure wizard ticks by default. A head with a zero amount is '
+                    .'dropped rather than raised as a zero charge.',
+                'span' => 6,
+                'sort' => 200,
+            ],
+            'auto_generate_fee_structure_on_admission' => [
+                'label' => 'Raise fees when an admission is confirmed',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Runs the fee-structure generator as part of confirming an admission (§68). The '
+                    .'generator is duplicate-proof, so turning this on cannot double-charge anybody.',
+                'span' => 4,
+                'sort' => 210,
+            ],
+            'fee_slip_show_commission' => [
+                'label' => 'Print commission on the fee slip',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                // §41 lists commission among the slip's fields; §112 forbids showing it to the student.
+                // Both hold: this switch governs the STAFF copy only, and the student's copy is built
+                // through FeeSlipOptions::studentCopy(), which no setting and no query parameter can
+                // talk out of hiding the figures (§6.7.1).
+                'help' => 'Staff copies only, and only for someone who also holds the commission financial '
+                    .'permission. A student\'s copy never shows a rate or an amount whatever this says — it '
+                    .'names the collaborator and nothing more.',
+                'span' => 4,
+                'sort' => 220,
+            ],
+            'fee_slip_footer_note' => [
+                'label' => 'Fee slip footer',
+                'type' => self::TYPE_TEXTAREA,
+                'rules' => ['nullable', 'string', 'max:1000'],
+                'default' => null,
+                'help' => 'Printed at the bottom of every fee slip and receipt — terms, a refund-policy line, '
+                    .'bank details. Mirrors the invoice footer on the finance side.',
+                'span' => 12,
+                'sort' => 230,
             ],
 
             // phase-14-17 §5. The one Phase 14 key: how many courses a page of the public catalogue

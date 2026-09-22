@@ -186,6 +186,32 @@ class StudentFee extends Model
         return $this->belongsTo(User::class, 'cancelled_by');
     }
 
+    public function student(): BelongsTo
+    {
+        return $this->belongsTo(Student::class, 'student_id');
+    }
+
+    public function admission(): BelongsTo
+    {
+        return $this->belongsTo(StudentAdmission::class, 'student_admission_id');
+    }
+
+    public function course(): BelongsTo
+    {
+        return $this->belongsTo(Course::class, 'course_id');
+    }
+
+    public function batch(): BelongsTo
+    {
+        return $this->belongsTo(Batch::class, 'batch_id');
+    }
+
+    /** phase-18 2.2 - the log of every time this student was told about this charge. */
+    public function reminders(): HasMany
+    {
+        return $this->hasMany(StudentFeeReminder::class, 'student_fee_id')->orderByDesc('sent_at');
+    }
+
     public function installments(): HasMany
     {
         return $this->hasMany(StudentFeeInstallment::class, 'student_fee_id')->orderBy('installment_no');

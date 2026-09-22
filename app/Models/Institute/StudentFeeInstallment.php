@@ -114,6 +114,12 @@ class StudentFeeInstallment extends Model
         return $this->belongsTo(StudentFee::class, 'student_fee_id');
     }
 
+    /** phase-18 2.2. */
+    public function reminders(): HasMany
+    {
+        return $this->hasMany(StudentFeeReminder::class, 'student_fee_installment_id')->orderByDesc('sent_at');
+    }
+
     public function payments(): HasMany
     {
         return $this->hasMany(StudentFeePayment::class, 'student_fee_installment_id');

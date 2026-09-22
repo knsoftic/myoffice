@@ -11,6 +11,7 @@ use App\Enums\CollaborationType;
 use App\Enums\CollaboratorStatus;
 use App\Enums\CommissionCalculationType;
 use App\Enums\CommissionScope;
+use App\Enums\FeeDiscountType;
 use App\Enums\PaymentMethod;
 use App\Enums\ReferralSource;
 use App\Enums\ReferralSubject;
@@ -21,15 +22,18 @@ use App\Models\Collaborator\CollaboratorCommissionLedgerEntry;
 use App\Models\Collaborator\CollaboratorWallet;
 use App\Models\Institute\Student;
 use App\Models\Institute\StudentFee;
+use App\Models\Institute\StudentFeeDiscount;
 use App\Models\Institute\StudentFeeInstallment;
 use App\Models\Institute\StudentFeePayment;
 use App\Services\Collaborator\CommissionReconciliationService;
 use App\Services\Collaborator\CommissionRuleService;
 use App\Services\Collaborator\ReferralService;
 use App\Services\Finance\PaymentService;
+use App\Services\Institute\StudentFeeService;
 use App\Services\Institute\StudentService;
 use App\Support\Money;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
 
 /**
  * Fixtures and the shared assertion for the financial acceptance suite (phase-10-12 §11).
@@ -112,8 +116,8 @@ trait BuildsFinancialFixtures
             );
         }
 
-        $discount = $attributes['discount_amount'] ?? '0.00';
-        $net = Money::sub(Money::of($gross), Money::of($discount));
+        $discount = Money::of($attributes['discount_amount'] ?? '0.00');
+        $net = Money::sub(Money::of($gross), $discount);
 
         $fee = new StudentFee;
         $fee->forceFill(array_merge([
@@ -121,12 +125,40 @@ trait BuildsFinancialFixtures
             'student_id' => $studentId,
             'fee_type' => StudentFeeType::CourseFee->value,
             'gross_amount' => Money::of($gross),
-            'discount_amount' => Money::of($discount),
+            'discount_amount' => $discount,
             'net_amount' => $net,
             'balance_amount' => $net,
             'status' => StudentFeeStatus::Pending->value,
         ], array_diff_key($attributes, array_flip(['student_id', 'referred_on', 'discount_amount']))));
         $fee->save();
+
+        // **A discounted charge needs a discount ROW, not just a smaller number.**
+        //
+        // This used to write `discount_amount` and `net_amount` straight onto the charge and stop
+        // there, which was survivable only because the spine's `recomputeCharge()` deliberately left
+        // those two columns alone. Phase 18 owns them now (§2.3): `discount_amount` is defined as the
+        // sum of the discount rows, so a charge carrying 5,000 with no row behind it is exactly the
+        // drift `fees:verify-plan-integrity` exists to report — and the next recompute correctly reset
+        // it to zero, which moved the collectible and therefore the commission.
+        //
+        // The fixture now builds the state the application would: one row, then a recompute that
+        // derives the caches from it. `allowDirectWrites()` is the documented escape hatch for exactly
+        // this, and it skips the approver rule a real screen would enforce.
+        if (Money::isPositive($discount)) {
+            StudentFeeDiscount::allowDirectWrites(function () use ($fee, $discount): void {
+                (new StudentFeeDiscount)->forceFill([
+                    'student_fee_id' => $fee->getKey(),
+                    'type' => FeeDiscountType::FixedDiscount->value,
+                    // Signed: reductions are negative, so the bucket is a SUM rather than a case analysis.
+                    'amount' => Money::negate($discount),
+                    'reason' => 'Fixture discount',
+                    'effective_on' => Carbon::parse('2020-01-01')->toDateString(),
+                    'idempotency_key' => (string) Str::ulid(),
+                ])->save();
+            });
+
+            app(StudentFeeService::class)->recomputeCaches($fee->refresh());
+        }
 
         return $fee->refresh();
     }
