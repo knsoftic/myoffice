@@ -1,5 +1,7 @@
 <?php
 
+use App\Models\Activity;
+
 return [
 
     /*
@@ -39,7 +41,7 @@ return [
      * the extra context columns (ip_address, user_agent, device, module, reason) that
      * App\Models\Concerns\LogsActivityWithContext fills.
      */
-    'activity_model' => \App\Models\Activity::class,
+    'activity_model' => Activity::class,
 
     /*
      * This is the name of the table that will be created by the migration and
