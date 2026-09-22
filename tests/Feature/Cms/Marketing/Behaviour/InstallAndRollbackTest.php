@@ -211,7 +211,12 @@ final class InstallAndRollbackTest extends TestCase
     private function artisanInScratch(string $scratch, array $arguments): string
     {
         $result = Process::path(base_path())
-            ->timeout(600)
+            // 1800, not 600. This spawns a real `artisan migrate` over the **whole** schema, so its
+            // cost grows with every phase: 156 migrations take ~126s standalone and the test as a
+            // whole ~570s under PHPUnit, which left 30 seconds of headroom against the old ceiling.
+            // A gate that fails because the project got bigger teaches nobody anything — it just
+            // trains people to re-run the suite. The timeout still exists to catch a genuine hang.
+            ->timeout(1800)
             ->env([
                 'APP_ENV' => 'testing',
                 'DB_CONNECTION' => (string) config('database.default'),

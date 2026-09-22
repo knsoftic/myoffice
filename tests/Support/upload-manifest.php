@@ -355,7 +355,6 @@ return [
         'stored_as' => 'finance-reversals/{Y}/{m}/{ulid}.{ext} — shown on the parent row only',
     ],
 
-
     /*
     |--------------------------------------------------------------------------
     | Phase 14 — the one syllabus upload, on the private disk (D21, D85)

@@ -226,3 +226,41 @@ Schedule::command('invoices:mark-overdue')->dailyAt('01:05')->withoutOverlapping
 */
 Schedule::command('invoices:reconcile-balances', ['--quiet-when-ok'])->dailyAt('02:10')->withoutOverlapping();
 Schedule::command('expenses:flag-stale-approvals')->weeklyOn(1, '08:00')->withoutOverlapping();
+
+/*
+|--------------------------------------------------------------------------
+| Institute: scheduling, the register and the syllabus (phase-14-17 §10.4)
+|--------------------------------------------------------------------------
+| The commands live in app/Console/Commands/Institute and are auto-discovered. Times are in
+| app.schedule_timezone, which falls back to app.timezone = UTC (D61).
+|
+| **Three of these decide nothing, on purpose.**
+|
+| `attendance:flag-unmarked` lists the classes that finished without a register and stops there. Who
+| was in the room is a fact only a person in the room has, so a command that filled one in would be
+| inventing attendance — and an invented absence is on somebody's record for ever.
+|
+| `attendance:recount` and `batches:recount-students` are proofs, not repairs. Every percentage and
+| every counter is a cache that INV-I7 and INV-I11 say must be re-derivable; a row that moves here had
+| drifted, which means something wrote it that should not have. So each one is reported. A silent
+| nightly repair would let the same bug write a wrong number for a year without anybody noticing.
+|
+| `timetable:verify-clashes` is the same argument for INV-I8. `ScheduleClashDetector` stops a clash
+| being written through the application and the unique indexes stop the identical duplicate; neither
+| can stop a seeder, an import or raw SQL. This walks every live booking and asks the detector, and it
+| never moves anybody: which of two colliding classes gives way is a decision with a teacher and
+| thirty students attached to it.
+|
+| `institute:verify-constraints` exists because MariaDB DDL is not transactional (D70): a migration
+| that failed halfway can leave a table created and its CHECK missing, and a restore from an older
+| dump can do the same. It found a real gap on its very first run.
+*/
+
+Schedule::command('institute:generate-sessions')->dailyAt('00:20')->withoutOverlapping(30);
+Schedule::command('batches:advance-status')->dailyAt('00:30')->withoutOverlapping();
+Schedule::command('batches:recount-students')->dailyAt('01:40')->withoutOverlapping();
+Schedule::command('attendance:recount')->dailyAt('02:20')->withoutOverlapping(30);
+Schedule::command('progress:recompute')->dailyAt('02:40')->withoutOverlapping(30);
+Schedule::command('timetable:verify-clashes')->dailyAt('02:50')->withoutOverlapping();
+Schedule::command('institute:verify-constraints')->dailyAt('03:00');
+Schedule::command('attendance:flag-unmarked')->dailyAt('20:00')->withoutOverlapping();

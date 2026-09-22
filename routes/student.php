@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Student\AttendanceController;
 use App\Http\Controllers\Student\BatchController;
 use App\Http\Controllers\Student\DashboardController;
+use App\Http\Controllers\Student\ProgressController;
 use App\Http\Controllers\Student\TimetableController;
 use Illuminate\Support\Facades\Route;
 
@@ -62,4 +64,22 @@ Route::prefix('student')
         Route::get('teachers', [BatchController::class, 'teachers'])
             ->middleware(['module:teachers', 'can:student_portal.teachers'])
             ->name('teachers.index');
+
+        /*
+        |----------------------------------------------------------------------
+        | phase-14-17 §7.8 — their own register and their own syllabus
+        |----------------------------------------------------------------------
+        |
+        | Read-only, and scoped to the signed-in student's own enrolments. A
+        | student sees their own attendance and progress and nothing about a
+        | classmate — not a name, not a percentage, not a count (INV-I15).
+        |
+        */
+        Route::get('attendance', [AttendanceController::class, 'index'])
+            ->middleware(['module:student_attendance', 'can:student_portal.attendance'])
+            ->name('attendance.index');
+
+        Route::get('progress', [ProgressController::class, 'index'])
+            ->middleware(['module:student_progress', 'can:student_portal.progress'])
+            ->name('progress.index');
     });

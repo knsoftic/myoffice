@@ -40,6 +40,19 @@ final class SettingsMailTestTest extends TestCase
     /** TEST-NET-1 (RFC 5737): allowed by the guard, never reachable. */
     private const UNREACHABLE_HOST = '192.0.2.1';
 
+    /**
+     * The two sentences the application produces when it has **no** real reason to report — one from
+     * `TestMailService` when the transport's message is empty, one from `SettingsController` when
+     * something unexpected escapes. A failure message that is neither of these carries the transport's
+     * own words, whichever way the connection actually failed.
+     *
+     * @var list<string>
+     */
+    private const GENERIC_FAILURES = [
+        'the transport gave no reason',
+        'because of an unexpected error',
+    ];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -64,7 +77,16 @@ final class SettingsMailTestTest extends TestCase
         $message = (string) $response->json('message');
 
         $this->assertStringContainsString(self::UNREACHABLE_HOST, $message, 'The failure must name the SAVED host — proof the saved settings were used.');
-        $this->assertStringContainsString('Connection could not be established', $message, 'The transport’s own reason is surfaced, not a generic "failed".');
+
+        // The transport's own reason is surfaced, not a generic "failed" — asserted as "not one of the
+        // two fallbacks" rather than by pinning a sentence. Symfony reports "Connection could not be
+        // established" when the socket is refused and "Connection to ... timed out" when it opens and
+        // the handshake stalls, and which one happens is the network's decision: 192.0.2.1 is TEST-NET-1
+        // and is supposed to be dark, but plenty of ISPs run a middlebox that accepts any TCP connection.
+        // Both sentences are the real reason; neither fallback is.
+        foreach (self::GENERIC_FAILURES as $fallback) {
+            $this->assertStringNotContainsString($fallback, $message, 'The transport’s own reason is surfaced, not a generic "failed".');
+        }
         $this->assertStringNotContainsString('env-only-smtp.invalid', $message, 'The environment’s host must not have been used.');
 
         $response->assertDontSee(self::PASSWORD, false);
@@ -91,7 +113,9 @@ final class SettingsMailTestTest extends TestCase
         $this->actingAs($admin)
             ->get('/admin/settings/mail')
             ->assertOk()
-            ->assertSee('Connection could not be established', false)
+            // The saved host rather than a fixed sentence: see the note in the test above on why the
+            // transport's wording is the network's decision and not the application's.
+            ->assertSee(self::UNREACHABLE_HOST, false)
             ->assertDontSee(self::PASSWORD, false);
     }
 

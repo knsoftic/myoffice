@@ -207,6 +207,8 @@ use App\Models\Institute\DemoClass;
 use App\Models\Institute\Student;
 use App\Models\Institute\StudentAdmission;
 use App\Models\Institute\StudentApplication;
+use App\Models\Institute\StudentAttendance;
+use App\Models\Institute\StudentCourseProgress;
 use App\Models\Institute\Teacher;
 use App\Models\Institute\TimetableEntry;
 use App\Models\Institute\CourseTopicResource;
@@ -220,7 +222,9 @@ use App\Policies\Institute\CoursePolicy;
 use App\Policies\Institute\DemoClassPolicy;
 use App\Policies\Institute\StudentAdmissionPolicy;
 use App\Policies\Institute\StudentApplicationPolicy;
+use App\Policies\Institute\StudentAttendancePolicy;
 use App\Policies\Institute\StudentPolicy;
+use App\Policies\Institute\StudentProgressPolicy;
 use App\Policies\Institute\TeacherPolicy;
 use App\Policies\Institute\TimetableEntryPolicy;
 use App\Support\Institute\Sitemap\CourseCategorySitemapProvider;
@@ -354,6 +358,12 @@ class AppServiceProvider extends ServiceProvider
         Batch::class => BatchPolicy::class,
         TimetableEntry::class => TimetableEntryPolicy::class,
         ClassSession::class => ClassSessionPolicy::class,
+
+        // phase-17: the register and the syllabus. `BatchTopicCoverage` and the two derived progress
+        // tables have no policy of their own — none of them is ever reached except through the batch
+        // or the enrolment whose progress row IS the thing being authorised.
+        StudentAttendance::class => StudentAttendancePolicy::class,
+        StudentCourseProgress::class => StudentProgressPolicy::class,
     ];
 
     /**

@@ -52,7 +52,6 @@ return [
         'why' => 'The FAQ manager previews each answer as it will render on the site; the stored answer is rich text, sanitised again on render.',
     ],
 
-
     /*
     |----------------------------------------------------------------------
     | Phase 14 — the course landing page

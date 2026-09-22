@@ -57,20 +57,6 @@ use App\Http\Controllers\Admin\Finance\FinanceCategoryController;
 use App\Http\Controllers\Admin\Finance\FinanceReportController;
 use App\Http\Controllers\Admin\Finance\IncomeController;
 use App\Http\Controllers\Admin\Finance\InvoiceController;
-use App\Http\Controllers\Admin\Institute\AdmissionController;
-use App\Http\Controllers\Admin\Institute\BatchController;
-use App\Http\Controllers\Admin\Institute\ClassroomController;
-use App\Http\Controllers\Admin\Institute\ClassSessionController;
-use App\Http\Controllers\Admin\Institute\EnrollmentController;
-use App\Http\Controllers\Admin\Institute\TeacherController;
-use App\Http\Controllers\Admin\Institute\TimetableController;
-use App\Http\Controllers\Admin\Institute\CourseCategoryController;
-use App\Http\Controllers\Admin\Institute\CourseInquiryController;
-use App\Http\Controllers\Admin\Institute\DemoClassController;
-use App\Http\Controllers\Admin\Institute\CourseController;
-use App\Http\Controllers\Admin\Institute\CourseOutlineController;
-use App\Http\Controllers\Admin\Institute\StudentApplicationController;
-use App\Http\Controllers\Admin\Institute\StudentController;
 use App\Http\Controllers\Admin\Finance\PaymentMethodController;
 use App\Http\Controllers\Admin\Finance\PaymentRegisterController;
 use App\Http\Controllers\Admin\Finance\ProjectPaymentController;
@@ -95,6 +81,23 @@ use App\Http\Controllers\Admin\Hr\SelfService\LeaveController as MyLeaveControll
 use App\Http\Controllers\Admin\Hr\SelfService\PayslipController as MyPayslipController;
 use App\Http\Controllers\Admin\Hr\SelfService\ProfileController as MyProfileController;
 use App\Http\Controllers\Admin\Hr\WorkShiftController;
+use App\Http\Controllers\Admin\Institute\AdmissionController;
+use App\Http\Controllers\Admin\Institute\AttendanceController as StudentAttendanceController;
+use App\Http\Controllers\Admin\Institute\AttendanceReportController as StudentAttendanceReportController;
+use App\Http\Controllers\Admin\Institute\BatchController;
+use App\Http\Controllers\Admin\Institute\ClassroomController;
+use App\Http\Controllers\Admin\Institute\ClassSessionController;
+use App\Http\Controllers\Admin\Institute\CourseCategoryController;
+use App\Http\Controllers\Admin\Institute\CourseController;
+use App\Http\Controllers\Admin\Institute\CourseInquiryController;
+use App\Http\Controllers\Admin\Institute\CourseOutlineController;
+use App\Http\Controllers\Admin\Institute\DemoClassController;
+use App\Http\Controllers\Admin\Institute\EnrollmentController;
+use App\Http\Controllers\Admin\Institute\ProgressController as StudentProgressController;
+use App\Http\Controllers\Admin\Institute\StudentApplicationController;
+use App\Http\Controllers\Admin\Institute\StudentController;
+use App\Http\Controllers\Admin\Institute\TeacherController;
+use App\Http\Controllers\Admin\Institute\TimetableController;
 use App\Http\Controllers\Admin\LeadActivityController;
 use App\Http\Controllers\Admin\LeadBoardController;
 use App\Http\Controllers\Admin\LeadController;
@@ -1626,7 +1629,6 @@ Route::prefix('admin')
             Route::get('reports/finance/{report}/export/{format}', [FinanceReportController::class, 'export'])->middleware(['can:reports.view_reports', 'throttle:20,1'])->name('reports.finance.export');
         });
 
-
         /*
         |----------------------------------------------------------------------
         | Course categories and courses - phase-14-17 sec 7.1
@@ -1987,6 +1989,73 @@ Route::prefix('admin')
             Route::post('class-sessions/{session}/reschedule', [ClassSessionController::class, 'reschedule'])->whereNumber('session')->middleware('can:changeStatus,session')->name('class-sessions.reschedule');
             Route::post('class-sessions/{session}/substitute', [ClassSessionController::class, 'substitute'])->whereNumber('session')->middleware('can:changeStatus,session')->name('class-sessions.substitute');
             Route::post('class-sessions/{session}/held', [ClassSessionController::class, 'held'])->whereNumber('session')->middleware('can:changeStatus,session')->name('class-sessions.held');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Attendance — phase-14-17 §7.7, §8.15, §8.16
+        |----------------------------------------------------------------------
+        |
+        | **`edit` is the amendment right, and it is not `create`.** Taking a
+        | register at the classroom door is `student_attendance.create`; revising
+        | one after `institute.attendance_lock_hours` needs `edit` **and** a
+        | reason, and the old value is kept either way (INV-I10). There is no
+        | destroy route and there never will be: attendance is corrected, never
+        | removed, and the policy answers false to `delete` for everybody.
+        |
+        | The literal segments (`reports`, `print`, `export`, `import`) are
+        | declared before `{attendance}` so a numeric constraint is never the
+        | thing deciding which route matched.
+        |
+        */
+        Route::middleware('module:student_attendance')->group(static function (): void {
+            Route::get('student-attendance', [StudentAttendanceController::class, 'index'])->middleware('can:student_attendance.view_any')->name('student-attendance.index');
+
+            Route::get('student-attendance/reports/daily', [StudentAttendanceReportController::class, 'daily'])->middleware('can:student_attendance.view_reports')->name('student-attendance.reports.daily');
+            Route::get('student-attendance/reports/monthly', [StudentAttendanceReportController::class, 'monthly'])->middleware('can:student_attendance.view_reports')->name('student-attendance.reports.monthly');
+            Route::get('student-attendance/reports/percentage', [StudentAttendanceReportController::class, 'percentage'])->middleware('can:student_attendance.view_reports')->name('student-attendance.reports.percentage');
+            Route::get('student-attendance/reports/batch', [StudentAttendanceReportController::class, 'batchSummary'])->middleware('can:student_attendance.view_reports')->name('student-attendance.reports.batch');
+            Route::get('student-attendance/print/{report}', [StudentAttendanceReportController::class, 'print'])->where('report', 'daily|monthly|percentage|batch')->middleware('can:student_attendance.print')->name('student-attendance.print');
+            Route::get('student-attendance/export/{report}/{format}', [StudentAttendanceReportController::class, 'export'])->where('report', 'daily|monthly|percentage|batch')->middleware('can:student_attendance.export')->name('student-attendance.export');
+            Route::post('student-attendance/import', [StudentAttendanceController::class, 'import'])->middleware('can:student_attendance.import')->name('student-attendance.import');
+
+            Route::get('student-attendance/sessions/{session}', [StudentAttendanceController::class, 'mark'])->whereNumber('session')->middleware('can:student_attendance.create')->name('student-attendance.mark');
+            Route::post('student-attendance/sessions/{session}', [StudentAttendanceController::class, 'store'])->whereNumber('session')->middleware(['can:student_attendance.create', 'throttle:30,1'])->name('student-attendance.store');
+            Route::post('student-attendance/sessions/{session}/bulk', [StudentAttendanceController::class, 'bulk'])->whereNumber('session')->middleware('can:student_attendance.create')->name('student-attendance.bulk');
+
+            Route::put('student-attendance/{attendance}', [StudentAttendanceController::class, 'update'])->whereNumber('attendance')->middleware('can:update,attendance')->name('student-attendance.update');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Progress — phase-14-17 §7.7, §8.17
+        |----------------------------------------------------------------------
+        |
+        | **`create` is the class-level mark and `edit` is the individual one.**
+        | Marking a topic covered for a batch is a teaching act; overriding it for
+        | one student is a judgement about that student, and the two are grantable
+        | apart so a visiting trainer can do the first without the second.
+        |
+        | `skip` is `change_status`, because dropping a topic takes its weight out
+        | of every denominator and therefore RAISES everybody's percentage — a
+        | change to a published number, which takes a reason.
+        |
+        | There is no destroy route: every row here is derived and re-derivable by
+        | `progress:recompute`, so deleting one would destroy nothing and repair
+        | nothing (§4.2 declares no `delete` on the module at all).
+        |
+        */
+        Route::middleware('module:student_progress')->group(static function (): void {
+            Route::get('student-progress', [StudentProgressController::class, 'index'])->middleware('can:student_progress.view_any')->name('student-progress.index');
+            Route::get('student-progress/export/{format}', [StudentProgressController::class, 'export'])->middleware('can:student_progress.export')->name('student-progress.export');
+
+            Route::get('batches/{batch}/progress', [StudentProgressController::class, 'batch'])->whereNumber('batch')->middleware('can:student_progress.view')->name('student-progress.batch');
+            Route::post('batches/{batch}/progress/topics/{topic}', [StudentProgressController::class, 'markForBatch'])->whereNumber('batch')->whereNumber('topic')->middleware('can:student_progress.create')->name('student-progress.batch.topic');
+            Route::post('batches/{batch}/progress/topics/{topic}/skip', [StudentProgressController::class, 'skip'])->whereNumber('batch')->whereNumber('topic')->middleware('can:student_progress.change_status')->name('student-progress.batch.skip');
+
+            Route::get('enrollments/{enrollment}/progress', [StudentProgressController::class, 'student'])->whereNumber('enrollment')->middleware('can:student_progress.view')->name('student-progress.student');
+            Route::post('enrollments/{enrollment}/progress/topics/{topic}', [StudentProgressController::class, 'markForStudent'])->whereNumber('enrollment')->whereNumber('topic')->middleware('can:student_progress.edit')->name('student-progress.student.topic');
+            Route::post('enrollments/{enrollment}/progress/recompute', [StudentProgressController::class, 'recompute'])->whereNumber('enrollment')->middleware('can:student_progress.edit')->name('student-progress.recompute');
         });
 
         /*

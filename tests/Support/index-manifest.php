@@ -322,7 +322,6 @@ return [
         ['course_topic_id'], ['created_by'], ['updated_by'],
     ],
 
-
     /*
     |----------------------------------------------------------------------
     | Phase 15 - inquiries, applications, students, admissions, demo classes
@@ -379,7 +378,6 @@ return [
         ['converted_admission_id'], ['branch_id'], ['course_id'], ['created_by'], ['updated_by'],
     ],
 
-
     /*
     |----------------------------------------------------------------------
     | Phase 16 — teachers, rooms, batches, enrolment, the timetable, the classes
@@ -426,6 +424,38 @@ return [
         ['course_topic_id'], ['course_id'], ['timetable_entry_id'], ['original_teacher_id'],
         ['course_lecture_id'], ['attendance_marked_by'], ['rescheduled_from_id'], ['created_by'],
         ['updated_by'],
+    ],
+
+    /*
+    |----------------------------------------------------------------------
+    | Phase 17 — the register, class coverage, and progress at three levels
+    |----------------------------------------------------------------------
+    | `uq_sa_session_student` is the whole guard against a double-marked roster: the marking screen
+    | is used on a phone at a classroom door, where a slow response and an impatient thumb produce
+    | two submissions of the same register, and the service upserts on it.
+    |
+    | Three of these tables carry no `deleted_at` ([D-IN-2]) and each is keyed by a unique index that
+    | an upsert relies on — a soft-deleted row would sit under it and make the next mark a 1062.
+    */
+    'student_attendances' => [
+        ['class_session_id', 'student_id'], ['student_id', 'status'], ['batch_id', 'status'],
+        ['student_batch_enrollment_id'], ['marked_at'], ['status'], ['marked_by'], ['amended_by'],
+        ['created_by'], ['updated_by'],
+    ],
+    'batch_topic_coverage' => [
+        ['batch_id', 'course_topic_id'], ['batch_id', 'status'], ['course_topic_id'], ['course_module_id'],
+        ['class_session_id'], ['covered_on'], ['teacher_id'], ['created_by'], ['updated_by'],
+    ],
+    'student_course_progress' => [
+        ['student_id', 'status'], ['course_id', 'status'], ['batch_id', 'completion_percentage'],
+        ['student_batch_enrollment_id'], ['created_by'], ['updated_by'],
+    ],
+    'student_module_progress' => [
+        ['student_course_progress_id', 'course_module_id'], ['course_module_id', 'status'],
+    ],
+    'student_topic_progress' => [
+        ['student_course_progress_id', 'course_topic_id'], ['course_topic_id', 'status'], ['status'],
+        ['course_module_id'], ['marked_by'],
     ],
 
 ];

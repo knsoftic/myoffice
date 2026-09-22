@@ -2,9 +2,11 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Teacher\AttendanceController;
 use App\Http\Controllers\Teacher\BatchController;
 use App\Http\Controllers\Teacher\DashboardController;
 use App\Http\Controllers\Teacher\DemoClassController;
+use App\Http\Controllers\Teacher\ProgressController;
 use App\Http\Controllers\Teacher\TimetableController;
 use Illuminate\Support\Facades\Route;
 
@@ -66,5 +68,32 @@ Route::prefix('teacher')
         Route::middleware(['module:demo_classes', 'can:teacher_portal.demo_classes'])->group(static function (): void {
             Route::get('demo-classes', [DemoClassController::class, 'index'])->name('demo-classes.index');
             Route::post('demo-classes/{demo}/status', [DemoClassController::class, 'status'])->whereNumber('demo')->name('demo-classes.status');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | phase-14-17 §7.9 — the register, which is the teacher's to take
+        |----------------------------------------------------------------------
+        |
+        | **`attendance_mark` is separate from `attendance` on purpose** (§4.3): a
+        | visiting trainer may be allowed to see a roster without being allowed to
+        | write the register. Both are scoped to the sessions this teacher owns —
+        | as the batch teacher, as a slot's teacher, or as the actual teacher of
+        | that one class after a substitution — and somebody else's session is a
+        | 404, not a 403.
+        |
+        */
+        Route::middleware('module:student_attendance')->group(static function (): void {
+            Route::get('attendance', [AttendanceController::class, 'index'])->middleware('can:teacher_portal.attendance')->name('attendance.index');
+            Route::get('sessions/{session}/attendance', [AttendanceController::class, 'mark'])->whereNumber('session')->middleware('can:teacher_portal.attendance_mark')->name('attendance.mark');
+            Route::post('sessions/{session}/attendance', [AttendanceController::class, 'store'])->whereNumber('session')->middleware(['can:teacher_portal.attendance_mark', 'throttle:30,1'])->name('attendance.store');
+            Route::put('attendance/{attendance}', [AttendanceController::class, 'update'])->whereNumber('attendance')->middleware('can:teacher_portal.attendance_mark')->name('attendance.update');
+            Route::get('reports/attendance', [AttendanceController::class, 'report'])->middleware('can:teacher_portal.reports')->name('reports.attendance');
+        });
+
+        Route::middleware('module:student_progress')->group(static function (): void {
+            Route::get('batches/{batch}/progress', [ProgressController::class, 'show'])->whereNumber('batch')->middleware('can:teacher_portal.student_progress')->name('progress.show');
+            Route::post('batches/{batch}/progress/topics/{topic}', [ProgressController::class, 'markForBatch'])->whereNumber('batch')->whereNumber('topic')->middleware('can:teacher_portal.progress_mark')->name('progress.store');
+            Route::post('enrollments/{enrollment}/progress/topics/{topic}', [ProgressController::class, 'markForStudent'])->whereNumber('enrollment')->whereNumber('topic')->middleware('can:teacher_portal.progress_mark')->name('progress.student');
         });
     });

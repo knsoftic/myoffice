@@ -403,8 +403,17 @@ final class ClassSessionService
                 app(BatchService::class)->recountSessions($batch);
             }
 
-            // `attendance_auto_absent_on_close` is Phase 17's: the register belongs to the attendance
-            // service, and filling one from here would be a second writer of the same rows.
+            // Phase 17's two hand-offs, each through the service that owns those rows rather than
+            // written from here — a second writer of a register or a progress row is exactly what
+            // INV-I10 and INV-I11 exist to prevent.
+            //
+            // The order matters: fill the register first, so the counters this leaves behind are the
+            // ones the topic coverage is recorded beside.
+            app(AttendanceService::class)->fillUnmarkedAsAbsent($session->refresh(), $actor);
+
+            if ($session->course_topic_id !== null) {
+                app(CourseProgressService::class)->markFromSession($session->refresh(), $actor);
+            }
 
             return $session->refresh();
         }, 3);

@@ -244,6 +244,12 @@ final class SidebarVisibilityTest extends TestCase
                 'All Batches',
                 'Timetable',
                 'Classes',
+                // phase-14-17 §7.7: the register and the syllabus. Phase 1 reserved these two entries
+                // under names it guessed (`admin.student-attendance.index`); §7.7 names the routes
+                // `admin.attendance.*` and `admin.progress.*`, and Phase 17 corrected the entries to
+                // match — a nav item pointing at a route that does not exist renders as dead text.
+                'Attendance',
+                'Progress',
                 // phase-10-12 §8.2. The money register sits in the **Institute** group, beside the
                 // charges it pays off — `student_fee_payments` is an Institute module, and it being
                 // what triggers commission is not a reason to file it under Collaborator. Its parent
@@ -356,8 +362,10 @@ final class SidebarVisibilityTest extends TestCase
                     'Invoices', 'Payments', 'Meetings', 'Messages', 'Support', 'Notifications', 'My Profile'],
                 PanelType::Collaborator => ['Dashboard', 'My Projects', 'Wallet', 'Commissions', 'Payouts',
                     'Statements'],
-                PanelType::Student => ['Dashboard', 'Timetable'],
-                PanelType::Teacher => ['Dashboard', 'My Batches', 'My Students', 'Timetable', 'Demo Classes'],
+                // phase-17 added the register and the syllabus to both panels.
+                PanelType::Student => ['Dashboard', 'Timetable', 'Attendance', 'Progress'],
+                PanelType::Teacher => ['Dashboard', 'My Batches', 'My Students', 'Timetable',
+                    'Demo Classes', 'Attendance'],
                 default => ['Dashboard'],
             };
 

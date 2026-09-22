@@ -3332,7 +3332,9 @@ final class SettingsRegistry
                 'label' => 'What the closed admission form says',
                 'type' => self::TYPE_TEXTAREA,
                 'rules' => ['nullable', 'string', 'max:500'],
-                'default' => '',
+                // null, not '': the form posts an empty field back as null, and a default of ''
+                // would make an untouched save move the stored value.
+                'default' => null,
                 'help' => 'Shown on the public admission page while admissions are shut. Leave it empty for the '
                     .'standard wording, which points the visitor at the contact page rather than a dead end.',
                 'span' => 12,
@@ -3468,6 +3470,68 @@ final class SettingsRegistry
                 'help' => 'Minutes of travel or setup time enforced between two slots of the SAME teacher or room. Zero allows back-to-back classes; a batch is never given a gap.',
                 'span' => 4,
                 'sort' => 77,
+            ],
+            /*
+            |--------------------------------------------------------------------------
+            | phase-14-17 §5 — the register, and what a percentage counts
+            |--------------------------------------------------------------------------
+            */
+            'attendance_lock_hours' => [
+                'label' => 'A register can be changed freely for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['nullable', 'integer', 'min:0', 'max:720'],
+                'default' => 48,
+                'help' => 'Hours after it was taken. Afterwards a change needs the attendance edit permission and a '
+                    .'reason, and the old value is kept — fixing a typo on the way out of the room is not the same '
+                    .'act as revising a register somebody has already reported on.',
+                'span' => 4,
+                'sort' => 80,
+            ],
+            'attendance_minimum_percentage' => [
+                'label' => 'Minimum attendance',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['nullable', 'numeric', 'min:0', 'max:100'],
+                'default' => 75,
+                'help' => 'The pass line shown on every attendance report, and the one Phase 21 reads for '
+                    .'certificate eligibility. Nothing is refused by it; people are flagged.',
+                'span' => 4,
+                'sort' => 81,
+            ],
+            'attendance_leave_counts_in_denominator' => [
+                'label' => 'Approved leave counts against attendance',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Off: an approved leave is neither present nor counted, so it neither helps nor hurts the '
+                    .'percentage. On: it stays in the denominator and dilutes it. This is a policy choice, which is '
+                    .'why it is a setting and not a line inside a formula.',
+                'span' => 6,
+                'sort' => 82,
+            ],
+            'attendance_auto_absent_on_close' => [
+                'label' => 'Fill unmarked students as absent when a class is closed',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Off by default, because an absence a person did not decide is still an absence on somebody '
+                    .'record. When it is on, those rows are stamped "filled by the system" so the difference stays '
+                    .'visible to whoever is challenged about one.',
+                'span' => 6,
+                'sort' => 83,
+            ],
+            'progress_weighting' => [
+                'label' => 'Syllabus progress counts',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['nullable', 'string', 'in:topic_count,topic_weight'],
+                'options' => [
+                    'topic_count' => 'Every topic equally',
+                    'topic_weight' => 'By each topic\'s weight',
+                ],
+                'default' => 'topic_weight',
+                'help' => 'Whether a three-week topic counts for more than a one-hour one. Changing it recomputes '
+                    .'every progress row overnight; the stored percentages are caches either way.',
+                'span' => 6,
+                'sort' => 84,
             ],
             'session_generation_weeks_ahead' => [
                 'label' => 'Generate classes this far ahead',

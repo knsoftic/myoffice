@@ -3343,7 +3343,6 @@ return [
         'owner_phase' => 13,
     ],
 
-
     /*
     |----------------------------------------------------------------------
     | Phase 14 - institute catalogue: categories, courses, outline (47 routes)
@@ -5346,6 +5345,358 @@ return [
         'state_changing' => false,
         'rationale' => null,
         'owner_phase' => 16,
+    ],
+
+    /*
+    |----------------------------------------------------------------------
+    | Phase 17 — the register and the syllabus
+    |----------------------------------------------------------------------
+    | **The URIs are `admin/student-attendance` and `admin/student-progress`, not what §7.7 wrote.**
+    | Phase 7 already owns `admin/attendance` and `admin.attendance.*` for EMPLOYEE attendance, and
+    | seven of the names collided exactly. Laravel keeps the last registration for name lookup and the
+    | first matching URI for dispatch, so the two halves disagreed: `route('admin.attendance.index')`
+    | built the institute's URL while `/admin/attendance` dispatched to Phase 7's controller. Phase 1's
+    | sidebar had already reserved `admin.student-attendance.index`, which is the answer (D98).
+    |
+    | **`create` takes a register and `edit` revises one** (INV-I10). Marking at the classroom door and
+    | revising a register somebody has already reported on are different acts, so `attendance.update`
+    | is the only route here guarded by a policy — and there is no destroy route at all, because
+    | attendance is corrected and never removed.
+    |
+    | **`student_progress` declares no `delete`** (§4.2), so nothing here can ask for one: every row is
+    | derived and re-derivable by `progress:recompute`. Dropping a topic is `change_status`, because it
+    | takes the topic's weight out of every denominator and therefore raises a published percentage.
+    */
+
+    [
+        'route' => 'admin.student-attendance.bulk',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_attendance', 'can:student_attendance.create'],
+        'permission' => 'student_attendance.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-attendance.export',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_attendance', 'can:student_attendance.export'],
+        'permission' => 'student_attendance.export',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-attendance.import',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_attendance', 'can:student_attendance.import'],
+        'permission' => 'student_attendance.import',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-attendance.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_attendance', 'can:student_attendance.view_any'],
+        'permission' => 'student_attendance.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-attendance.mark',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_attendance', 'can:student_attendance.create'],
+        'permission' => 'student_attendance.create',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-attendance.print',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_attendance', 'can:student_attendance.print'],
+        'permission' => 'student_attendance.print',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-attendance.reports.batch',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_attendance', 'can:student_attendance.view_reports'],
+        'permission' => 'student_attendance.view_reports',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-attendance.reports.daily',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_attendance', 'can:student_attendance.view_reports'],
+        'permission' => 'student_attendance.view_reports',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-attendance.reports.monthly',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_attendance', 'can:student_attendance.view_reports'],
+        'permission' => 'student_attendance.view_reports',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-attendance.reports.percentage',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_attendance', 'can:student_attendance.view_reports'],
+        'permission' => 'student_attendance.view_reports',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-attendance.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_attendance', 'can:student_attendance.create', 'throttle:30,1'],
+        'permission' => 'student_attendance.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-attendance.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_attendance', 'can:update,attendance'],
+        'permission' => 'student_attendance.edit',
+        'policy' => 'StudentAttendancePolicy::update',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-progress.batch',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_progress', 'can:student_progress.view'],
+        'permission' => 'student_progress.view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-progress.batch.skip',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_progress', 'can:student_progress.change_status'],
+        'permission' => 'student_progress.change_status',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-progress.batch.topic',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_progress', 'can:student_progress.create'],
+        'permission' => 'student_progress.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-progress.export',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_progress', 'can:student_progress.export'],
+        'permission' => 'student_progress.export',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-progress.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_progress', 'can:student_progress.view_any'],
+        'permission' => 'student_progress.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-progress.recompute',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_progress', 'can:student_progress.edit'],
+        'permission' => 'student_progress.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-progress.student',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_progress', 'can:student_progress.view'],
+        'permission' => 'student_progress.view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'admin.student-progress.student.topic',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_progress', 'can:student_progress.edit'],
+        'permission' => 'student_progress.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'student.attendance.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:student', 'module:student_attendance', 'can:student_portal.attendance'],
+        'permission' => 'student_portal.attendance',
+        'panel' => 'student',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'student.progress.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:student', 'module:student_progress', 'can:student_portal.progress'],
+        'permission' => 'student_portal.progress',
+        'panel' => 'student',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'teacher.attendance.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:teacher', 'module:student_attendance', 'can:teacher_portal.attendance'],
+        'permission' => 'teacher_portal.attendance',
+        'panel' => 'teacher',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'teacher.attendance.mark',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:teacher', 'module:student_attendance', 'can:teacher_portal.attendance_mark'],
+        'permission' => 'teacher_portal.attendance_mark',
+        'panel' => 'teacher',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'teacher.attendance.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:teacher', 'module:student_attendance', 'can:teacher_portal.attendance_mark', 'throttle:30,1'],
+        'permission' => 'teacher_portal.attendance_mark',
+        'panel' => 'teacher',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'teacher.attendance.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:teacher', 'module:student_attendance', 'can:teacher_portal.attendance_mark'],
+        'permission' => 'teacher_portal.attendance_mark',
+        'panel' => 'teacher',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'teacher.progress.show',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:teacher', 'module:student_progress', 'can:teacher_portal.student_progress'],
+        'permission' => 'teacher_portal.student_progress',
+        'panel' => 'teacher',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'teacher.progress.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:teacher', 'module:student_progress', 'can:teacher_portal.progress_mark'],
+        'permission' => 'teacher_portal.progress_mark',
+        'panel' => 'teacher',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'teacher.progress.student',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:teacher', 'module:student_progress', 'can:teacher_portal.progress_mark'],
+        'permission' => 'teacher_portal.progress_mark',
+        'panel' => 'teacher',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 17,
+    ],
+
+    [
+        'route' => 'teacher.reports.attendance',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:teacher', 'module:student_attendance', 'can:teacher_portal.reports'],
+        'permission' => 'teacher_portal.reports',
+        'panel' => 'teacher',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 17,
     ],
 
 ];

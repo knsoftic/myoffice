@@ -128,7 +128,10 @@ final class BatchEnrollmentService
             // (8) The cache, recounted — never incremented.
             $this->batches->recountStudents($locked);
 
-            // (10) Progress is Phase 17's; the enrolment is what it opens against.
+            // (10) A seat comes with a syllabus to get through: one course row, one module row per
+            // active module and one topic row per active topic, so a student's progress screen has
+            // something to show on day one rather than after the first topic is covered.
+            app(CourseProgressService::class)->openFor($enrollment, $actor);
 
             return $enrollment->refresh();
         }, 3);

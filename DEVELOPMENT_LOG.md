@@ -10,8 +10,8 @@
 | **Stack** | Laravel 12.69.2 · PHP 8.2.12 · MariaDB 10.4.32 · Tailwind 3.4 · Alpine 3 · Vite 7 |
 | **Database** | `my_office` (utf8mb4_unicode_ci) |
 | **Created** | 2026-09-12 |
-| **Last updated** | 2026-09-21 |
-| **Current phase** | PHASE 16 complete — next: PHASE 17, student attendance + course progress |
+| **Last updated** | 2026-09-22 |
+| **Current phase** | PHASE 17 complete — next: PHASE 18, student fees, installments, discounts (commission triggers) |
 
 ---
 
@@ -210,7 +210,14 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D96 | **A demo that names a batch is sitting in on it, so that batch's own class is not a conflict.** | §2.16 defines `demo_classes.batch_id` as "sit in on this batch" — and a sit-in is held by the same teacher in the same room at the same hour, which every dimension would otherwise report as a clash. `SlotCandidate::$joiningBatchId` drops conflicts belonging to the batch being joined, which is the only way the one thing that column is for can ever be booked. |
 | D97 | **F-9.2 is satisfied by an index the foreign key LEADS, not by a single-column one.** | The index manifest's own header says a prefix of a longer index counts as present, but Phase 15's check asked for an exact `['column']` row. Phase 16 attached three keys to `demo_classes`, whose `(classroom_id, scheduled_on, start_time, active_guard)` serves `classroom_id` perfectly — and the stricter reading would have had every future phase add manifest rows for indexes that do not exist. The assertion now matches the rule the file states. |
 | D93 | **A cancelled or lost record loses its next-action date.** | A `follow_up_date` left behind on a closed enquiry puts it back into tomorrow's "due" count, where somebody works it again and rings a person who has already said no. `changeStatus()` clears it whenever the status stops being open — found by a test asserting that a finished enquiry needs no next action. |
-
+| D98 | **Two phases claimed `admin.attendance.*`, and the route table reported both answers at once.** The institute's are `admin.student-attendance.*` and `admin.student-progress.*`. | §7.7 asks for `admin/attendance`, which Phase 7 has owned for employee attendance since long before the institute existed, and seven names matched exactly — `index`, `store`, `update`, `export`, `import`, `bulk`, `mark`. Laravel keeps the **last** registration in the name lookup and the **first** match in the URI dispatcher, so the two halves disagreed: `route('admin.attendance.index')` built the institute's URL while a request to `/admin/attendance` reached Phase 7's controller. Nothing failed — Phase 7's screen is also a `200`, so the render probe passed while probing the wrong screen. Phase 1's sidebar had already reserved `admin.student-attendance.index`, which is the name the phase now registers. The rename needed **both** halves; renaming only the names would have left the same disagreement pointing the other way. |
+| D99 | **A rename by search-and-replace over a route file is a bad idea twice over, and `no_route_of_this_phase_collides_with_phase_7` is the test that says so.** | The script that fixed D98 rewrote every `admin.attendance.` it found — including `@include('admin.attendance.…')` and `view('admin.attendance.…')`, which are directories and not route names — and then, because `routes/admin.php` now imported the institute controller as `StudentAttendanceController`, it rewrote **Phase 7's own** `AttendanceController::class` references in the same file. Eight of Phase 7's employee-attendance routes silently began dispatching to the institute controller, and no test in the repository noticed: the route-guard manifest records middleware, not the action, and Phase 7 has no HTTP test over those routes. The new test asserts the action of `admin.attendance.index` still contains `Hr` — one line that would have caught both the original collision and the damage done fixing it. |
+| D100 | **A TIME column is a wall clock, not an instant: `Format::clock()` / `app_clock()`.** | `NoHardcodedFormatsTest` caught the views formatting `start_time` with `Carbon::parse($t)->format('H:i')`. The obvious repair — `app_time()` — is wrong, and quietly so: it treats the value as a UTC instant and converts it to the display timezone, which moves a 09:00 class into the afternoon and, for a class at 23:30, onto the wrong day. A batch's start time is the time written on the timetable in every timezone. `app_clock()` reads the two or three fields and never converts, and every attendance and progress view uses it. |
+| D101 | **`student_attendances` and `student_course_progress` each carry a `deleted_at` their unique guard does not include, so each closes the hole a different way.** | §2.24 and §2.26 both ask for the column to honour `CLAUDE.md` §3, and `CLAUDE.md` §3's own D19 warning says why that is a hazard: the guard — `uq_sa_session_student`, `uq_scp(student_batch_enrollment_id)` — does not mention `deleted_at`, so a soft-deleted row is invisible to a default query and still occupies the index. For the register the answer is refusal: `StudentAttendance::deleting` throws, so the column can never be written at all, and that lives in the **model** rather than the policy because `Gate::before` hands a Super Admin `student_attendance.delete` before any policy is consulted (INV-I10). For progress, refusing would be theatre — every row is derived and `progress:recompute` rebuilds it — so `CourseProgressService::openFor()` looks through the scope with `withTrashed()` and **restores** the row instead. Before that, `openFor()` answered `null` for a trashed row and then inserted into a 1062: the seat could never have progress again. Found by the phase's own manifest test, fixed with a behavioural test that soft-deletes a row and re-opens the seat. |
+| D102 | **The attendance CSV importer is not built, and the route says so in a sentence.** | §7.7 lists an import. A register is the one import where a partial success is worse than a refusal — rows silently dropped because a name did not match the roster leave a class that looks marked and is not, and the percentage that follows is used to bar a student from an exam. `admin.student-attendance.import` is registered, guarded by `student_attendance.import`, and answers with a message pointing at the marking screen, which checks every student against the roster **for that date** (INV-I9). It takes no file, so it has no upload-manifest row; when the importer ships it brings its row with it. |
+| D103 | **`InstallAndRollbackTest`'s child-process timeout is 1800 seconds, not 600.** | That test spawns a real `artisan migrate` over the whole schema three times, so its cost grows with every phase the project gains. Three runs of the same test on the same tree took **282s, 570s and over 4,800s** depending on what else the machine was doing — the first two pass, the third was killed by the old ceiling. A gate that fails because the project got bigger, or because a laptop was busy, teaches nobody anything: it trains people to re-run the suite until it goes green, which is the habit that lets a real failure through. 156 migrations take ~126s in isolation; 1800 still catches a genuine hang and no longer catches a slow afternoon. |
+| D104 | **Five month captions in the monthly attendance report were formatting a date by hand, and only the cross-phase run found them.** | `NoHardcodedFormatsTest` lives in `tests/Feature/Views`, so Phase 17's own 204-test Institute run never covered it — `->format('F Y')` went in green and stayed green through every targeted run. `Format::date()` already takes a format and, unlike `instantDate()`, reads a calendar date as a calendar date rather than an instant, so `app_date($from, 'F Y')` is the whole fix and no new helper was needed. This is **not** the D100 case: there the semantics genuinely differed (a TIME column is a wall clock), here only the call site was wrong. The lesson is about the gate rather than the code — a phase's own suite is not a substitute for the cross-phase one, and "the Institute tests pass" was never the same claim as "the suite passes". |
+| D105 | **`SettingsMailTestTest` pinned one of Symfony Mailer's two failure sentences, which is the network's decision and not the application's.** | The test saves `192.0.2.1:2525` — TEST-NET-1, RFC 5737, meant to be unroutable — and asserted the message contained "Connection could not be established". On this network something answers: `stream_socket_client('tcp://192.0.2.1:2525')` returns an **open socket in 0.2s**, so the SMTP handshake stalls and the transport reports `Connection to "192.0.2.1:2525" timed out` instead. Plenty of ISPs run a middlebox that accepts any TCP connection. Both sentences are the transport's own reason, which is the thing the test exists to prove — so it now asserts the message names the **saved host** and is neither of the two generic fallbacks (`TestMailService`'s "the transport gave no reason" and `SettingsController`'s "because of an unexpected error"). That holds whether TEST-NET-1 is dark or answered. The password assertions are untouched. |
 ---
 
 ## 5. Phase Tracker
@@ -579,7 +586,32 @@ services, five policies, every admin screen, the two panels and the four D60 man
 | [ ] | `TeacherService::linkEmployee()` writes `employee_id` with no foreign key — **deferred, not skipped**: Phase 7 creates `employees` and its migration attaches the key ([D-IN-1]). `uq_te_employee` already stops one employee being two teachers, and both sides of the link are audited |
 | [ ] | `timetable:verify-clashes` and the nightly generation command — **deferred to Phase 17**, which adds the scheduler block for attendance sweeps; a command with no scheduler entry is a command nobody runs |
 
-### [ ] PHASE 17 — Student attendance + course progress
+### [x] PHASE 17 — Student attendance + course progress
+
+Contract: [`docs/phases/phase-14-17.md`](docs/phases/phase-14-17.md) §2.24-§2.28, §4.2, §6.8-§6.10, §7.7,
+§8.15-§8.17, §75, §99 · **schema, two services, the report engine, every screen, both panels, the scheduler
+block and the four D60 manifests landed 2026-09-22.**
+
+| | Item |
+|---|---|
+| [x] | Five tables and four enums — `student_attendances`, `batch_topic_coverage`, `student_course_progress`, `student_module_progress`, `student_topic_progress` — **422/422 schema checks on both databases**, 34/34 behavioural checks inside a rolled-back transaction, **40/40 on `institute:verify-constraints` on both** |
+| [x] | **INV-I9 is one question asked in one place**: a register may only be taken against a *dated* class, for a student who was on that roster *on that date*. `AttendanceService::roster()` and `mark()` both resolve it from `student_batch_enrollments`, so a student transferred out last week is absent from today's register rather than present in it |
+| [x] | **INV-I10 lives in the model, not the policy (D101).** `Gate::before` allows a Super Admin `student_attendance.delete` before `StudentAttendancePolicy` is ever consulted, so the policy alone cannot hold the line — `StudentAttendance::deleting` throws for every caller. After `institute.attendance_lock_hours` a change additionally needs `student_attendance.edit` **and** a reason, and `amend()` writes the old value, the new one, who changed it and why |
+| [x] | **A register is idempotent by `uq_sa_session_student`**, because the marking screen is used on a phone at a classroom door where a slow response and an impatient thumb submit the same register twice. `mark()` upserts; `bulk()` and `fillUnmarkedAsAbsent()` go through the same path |
+| [x] | Four reports over **three** base queries (`heldSessions`, `attendanceRows`, `enrollments`) — daily, the monthly student x day matrix, by student and by batch — each with an HTML view, a print layout and a CSV, plus `unmarked()` for the registers nobody has taken. A cancelled class is not a zero: it leaves both sides of the percentage |
+| [x] | `CourseProgressService` at **three levels** (course / module / topic) from one recompute: `Money::weightedAverage()` over the topic rows, clamped, stored half-up at two in `decimal(8,4)` (INV-I11). A course with no outline reports `0.00` and never divides by zero |
+| [x] | **Marking a topic for the class reaches every active student except anybody whose row was set by hand** — `ProgressSource::isOverwritableByBatch()` is true only for `batch_coverage`, so a teacher's per-student judgement survives the next class-level mark. The batch board draws an amber dot on exactly those cells |
+| [x] | **Dropping a topic raises every percentage**, because its weight leaves the denominator — which is what should happen when work comes out of a syllabus, and why it is `student_progress.change_status` with a mandatory reason rather than an `edit` |
+| [x] | 30 routes (20 admin, 8 teacher panel, 2 student panel), **28 screens rendered against live data with 0 failures**: the register list with its unmarked filter, the marking screen with its keyboard shortcuts, the four report matrices with print and CSV, the progress board, the per-student syllabus, and both panels |
+| [x] | **Eight scheduler commands, each with its `Schedule::command()` entry** — the attendance sweeps, the progress recompute, and Phase 16's two deferred commands (`timetable:verify-clashes`, class generation), which is what that deferral was waiting for. A command with no scheduler entry is a command nobody runs |
+| [x] | **A branch leak, found by a test**: the report filter dropdowns listed every batch code in the institute, to a user who may see one branch. `pickers()` and `AttendanceController::index()` now take the request and apply `->forBranch()` |
+| [x] | 39 tests across four files: attendance (15), progress (15), authorization and panel scoping (10), and the manifests (9) — 3,142 assertions on the manifest file alone |
+| [x] | The four D60 manifests: 30 route-guard rows with D87's shape for the one a policy guards, 18 screen rows (`board` for the two grids, `form` for the marking screen, both HTML sweeps off for a CSV), the five tables' indexes with each unique guard asserted **UNIQUE** rather than merely listed, and an explicit assertion that this phase accepts no upload |
+| [x] | **D98 / D99, the phase's real cost**: seven route names collided exactly with Phase 7's employee attendance, and the collision was invisible because both halves of it answered `200`. The rename that fixed it then broke eight of Phase 7's own routes, and nothing in the repository noticed until a test was written to ask |
+| [x] | **D103 — the full-suite gate had thirty seconds of headroom and I only found out by losing a run.** `InstallAndRollbackTest` migrates the entire schema in a child process, three times; the same test on the same tree took 282s, 570s and 4,800s on three consecutive runs. Its 600s ceiling is now 1800s |
+| [x] | **D104 / D105 — the full cross-phase run found two things the phase's own suite could not.** Five month captions in the monthly report formatted a date by hand (`NoHardcodedFormatsTest` is in `tests/Feature/Views`, which the Institute run never touches), and a Phase 2 mail test pinned a failure sentence that depends on whether the network answers on TEST-NET-1 |
+| [ ] | The attendance CSV importer — **deliberately not built (D102)**: the route exists, is guarded, and answers with a sentence explaining why a partial importer would be worse than none |
+
 ### [ ] PHASE 18 — Student fees, installments, discounts, scholarships (commission triggers)
 
 > **Release note** — note: consumes Phase 10's `PaymentService` and the four fee tables (`student_fees`, `student_fee_installments`, `student_fee_discounts`, `student_fee_payments`); Phase 18 creates no financial table. It ships `student_fee_reminders`, the fee services and all fee screens.
@@ -595,6 +627,90 @@ services, five policies, every admin screen, the two panels and the four D60 man
 ---
 
 ## 6. Change Log
+
+### 2026-09-22 — Phase 17: the register, and two phases that both owned `admin/attendance`
+
+**Shipped.** Five tables, four enums, five models, two services plus a report engine, two policies, three
+admin controllers, four panel controllers, 30 routes, 15 views, eight scheduler commands and 39 tests.
+`student_attendances` is the register; `batch_topic_coverage` is what the class covered; the three
+`student_*_progress` tables are the same syllabus seen per student, per module and per topic, all derived
+from one recompute and all re-derivable by `progress:recompute`.
+
+**What the register refuses.** INV-I9 — a register exists only against a *dated* class, and only for a
+student the roster held *on that date*, which is resolved from `student_batch_enrollments` in both
+`roster()` and `mark()` so a student transferred out last week is absent from today's register rather than
+quietly present in it. INV-I10 — a row is corrected, never removed; past `institute.attendance_lock_hours`
+the correction additionally needs `student_attendance.edit` and a reason, and `amend()` records the old
+value, the new one, the actor and the reason.
+
+**The invariant had to move down a layer.** `StudentAttendancePolicy::delete()` returns `false`, and that
+is not enough: `Gate::before` allows a Super Admin every ability *before* a policy is consulted, so the
+break-glass account could delete a register while the policy sat there saying no. `StudentAttendance::deleting`
+now throws for every caller. This is the fourth phase in which that ordering has caught me, and the lesson
+is the same each time — a hard invariant belongs in the model, and a test for one must not be written as a
+Super Admin.
+
+**`admin/attendance` had two owners, and the route table answered both (D98).** §7.7 asked for
+`admin/attendance` and `admin.attendance.*`; Phase 7 has owned both for employee attendance since long
+before the institute existed, and seven names matched exactly. Laravel keeps the last registration for name
+lookup and the first match for dispatch, so `route('admin.attendance.index')` built the institute's URL
+while `/admin/attendance` reached Phase 7's controller. The screen probe reported `200` for a screen it
+never rendered. The phase's routes are `admin.student-attendance.*` and `admin.student-progress.*` — the
+names Phase 1's sidebar had already reserved — renamed in **both** halves, names and URIs.
+
+**Then the fix broke Phase 7 (D99).** The rename ran as a search-and-replace over `routes/admin.php`, which
+by then imported the institute controller as `StudentAttendanceController` — so it rewrote Phase 7's own
+`AttendanceController::class` references too, and eight employee-attendance routes began dispatching to the
+institute controller. Nothing failed: the route-guard manifest records middleware, not the action, and there
+is no HTTP test over those routes. `RegisterManifestTest::no_route_of_this_phase_collides_with_phase_7`
+asserts the action of `admin.attendance.index` still contains `Hr`, which catches the collision and the
+damage done fixing it in the same line.
+
+**A soft-delete column under a unique guard (D101).** §2.24 and §2.26 give two of the five tables a
+`deleted_at` to honour `CLAUDE.md` §3 — and neither unique guard includes it, which is precisely the D19
+hazard. For the register the column is simply unreachable, because the model refuses every delete. For
+progress it could not be: `openFor()` used a default query, so a trashed row was invisible and still
+occupied `uq_scp` — the lookup answered `null`, the insert hit a 1062, and that seat could never have
+progress again. `openFor()` now uses `withTrashed()` and restores the row, keeping its topic rows attached.
+The phase's own manifest test found it; a behavioural test pins it.
+
+**`app_clock()`, because a TIME column is a wall clock (D100).** `NoHardcodedFormatsTest` caught
+`Carbon::parse($t)->format('H:i')` in the views. `app_time()` would have passed the test and been wrong —
+it converts to the display timezone, moving a 09:00 class into the afternoon and a 23:30 class onto the
+wrong day. `Format::clock()` reads the fields and never converts.
+
+**A branch leak, found by a test.** The report filter dropdowns listed every batch code in the institute to
+a user scoped to one branch. `pickers()` and the register index now take the request and apply
+`->forBranch()`.
+
+**Phase 16's two deferred commands landed here**, which is what the deferral was for: this phase adds the
+scheduler block, and a command with no `Schedule::command()` entry is a command nobody runs. Eight entries,
+eight commands.
+
+**Deferred on purpose (D102).** The attendance CSV importer. A register is the one import where partial
+success is worse than refusal — rows dropped because a name did not match the roster leave a class that
+looks marked and is not, and the percentage that follows bars a student from an exam. The route exists, is
+guarded, and says so.
+
+**The gate itself needed fixing (D103).** Running the full suite three times on the same tree gave
+`InstallAndRollbackTest` durations of 282s, 570s and over 4,800s — the last one killed by the 600s
+ceiling on its child `artisan migrate`. Twice I read that failure as a bug in this phase's work; both
+times it was the machine being busy. The ceiling is now 1800s, which still catches a hang and no longer
+catches a slow afternoon.
+
+**What the cross-phase run found that this phase's own suite could not (D104, D105).** The Institute
+suite was green at 204/204 and the manifests at 9/9, and the full run still came back with three
+failures. One was mine: five month captions in the monthly report used `->format('F Y')`, and
+`NoHardcodedFormatsTest` lives in `tests/Feature/Views`, which no Institute run touches. `app_date($v,
+'F Y')` is the fix — `Format::date()` already takes a format and treats a calendar date as one. The
+other two were a Phase 2 mail test asserting a sentence that depends on the network: it saves
+`192.0.2.1` expecting an unroutable address, and on this connection something answers in 0.2s, so
+Symfony reports a timeout rather than a refusal. Both sentences are the transport's own reason, so the
+test now asserts what it actually meant.
+
+**Verified.** 422/422 schema checks on both databases · 34/34 behavioural · 60/60 service · 28/28 screens
+rendered against live data · 40/40 `institute:verify-constraints` on both databases · 39 Phase 17 tests ·
+the whole `tests/Feature/Institute/` suite green · **the full cross-phase suite 3,019 passed, 0 failed (95,090 assertions, 40 minutes)**.
 
 ### 2026-09-21 — Phase 16: one clash authority, and three bookings that clashed with themselves
 

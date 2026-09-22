@@ -1242,6 +1242,15 @@ final class Sidebar
                         'permission' => 'student_portal.attendance',
                     ],
                     [
+                        // phase-17 §7.8: Phase 1 reserved `student_portal.progress` but never gave it
+                        // an entry, so the screen would have been reachable only by typing the URL.
+                        'label' => 'Progress',
+                        'icon' => 'chart-bar',
+                        'route' => 'student.progress.index',
+                        'module' => 'student_portal',
+                        'permission' => 'student_portal.progress',
+                    ],
+                    [
                         'label' => 'Materials',
                         'icon' => 'folder-open',
                         'route' => 'student.materials.index',

@@ -832,7 +832,17 @@ final class PermissionRegistry
                 'icon' => 'clipboard-document-check',
                 'is_core' => false,
                 'sort' => 620,
-                'abilities' => self::merge(self::CRUD, self::STATUS, self::IMPORT, self::REPORTS, self::RESTORE),
+                // phase-14-17 §4.2. `edit` is what the post-lock amendment of INV-I10 requires — a
+                // register is corrected, never deleted, so `delete` exists only for the soft-delete
+                // column `CLAUDE.md` §3 asks for and every policy answers false to it.
+                'abilities' => self::merge(
+                    self::CRUD,
+                    self::STATUS,
+                    self::IMPORT,
+                    self::REPORTS,
+                    self::LOGS,
+                    self::RESTORE,
+                ),
             ],
             'student_progress' => [
                 'name' => 'Student Progress',
@@ -840,7 +850,17 @@ final class PermissionRegistry
                 'icon' => 'chart-bar',
                 'is_core' => false,
                 'sort' => 630,
-                'abilities' => self::merge(self::CRUD, self::REPORTS, self::RESTORE),
+                // phase-14-17 §4.2: read + create + edit + change_status + the reports. There is
+                // deliberately **no `delete`**: every row here is derived by `CourseProgressService`
+                // and re-derivable by `progress:recompute`, so deleting one would destroy nothing and
+                // repair nothing. A topic that should stop counting is `skipped`, which is
+                // `change_status` and leaves the reason on the record.
+                'abilities' => self::merge(
+                    self::READ,
+                    [Ability::Create, Ability::Edit],
+                    self::STATUS,
+                    self::REPORTS,
+                ),
             ],
             'student_fees' => [
                 'name' => 'Student Fees',
