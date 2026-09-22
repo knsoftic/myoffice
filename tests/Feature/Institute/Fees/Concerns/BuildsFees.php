@@ -170,7 +170,9 @@ trait BuildsFees
             ->whereNot('status', InstallmentStatus::Cancelled->value)
             ->get();
 
-        if ($live->isEmpty()) {
+        // [D18-10]: an overpaid charge has no schedule left to be in balance with. The service and
+        // the nightly verifier skip the same case; see StudentFeeService::assertPlanIntegrity().
+        if ($live->isEmpty() || Money::isNegative((string) $charge->balance_amount)) {
             return;
         }
 

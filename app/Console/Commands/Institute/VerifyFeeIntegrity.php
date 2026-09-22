@@ -170,7 +170,9 @@ final class VerifyFeeIntegrity extends Command
             ->whereNot('status', InstallmentStatus::Cancelled->value)
             ->get();
 
-        if ($lines->isEmpty()) {
+        // [D18-10]: PI-1 is a statement about a schedule that can still be paid off, and an overpaid
+        // charge has none. See StudentFeeService::assertPlanIntegrity() for the whole argument.
+        if ($lines->isEmpty() || Money::isNegative((string) $charge->balance_amount)) {
             return $problems;
         }
 

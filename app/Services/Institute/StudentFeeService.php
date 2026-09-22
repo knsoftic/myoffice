@@ -1451,6 +1451,27 @@ final class StudentFeeService
             return;
         }
 
+        // **PI-1 is a statement about a schedule that can still be paid off, and an overpaid charge
+        // has none** ([D18-10]). §6.2 and §6.3 pull against each other in exactly one case: a discount
+        // larger than the remaining unpaid lines. §6.2 says the unconsumed remainder is *not* forced
+        // onto a paid line — money already received is evidence, not a slot — and §6.3 states PI-1 as a
+        // flat equality over every live line. Both cannot hold: a student who paid 10,000 against a fee
+        // later reduced to 5,000 leaves one live line of 10,000 that no longer sums to the net fee.
+        //
+        // The line is right and the equality is wrong. "Installment 1: 10,000, paid" is a true
+        // historical statement, and the 5,000 the student is owed back is an advance rather than
+        // something the schedule should pretend to contain. The alternative — shrinking the paid line
+        // to 5,000 and leaving it over-allocated — would rewrite what somebody was asked to pay after
+        // they had paid it.
+        //
+        // PI-1's whole purpose is that a plan which does not sum to the fee leaves a charge that can
+        // never reach `paid`. An overpaid charge has already gone past `paid`, so the risk it guards
+        // against does not exist here. `fees:verify-plan-integrity` skips the same case for the same
+        // reason.
+        if ($charge->isOverpaid()) {
+            return;
+        }
+
         $scheduled = Money::sub(
             Money::sum($lines->map(static fn (StudentFeeInstallment $l): string => (string) $l->amount)->all()),
             Money::sum($lines->map(static fn (StudentFeeInstallment $l): string => (string) $l->waived_amount)->all()),
