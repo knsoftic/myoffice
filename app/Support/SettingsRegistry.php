@@ -3703,7 +3703,10 @@ final class SettingsRegistry
             'discount_max_percentage' => [
                 'label' => 'Largest percentage discount',
                 'type' => self::TYPE_DECIMAL,
-                'rules' => ['required', 'numeric', 'between:0,100'],
+                // `decimal:0,4` is what refuses exponent notation — `numeric` alone accepts `1E1`
+                // and stores it, which would put a value no percentage column can parse behind a
+                // field that looked validated. Every other decimal setting carries it.
+                'rules' => ['required', 'numeric', 'decimal:0,4', 'min:0', 'max:100'],
                 'default' => '100.0000',
                 'help' => 'Caps a percentage discount before the database CHECK has to. 100 allows a full waiver.',
                 'suffix' => '%',
@@ -3714,10 +3717,13 @@ final class SettingsRegistry
                 'label' => 'Heads the fee wizard offers',
                 'type' => self::TYPE_MULTISELECT,
                 'rules' => ['required', 'array', 'min:1'],
+                // Declared in the enum's own case order, which is the order the checkboxes render
+                // and therefore the order a save posts back. A set has no meaningful order, and
+                // writing the default in a different one makes an untouched save look like an edit.
                 'default' => [
+                    StudentFeeType::CourseFee->value,
                     StudentFeeType::AdmissionFee->value,
                     StudentFeeType::RegistrationFee->value,
-                    StudentFeeType::CourseFee->value,
                 ],
                 'options' => StudentFeeType::options(),
                 'help' => 'Which heads the fee-structure wizard ticks by default. A head with a zero amount is '

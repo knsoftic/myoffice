@@ -25,6 +25,8 @@ use App\Models\Institute\Student;
 use App\Models\Institute\StudentAdmission;
 use App\Models\Institute\StudentApplication;
 use App\Models\Institute\StudentBatchEnrollment;
+use App\Models\Institute\StudentFee;
+use App\Models\Institute\StudentFeePayment;
 use App\Models\Institute\Teacher;
 use Illuminate\Support\Facades\DB;
 
@@ -3549,6 +3551,234 @@ return [
         'responsive' => true,
         'a11y' => true,
         'idor' => ['owner' => 'teacher_id'],
+        'response' => 'html',
+    ],
+
+    /*
+    |----------------------------------------------------------------------
+    | Phase 18 — the fee document side
+    |----------------------------------------------------------------------
+    | The charge detail carries the phase's highest budget: five tabs' worth of rows — receipts,
+    | installments, discounts, reminders and the commission trail — loaded in one pass rather than
+    | five round trips.
+    |
+    | **The two previews answer `json`**, so they are in neither HTML sweep: they are the wizards'
+    | arithmetic rather than a page. The slips and the receipt are `print`, which means one fixed
+    | width and no responsive pass, but they stay in the accessibility sweep because somebody reads
+    | them on screen before they ever reach a printer.
+    |
+    | **Every student row carries an IDOR owner and every student route answers 404 rather than 403**
+    | for a charge that is not theirs (§9). A 403 confirms the row exists, which turns an id into
+    | something worth guessing.
+    */
+
+    [
+        'route' => 'admin.fee-collection.index',
+        'panel' => 'admin',
+        'kind' => 'index',
+        'params' => static fn (?object $fixture = null): array => [],
+        'permissions' => ['student_fees.view_reports'],
+        'module' => 'student_fees',
+        'owner_phase' => 18,
+        'query_budget' => 35,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'admin.fee-reminders.index',
+        'panel' => 'admin',
+        'kind' => 'index',
+        'params' => static fn (?object $fixture = null): array => [],
+        'permissions' => ['fee_reminders.view_any'],
+        'module' => 'fee_reminders',
+        'owner_phase' => 18,
+        'query_budget' => 30,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'admin.fee-structures.preview',
+        'panel' => 'admin',
+        'kind' => 'index',
+        'params' => static fn (?object $fixture = null): array => ['admission' => $first(StudentAdmission::class)],
+        'permissions' => ['student_fees.create'],
+        'module' => 'student_fees',
+        'owner_phase' => 18,
+        'query_budget' => 30,
+        'responsive' => false,
+        'a11y' => false,
+        'idor' => ['owner' => null],
+        'response' => 'json',
+    ],
+
+    [
+        'route' => 'admin.fee-structures.slip',
+        'panel' => 'admin',
+        'kind' => 'print',
+        'params' => static fn (?object $fixture = null): array => ['admission' => $first(StudentAdmission::class)],
+        'permissions' => ['student_fees.print'],
+        'module' => 'student_fees',
+        'owner_phase' => 18,
+        'query_budget' => 25,
+        'responsive' => false,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'admin.installments.preview',
+        'panel' => 'admin',
+        'kind' => 'index',
+        'params' => static fn (?object $fixture = null): array => ['fee' => $first(StudentFee::class)],
+        'permissions' => ['installments.create'],
+        'module' => 'installments',
+        'owner_phase' => 18,
+        'query_budget' => 30,
+        'responsive' => false,
+        'a11y' => false,
+        'idor' => ['owner' => null],
+        'response' => 'json',
+    ],
+
+    [
+        'route' => 'admin.student-fees.create',
+        'panel' => 'admin',
+        'kind' => 'form',
+        'params' => static fn (?object $fixture = null): array => [],
+        'permissions' => ['student_fees.create'],
+        'module' => 'student_fees',
+        'owner_phase' => 18,
+        'query_budget' => 30,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'admin.student-fees.export',
+        'panel' => 'admin',
+        'kind' => 'export',
+        'params' => static fn (?object $fixture = null): array => ['format' => 'csv'],
+        'permissions' => ['student_fees.export'],
+        'module' => 'student_fees',
+        'owner_phase' => 18,
+        'query_budget' => 30,
+        'responsive' => false,
+        'a11y' => false,
+        'idor' => ['owner' => null],
+        'response' => 'csv',
+    ],
+
+    [
+        'route' => 'admin.student-fees.index',
+        'panel' => 'admin',
+        'kind' => 'index',
+        'params' => static fn (?object $fixture = null): array => [],
+        'permissions' => ['student_fees.view_any'],
+        'module' => 'student_fees',
+        'owner_phase' => 18,
+        'query_budget' => 30,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'admin.student-fees.show',
+        'panel' => 'admin',
+        'kind' => 'show',
+        'params' => static fn (?object $fixture = null): array => ['fee' => $first(StudentFee::class)],
+        'permissions' => ['student_fees.view'],
+        'module' => 'student_fees',
+        'owner_phase' => 18,
+        'query_budget' => 40,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'admin.student-fees.slip',
+        'panel' => 'admin',
+        'kind' => 'print',
+        'params' => static fn (?object $fixture = null): array => ['fee' => $first(StudentFee::class)],
+        'permissions' => ['student_fees.print'],
+        'module' => 'student_fees',
+        'owner_phase' => 18,
+        'query_budget' => 25,
+        'responsive' => false,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'student.fees.index',
+        'panel' => 'student',
+        'kind' => 'index',
+        'params' => static fn (?object $fixture = null): array => [],
+        'permissions' => ['student_portal.fees'],
+        'module' => 'student_fees',
+        'owner_phase' => 18,
+        'query_budget' => 30,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => 'student_id'],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'student.fees.show',
+        'panel' => 'student',
+        'kind' => 'show',
+        'params' => static fn (?object $fixture = null): array => ['fee' => $first(StudentFee::class)],
+        'permissions' => ['student_portal.fees'],
+        'module' => 'student_fees',
+        'owner_phase' => 18,
+        'query_budget' => 30,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => 'student_id'],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'student.fees.slip',
+        'panel' => 'student',
+        'kind' => 'print',
+        'params' => static fn (?object $fixture = null): array => ['fee' => $first(StudentFee::class)],
+        'permissions' => ['student_portal.fees'],
+        'module' => 'student_fees',
+        'owner_phase' => 18,
+        'query_budget' => 25,
+        'responsive' => false,
+        'a11y' => true,
+        'idor' => ['owner' => 'student_id'],
+        'response' => 'html',
+    ],
+
+    [
+        'route' => 'student.payments.receipt',
+        'panel' => 'student',
+        'kind' => 'print',
+        'params' => static fn (?object $fixture = null): array => ['payment' => $first(StudentFeePayment::class)],
+        'permissions' => ['student_portal.payments'],
+        'module' => 'student_fees',
+        'owner_phase' => 18,
+        'query_budget' => 25,
+        'responsive' => false,
+        'a11y' => true,
+        'idor' => ['owner' => 'student_id'],
         'response' => 'html',
     ],
 

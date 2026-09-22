@@ -896,7 +896,7 @@ final class PermissionRegistry
                 'group' => ModuleGroup::Institute,
                 'icon' => 'bell-alert',
                 'is_core' => false,
-                'sort' => 650,
+                'sort' => 665,
                 // phase-18 §4.1. "Tell a student they owe money" is a different act from editing a fee:
                 // a Receptionist may do the first and must not do the second, and folding the two into
                 // `student_fees.edit` would have meant granting the second to get the first.

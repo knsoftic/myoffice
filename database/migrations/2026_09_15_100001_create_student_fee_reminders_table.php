@@ -103,9 +103,12 @@ return new class extends Migration
             // Written once: no `updated_at` and no `deleted_at` (D19).
             $table->timestamp('created_at')->nullable();
 
-            // No index on `student_fee_id` alone: `uq_sfr_dedupe` already leads with it, and a
-            // prefix of a longer index counts as present for F-9.2. A second copy would only
-            // cost writes.
+            // `student_fee_id` gets its own index even though `uq_sfr_dedupe` already leads with
+            // it. InnoDB requires *an* index on a foreign key column and will happily use the
+            // unique one — which then cannot be dropped while the FK exists (error 1553), so
+            // `down()` fails and the migration stops being reversible. A few bytes per write is
+            // the price of a rollback that works.
+            $table->index('student_fee_id', 'idx_sfr_fee');
             $table->index(['student_id', 'sent_at'], 'idx_sfr_student');
             $table->index(['type', 'sent_at'], 'idx_sfr_type');
             $table->index('run_uuid', 'idx_sfr_run');
@@ -132,6 +135,12 @@ return new class extends Migration
      */
     private function guard(): void
     {
+        // Ensured on every run, not only on create: a database migrated before this index existed
+        // still has its foreign key leaning on `uq_sfr_dedupe`, and would fail to roll back.
+        if (! RawSchema::indexExists(self::TABLE, 'idx_sfr_fee')) {
+            RawSchema::index(self::TABLE, 'idx_sfr_fee', ['student_fee_id']);
+        }
+
         if (! Schema::hasColumn(self::TABLE, 'dedupe_line')) {
             RawSchema::generatedColumn(
                 self::TABLE,
@@ -163,6 +172,8 @@ return new class extends Migration
     {
         // The unique index reads the generated column, so it goes first — dropping the column while an
         // index depends on it is error 1553, and PH18-39 rolls this back over a table holding rows.
+        // `idx_sfr_fee` is what makes dropping the unique index legal at all: without it InnoDB
+        // refuses, because the `student_fee_id` foreign key would be left with no index.
         if (Schema::hasTable(self::TABLE)) {
             if (RawSchema::indexExists(self::TABLE, 'uq_sfr_dedupe', true)) {
                 RawSchema::dropIndex(self::TABLE, 'uq_sfr_dedupe');

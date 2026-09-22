@@ -11,7 +11,7 @@
 | **Database** | `my_office` (utf8mb4_unicode_ci) |
 | **Created** | 2026-09-12 |
 | **Last updated** | 2026-09-22 |
-| **Current phase** | PHASE 17 complete — next: PHASE 18, student fees, installments, discounts (commission triggers) |
+| **Current phase** | PHASE 18 complete — next: PHASE 19, course material + assignments |
 
 ---
 
@@ -219,6 +219,14 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D104 | **Five month captions in the monthly attendance report were formatting a date by hand, and only the cross-phase run found them.** | `NoHardcodedFormatsTest` lives in `tests/Feature/Views`, so Phase 17's own 204-test Institute run never covered it — `->format('F Y')` went in green and stayed green through every targeted run. `Format::date()` already takes a format and, unlike `instantDate()`, reads a calendar date as a calendar date rather than an instant, so `app_date($from, 'F Y')` is the whole fix and no new helper was needed. This is **not** the D100 case: there the semantics genuinely differed (a TIME column is a wall clock), here only the call site was wrong. The lesson is about the gate rather than the code — a phase's own suite is not a substitute for the cross-phase one, and "the Institute tests pass" was never the same claim as "the suite passes". |
 | D105 | **`SettingsMailTestTest` pinned one of Symfony Mailer's two failure sentences, which is the network's decision and not the application's.** | The test saves `192.0.2.1:2525` — TEST-NET-1, RFC 5737, meant to be unroutable — and asserted the message contained "Connection could not be established". On this network something answers: `stream_socket_client('tcp://192.0.2.1:2525')` returns an **open socket in 0.2s**, so the SMTP handshake stalls and the transport reports `Connection to "192.0.2.1:2525" timed out` instead. Plenty of ISPs run a middlebox that accepts any TCP connection. Both sentences are the transport's own reason, which is the thing the test exists to prove — so it now asserts the message names the **saved host** and is neither of the two generic fallbacks (`TestMailService`'s "the transport gave no reason" and `SettingsController`'s "because of an unexpected error"). That holds whether TEST-NET-1 is dark or answered. The password assertions are untouched. |
 | D106 | **PI-1 is a statement about a schedule that can still be paid off, so an overpaid charge is exempt.** | §6.2 and §6.3 pull against each other in exactly one case, and a test found it: a discount larger than the remaining unpaid lines. §6.2 says the unconsumed remainder is **not** forced onto a paid line — money already received is evidence, not a slot — while §6.3 states PI-1 as a flat equality over every live line. Both cannot hold. A student who paid 10,000 against a fee later cut to 5,000 leaves one live line of 10,000 that no longer sums to the net fee, and *the line is right*: "installment 1: 10,000, paid" is a true historical statement, and the 5,000 they are owed back is an advance rather than something the schedule should pretend to contain. The alternative — shrinking the paid line to 5,000 and leaving it over-allocated — would rewrite what somebody was asked to pay after they had paid it. PI-1 exists so that a plan which does not sum to the fee cannot leave a charge unable to reach `paid`; an overpaid charge has already gone past `paid`, so the risk it guards is absent. `StudentFeeService::assertPlanIntegrity()`, `fees:verify-plan-integrity` and the suite's own helper all skip the same case, and each says why. |
+| D107 | **`PaymentService::recomputeCharge()` delegates to `StudentFeeService`, and its private `chargeStatus()` is deleted.** | §6.4.1 says `deriveStatus()` is *the* definition of a fee's status, called by the payment path, the discount path and the nightly sweeper alike. The spine had carried a private second copy since Phase 10, and by the time Phase 18 shipped the two had drifted in three ways — none of them a typo, all of them what happens when one question has two answers in two files. A charge covered entirely by a scholarship (`net 0.00`, nothing received) never reached `paid`: it fell past every branch to the due-date one and read `pending` or `overdue`, so a fully-funded student sat on the collection desk for ever. A part-paid charge past its due date always read `partial` and never `overdue`, so somebody who paid a tenth and then stopped never appeared on an overdue report. And `refunded_amount` was summed from `payment_reversals` **including reversals of voided receipts**, counting money that never counted. |
+| D108 | **The spine's own `charge()` fixture was writing a state the application cannot produce, and D107 is what exposed it.** | `BuildsFinancialFixtures::charge()` set `discount_amount` and `net_amount` directly with no `student_fee_discounts` row behind them. That survived only because the old `recomputeCharge()` deliberately left those two columns alone; the moment one definition of the caches existed, the recompute correctly reset `discount_amount` to zero, which moved the collectible and changed a commission by 500.00. `StudentCommissionEngineTest` failed on the number, not on the shape — which is the point: a fixture that builds an impossible state stops catching the bug it was written for and starts causing different ones. It now writes a real discount row through the escape hatch and lets the caches derive. |
+| D109 | **The sidebar was offering two links to routes this phase does not ship.** | Phase 1 reserved `admin.installments.index` and `admin.fee-discounts.index` long before the shape of the phase was known, and §7 ships neither: an installment and a discount are only ever read in the context of the charge they belong to, and a flat list of every installment in the institute answers no question anybody asks. They were visible menu entries that 404 — the same class of defect as **D98** pointing the other way, and found the same way, by asking whether every route a menu names actually exists. Replaced by the two screens the phase does ship (the collection desk and the reminder log), and a walk over all five panels now proves every sidebar route resolves. |
+| D110 | **Phase 10's separate admin receipt template is deleted; both panels print one document.** | §8.7 asks for the receipt on Phase 13's print layout, and Phase 10's predated both that layout and §6.7.2's rules — both dates labelled, a balance carrying its own print timestamp, a VOID watermark with the reversal number, a REPRINT stamp. Two templates for one receipt is exactly where those get remembered in one copy and forgotten in the other, and the forgotten one is the copy the student is holding. `resources/views/fees/receipt.blade.php` is the document; the staff and student routes differ only in the `FeeSlipOptions` they construct, so `studentCopy()` cannot be talked out of hiding a commission figure by any setting or query parameter. |
+| D111 | **`fee_reminders` and `installments` both sorted at 650, and the collision was invisible until the whole suite ran.** | A module's `sort` is also the base of every permission's `sort_order`, so one duplicated module number produced *four* duplicated permission numbers and two failing tests rather than one. The fix is one digit — `fee_reminders` moved to 665, after `fee_discounts` — but the lesson is about where it was found: `PermissionRegistryTest` lives in `tests/Unit`, and every targeted run I did during the phase filtered to `tests/Feature/Institute`. A registry is global state; a phase that adds to one has to run the registry's own tests, not only its own. |
+| D112 | **A comment justifying a missing index is what broke the migration's rollback.** | `student_fee_reminders` had no plain index on `student_fee_id`, and the migration said why: `uq_sfr_dedupe` already leads with that column, so a second copy would only cost writes. That reasoning is correct about *query* performance and wrong about *constraints*. InnoDB requires an index on a foreign key column and will happily satisfy that requirement with the unique one — after which `DROP INDEX uq_sfr_dedupe` is error 1553, `down()` fails, and the migration is no longer reversible. Both install-and-rollback tests failed on it, 137s and 143s in, which is also why neither targeted run had caught it. `idx_sfr_fee` now exists, is ensured on every `up()` so an already-migrated database heals, and the comment says what it is actually for. **A composite index is not a substitute for the foreign key's own index when the composite is `UNIQUE` and you will ever want to drop it.** |
+| D113 | **A multiselect default written in a different order from its options makes an untouched save look like an edit.** | `institute.fee_structure_fee_types` defaulted to `[admission_fee, registration_fee, course_fee]`, but the checkboxes render in `StudentFeeType`'s case order and therefore post back `[course_fee, admission_fee, registration_fee]`. `SettingsFormRoundTripTest` asserts that saving a group exactly as rendered moves nothing, and it correctly refused. Nothing was broken in production terms — the set is the same set — but the round-trip property is worth more than the ordering preference: it is what catches a save that silently normalises a value. **A set has no order, so it is declared in the one order the system renders.** |
+| D114 | **`numeric` accepts exponent notation; `decimal:0,N` is what refuses it.** | `institute.discount_max_percentage` was declared `['required','numeric','between:0,100']` — the only decimal setting in the registry without a `decimal:` rule — so `1E1` and `2.5e1` validated, stored, and left a value no `decimal(8,4)` column can parse behind a field that looked checked. `SettingsInputHardeningTest` sweeps *every* decimal field, which is why a one-field omission surfaced as a failing test rather than as a support ticket a year later. Every decimal setting added from here carries `decimal:0,4`, and Phase 19's `assignment_late_penalty_default_percentage` was written with it from the start. |
 ---
 
 ## 5. Phase Tracker
@@ -613,7 +621,31 @@ block and the four D60 manifests landed 2026-09-22.**
 | [x] | **D104 / D105 — the full cross-phase run found two things the phase's own suite could not.** Five month captions in the monthly report formatted a date by hand (`NoHardcodedFormatsTest` is in `tests/Feature/Views`, which the Institute run never touches), and a Phase 2 mail test pinned a failure sentence that depends on whether the network answers on TEST-NET-1 |
 | [ ] | The attendance CSV importer — **deliberately not built (D102)**: the route exists, is guarded, and answers with a sentence explaining why a partial importer would be worse than none |
 
-### [ ] PHASE 18 — Student fees, installments, discounts, scholarships (commission triggers)
+### [x] PHASE 18 — Student fees, installments, discounts, scholarships (commission triggers)
+
+Contract: [`docs/phases/phase-18.md`](docs/phases/phase-18.md) · **one table, four services, four
+policies, seven controllers, 25 routes, fourteen screens, four scheduler commands, three widgets and
+57 tests landed 2026-09-22.**
+
+| | Item |
+|---|---|
+| [x] | **Phase 10 owns and had already created all four money tables**; this phase creates exactly one — `student_fee_reminders` — and ships what acts on the rest. `student_fees.generation_key`, `PaymentService`, `DocumentNumberService`, `Money::distribute()` and `RemainderPlacement` were all verified present before a line was written |
+| [x] | **[D18-1] the dedupe guard is a STORED generated column.** `uq_sfr_dedupe` covers `(student_fee_id, dedupe_line, type, due_date, offset_days)` where `dedupe_line = COALESCE(student_fee_installment_id, 0)` — MariaDB permits unlimited NULLs in a unique index, so a charge with **no installment plan** would have slipped the guard on every single run and been chased every night. Writing `0` into the foreign key itself was the alternative, and that is a dangling reference in a disguise |
+| [x] | **`InstallmentPlanCalculator` works in integer paisa through `Money::distribute()`**, so the lines sum to the net fee by construction rather than by a final fix-up. It refuses `total < count` rather than emitting the unpayable `0.00` line `distribute()` would otherwise produce — `0.04 / 5` is a refusal with both numbers in the sentence, not a constraint violation |
+| [x] | **D107: `PaymentService::recomputeCharge()` now delegates here and its private `chargeStatus()` is gone.** Three drifts, none a typo — see the decision. This is the change that made `deriveStatus()` true rather than merely stated |
+| [x] | **D108, found by D107**: the spine's `charge()` fixture wrote `discount_amount` with no discount row behind it, which only survived because the old recompute left that column alone. It moved a commission by 500.00 the moment one definition existed |
+| [x] | **D106: PI-1 turns out to have an exception, and a test found it.** §6.2 and §6.3 pull against each other in exactly one case — a discount larger than the remaining unpaid lines. The live paid line is right; the flat equality is wrong. An overpaid charge has already gone past `paid`, so the risk PI-1 guards is absent. The service, the nightly verifier and the suite's helper all skip it and each says why |
+| [x] | `generateStructure()` is **duplicate-proof by INSERT, never by SELECT** (F-3.15): a `generation_key` per head, a 1062 treated as "already generated". A double-clicked wizard produces one set and the loser is told so. `SUM(net) = admission.net_payable` is asserted before anything is written and the whole transaction aborts otherwise — that figure is the spine's collectible denominator, so a wrong one is a wrong commission waiting to be paid |
+| [x] | 25 routes (21 admin, 4 student panel) and **14 screens rendered against live data with 0 failures**, including the charge detail's five tabs, both print layouts and every empty state |
+| [x] | **The student panel's response body carries no commission column** — selected away, not hidden in a template, and asserted against the body on all three screens. Somebody else's charge is a **404, never a 403** |
+| [x] | **D110: one receipt document, both panels.** Phase 10's separate admin template is deleted; the routes differ only in the `FeeSlipOptions` they construct, so `studentCopy()` cannot be talked out of hiding a commission figure |
+| [x] | **D109: the sidebar was offering two links to routes that do not exist.** Phase 1 reserved `admin.installments.index` and `admin.fee-discounts.index`; §7 ships neither. Replaced, and every sidebar route across all five panels now resolves |
+| [x] | Four scheduler commands, and **only one of them changes anything**. `fees:verify-plan-integrity` reports and never repairs — the same argument as `attendance:recount` and the wallet reconciler: a silent nightly repair would let the same bug write a wrong number for a year |
+| [x] | 57 tests across six files (453 + 3,264 assertions): the installment arithmetic, §120's commission integration, discounts and waivers, collection and the statuses, authorization and isolation, and the four D60 manifests |
+| [x] | The four D60 manifests: 25 route-guard rows with D87's shape for the three a policy guards, 14 screen rows (`json` for the two previews, `print` for the three documents), the one table's indexes with the generated guard asserted UNIQUE **and** STORED, and an explicit assertion that this phase accepts no upload |
+| [ ] | `transferPayment()` ships and is tested at the service level, but **Phase 15 owns the screen that calls it** (§13.3, R-11) — deferred there rather than invented here |
+| [ ] | The notification classes `FeePaymentReceived`, `FeeDueReminder`, `FeeOverdue` and `FeeCacheDriftDetected` are **Phase 22's** (§13.3). `FeeReminderService` writes its row and checks `class_exists()` before dispatching, so the dedupe guard holds across the gap and nothing is lost when they land |
+
 
 > **Release note** — note: consumes Phase 10's `PaymentService` and the four fee tables (`student_fees`, `student_fee_installments`, `student_fee_discounts`, `student_fee_payments`); Phase 18 creates no financial table. It ships `student_fee_reminders`, the fee services and all fee screens.
 
@@ -628,6 +660,87 @@ block and the four D60 manifests landed 2026-09-22.**
 ---
 
 ## 6. Change Log
+
+### 2026-09-22 — Phase 18: fees, and one definition of a fee's status
+
+**Shipped.** One table, two enums, four services, four policies, ten DTOs, seven controllers, 25
+routes, fourteen screens, two jobs, four scheduler commands, three dashboard widgets and 57 tests.
+Phase 10 owns and had already created all four money tables; this phase creates `student_fee_reminders`
+and ships everything that acts on the rest.
+
+**The change that mattered was subtraction.** `PaymentService` had carried a private `chargeStatus()`
+since Phase 10, and §6.4.1 says `deriveStatus()` is *the* definition. Making that true meant deleting
+the other one — and the two had already drifted in three ways (D107). A charge covered entirely by a
+scholarship never reached `paid`, so a fully-funded student sat on the collection desk for ever. A
+part-paid charge past its due date always read `partial`, so somebody who paid a tenth and stopped
+never appeared on an overdue report. And `refunded_amount` was summed from reversals of **voided**
+receipts — money that never counted. None of those is a typo; they are what happens when one question
+has two answers in two files.
+
+**That deletion immediately found something else (D108).** `StudentCommissionEngineTest` started
+computing 3,000.00 where it expected 2,500.00. The spine's own `charge()` fixture had been writing
+`discount_amount` and `net_amount` with no discount row behind them — a state the application cannot
+produce, which survived only because the old recompute left those columns alone. One definition of the
+caches correctly reset the bucket to zero, which moved the collectible and therefore the commission.
+The fixture now writes a real row and lets the caches derive.
+
+**PI-1 turns out to have an exception, and a test found it (D106).** §6.2 says a discount larger than
+the remaining unpaid lines leaves its remainder unconsumed — money already received is evidence, not a
+slot — while §6.3 states PI-1 as a flat equality over every live line. Both cannot hold: a student who
+paid 10,000 against a fee later cut to 5,000 leaves one live line of 10,000 that no longer sums to the
+net fee. The line is right and the equality is wrong. "Installment 1: 10,000, paid" is a true
+historical statement, and shrinking it would rewrite what somebody was asked to pay after they had
+paid it. PI-1 exists so a plan that does not sum to the fee cannot leave a charge unable to reach
+`paid`; an overpaid charge has already gone past `paid`. The service, the nightly verifier and the
+suite's own helper all skip that one case and each says why.
+
+**[D18-1] — a unique index that would have guarded nothing.** `student_fee_reminders` dedupes on
+`(student_fee_id, student_fee_installment_id, type, due_date, offset_days)`, and MariaDB permits
+unlimited NULLs in a unique index. A charge with no installment plan has a genuinely NULL
+`student_fee_installment_id`, so it would have slipped the guard on every run and been chased every
+single night — the one failure the table exists to prevent. The real index is on a STORED generated
+column, `COALESCE(student_fee_installment_id, 0)`. Writing `0` into the foreign key itself was the
+alternative, and that is a dangling reference wearing a disguise.
+
+**The arithmetic is exact by construction.** `InstallmentPlanCalculator` works in integer paisa through
+`Money::distribute()`, so there is no rounding drift to chase — only an integer remainder of at most
+`count - 1`, placed where the setting says. It refuses `total < count` rather than emitting the
+unpayable `0.00` line `distribute()` would otherwise produce quite correctly: `0.04 / 5` comes back as
+a sentence with both numbers in it instead of a constraint name.
+
+**D109 — the sidebar was offering two links that 404.** Phase 1 reserved `admin.installments.index` and
+`admin.fee-discounts.index` before the shape of the phase was known, and §7 ships neither: an
+installment and a discount are only ever read in the context of their charge. Same class of defect as
+D98, pointing the other way, found by asking whether every route a menu names exists. Every sidebar
+route across all five panels now resolves.
+
+**D110 — one receipt, not two.** Phase 10's admin receipt template predated the print layout and
+§6.7.2's rules, and two templates for one receipt is where those get forgotten in the copy the student
+is holding. Both panels render `resources/views/fees/receipt.blade.php`; the routes differ only in the
+`FeeSlipOptions` they construct.
+
+**What the suite caught.** Seven failures across the run, and only one was a code defect (D106's
+exception). The rest were mine and each taught something: six identical receipts tripped the spine's
+duplicate fingerprint — the guard working; a hand-built `Course` row was missing `code`, which is the
+argument for fixtures going through the owning service; a reopened charge read `pending` because the
+*plan's* first due date was a month ahead, so `recomputeCaches()` correctly stopped it being late; and
+`assertDatabaseCount()`'s third argument is the connection, not a message, so two assertions were
+quietly asking for a database called "Nothing was written by either attempt".
+
+**Deferred on purpose.** `transferPayment()` ships and is tested, but Phase 15 owns the screen that
+calls it (§13.3, R-11). The four notification classes are Phase 22's; `FeeReminderService` writes its
+row and checks `class_exists()` before dispatching, so the dedupe guard holds across the gap.
+
+**Verified.** 40/40 behavioural against live data · 24/24 screens rendered, including the student
+body asserted to carry no commission column · 114/114 static surface · 27/27 calculator · 57 Phase 18
+tests · 421/421 across `tests/Feature/Financial` and `tests/Feature/Institute`.
+
+**Then the full cross-phase suite found four more, and all four were mine** (D111–D114): a duplicated
+module sort order, a foreign key leaning on the unique index so the migration would not roll back, a
+multiselect default in the wrong order, and one decimal setting missing the rule that refuses exponent
+notation. None was reachable from a targeted run — two live in `tests/Unit`, two take 10 minutes each
+to reach the assertion. **3,090/3,090 green** after the fixes; the two install-and-rollback tests now
+complete their full round trip (613s and 500s) instead of failing partway.
 
 ### 2026-09-22 — Phase 17: the register, and two phases that both owned `admin/attendance`
 

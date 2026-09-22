@@ -5699,4 +5699,306 @@ return [
         'owner_phase' => 17,
     ],
 
+    /*
+    |----------------------------------------------------------------------
+    | Phase 18 — the fee document side
+    |----------------------------------------------------------------------
+    | Phase 10 owns the eight `admin.fee-payments.*` rows above; these are what raise, reduce,
+    | schedule, chase and print the charge that money is paid against.
+    |
+    | **`installments.waive` carries `change_status` and the policy demands `fee_discounts.approve`
+    | on top** (§6.1, spine §2.18.2). A waiver parks an amount on the line *and* writes a discount row
+    | that lowers the net fee, so the line permission alone would let somebody give money away one
+    | installment at a time. The manifest records the `can:` literal; the second ability is the
+    | policy's, which is why this row carries both a permission and a policy.
+    |
+    | **No route here can edit or delete a discount, and none exists.** `trg_sfd_no_delete` and
+    | `FinancialRow` back that at the database and the model; `fee-discounts.reverse` is the only
+    | correction path and it needs `approve` rather than `edit`, because undoing a discount is an
+    | authority question and not a typo question.
+    |
+    | **The two previews are GET and write nothing.** Both wizards show their arithmetic before
+    | anybody commits, through the same calculator the submit uses — a preview produced a second way
+    | is a preview that can disagree with what gets written, in somebody's money.
+    */
+
+    [
+        'route' => 'admin.fee-collection.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_fees', 'can:student_fees.view_reports'],
+        'permission' => 'student_fees.view_reports',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.fee-discounts.reverse',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:fee_discounts', 'can:fee_discounts.approve'],
+        'permission' => 'fee_discounts.approve',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.fee-reminders.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:fee_reminders', 'can:fee_reminders.view_any'],
+        'permission' => 'fee_reminders.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.fee-reminders.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:fee_reminders', 'can:fee_reminders.create', 'throttle:30,1'],
+        'permission' => 'fee_reminders.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.fee-structures.preview',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_fees', 'can:student_fees.create', 'throttle:60,1'],
+        'permission' => 'student_fees.create',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.fee-structures.slip',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_fees', 'can:student_fees.print'],
+        'permission' => 'student_fees.print',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.fee-structures.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_fees', 'can:student_fees.create', 'throttle:10,1'],
+        'permission' => 'student_fees.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.installments.preview',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:installments', 'can:installments.create', 'throttle:60,1'],
+        'permission' => 'installments.create',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.installments.waive',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:installments', 'can:changeStatus,installment'],
+        'permission' => 'installments.change_status',
+        'policy' => 'StudentFeeInstallmentPolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.student-fees.cancel',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_fees', 'can:changeStatus,fee'],
+        'permission' => 'student_fees.change_status',
+        'policy' => 'StudentFeePolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.student-fees.create',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_fees', 'can:student_fees.create'],
+        'permission' => 'student_fees.create',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.student-fees.discounts.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:fee_discounts', 'can:fee_discounts.create'],
+        'permission' => 'fee_discounts.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.student-fees.export',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_fees', 'can:student_fees.export'],
+        'permission' => 'student_fees.export',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.student-fees.generate-monthly',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_fees', 'can:student_fees.create', 'throttle:5,1'],
+        'permission' => 'student_fees.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.student-fees.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_fees', 'can:student_fees.view_any'],
+        'permission' => 'student_fees.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.student-fees.installments.rebuild',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:installments', 'can:installments.edit'],
+        'permission' => 'installments.edit',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.student-fees.installments.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:installments', 'can:installments.create'],
+        'permission' => 'installments.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.student-fees.reopen',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_fees', 'can:changeStatus,fee'],
+        'permission' => 'student_fees.change_status',
+        'policy' => 'StudentFeePolicy::changeStatus',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.student-fees.show',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_fees', 'can:view,fee'],
+        'permission' => 'student_fees.view',
+        'policy' => 'StudentFeePolicy::view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.student-fees.slip',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_fees', 'can:student_fees.print'],
+        'permission' => 'student_fees.print',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'admin.student-fees.store',
+        'methods' => ['POST'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:student_fees', 'can:student_fees.create'],
+        'permission' => 'student_fees.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'student.fees.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:student', 'module:student_fees', 'can:student_portal.fees'],
+        'permission' => 'student_portal.fees',
+        'panel' => 'student',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'student.fees.show',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:student', 'module:student_fees', 'can:student_portal.fees'],
+        'permission' => 'student_portal.fees',
+        'panel' => 'student',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'student.fees.slip',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:student', 'module:student_fees', 'can:student_portal.fees'],
+        'permission' => 'student_portal.fees',
+        'panel' => 'student',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
+    [
+        'route' => 'student.payments.receipt',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:student', 'module:student_fees', 'can:student_portal.payments'],
+        'permission' => 'student_portal.payments',
+        'panel' => 'student',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 18,
+    ],
+
 ];

@@ -458,4 +458,22 @@ return [
         ['course_module_id'], ['marked_by'],
     ],
 
+    /*
+    |----------------------------------------------------------------------
+    | Phase 18 — the one table this phase creates
+    |----------------------------------------------------------------------
+    | `uq_sfr_dedupe` leads with `student_fee_id` and then **`dedupe_line`**, the STORED
+    | generated column `COALESCE(student_fee_installment_id, 0)` ([D18-1]). MariaDB permits
+    | unlimited NULLs in a unique index, so a charge with no installment plan would have
+    | slipped the guard on every single run and been chased every night. Writing `0` into the
+    | foreign key itself was the alternative, and that is a dangling reference in a disguise.
+    |
+    | The four money tables belong to Phase 10 and are listed under its banner; this phase adds
+    | no index to them.
+    */
+    'student_fee_reminders' => [
+        ['student_fee_id', 'dedupe_line', 'type', 'due_date', 'offset_days'], ['student_id', 'sent_at'],
+        ['type', 'sent_at'], ['run_uuid'], ['student_fee_installment_id'], ['branch_id'], ['sent_by'],
+    ],
+
 ];
