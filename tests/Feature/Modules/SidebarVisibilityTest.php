@@ -255,7 +255,19 @@ final class SidebarVisibilityTest extends TestCase
                 // what triggers commission is not a reason to file it under Collaborator. Its parent
                 // "Fees" node appears with it: a group renders once it has a visible child.
                 'Fees',
+                // phase-18 §7-§8. Phase 1 reserved `admin.student-fees.index` and the menu carried it
+                // as dead text until this phase gave it a route; the same is true of the student
+                // panel's own Fees entry.
+                //
+                // `Installments` and `Discounts` are deliberately NOT here. Phase 1 reserved those two
+                // names as well, but §7 ships neither route — an installment and a discount are only
+                // ever read in the context of the charge they belong to, and a flat list of every
+                // installment in the institute answers no question anybody asks. They were replaced by
+                // the two screens the phase does ship.
+                'Student Fees',
                 'Fee Receipts',
+                'Fee Collection',
+                'Fee Reminders',
                 // phase-03 §7-§8: the nine Website CMS entries whose routes now exist.
                 'Website Overview',
                 'Sections',
@@ -362,8 +374,9 @@ final class SidebarVisibilityTest extends TestCase
                     'Invoices', 'Payments', 'Meetings', 'Messages', 'Support', 'Notifications', 'My Profile'],
                 PanelType::Collaborator => ['Dashboard', 'My Projects', 'Wallet', 'Commissions', 'Payouts',
                     'Statements'],
-                // phase-17 added the register and the syllabus to both panels.
-                PanelType::Student => ['Dashboard', 'Timetable', 'Attendance', 'Progress'],
+                // phase-17 added the register and the syllabus to both panels; phase-18 added the
+                // student's own fees, which Phase 1 had reserved an entry for and never had a route to.
+                PanelType::Student => ['Dashboard', 'Timetable', 'Attendance', 'Progress', 'Fees'],
                 PanelType::Teacher => ['Dashboard', 'My Batches', 'My Students', 'Timetable',
                     'Demo Classes', 'Attendance'],
                 default => ['Dashboard'],

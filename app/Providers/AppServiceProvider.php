@@ -13,6 +13,9 @@ use App\Dashboard\Cms\NewInquiriesWidget;
 use App\Dashboard\Cms\OpenJobsWidget;
 use App\Dashboard\Cms\PendingModerationWidget;
 use App\Dashboard\Cms\TopViewedPostsWidget;
+use App\Dashboard\Institute\FeeCollectedTodayWidget;
+use App\Dashboard\Institute\OverdueFeesWidget;
+use App\Dashboard\Institute\PendingFeesWidget;
 use App\Enums\InquiryType;
 use App\Events\ModuleStateChanged;
 use App\Events\SettingsChanged;
@@ -495,6 +498,13 @@ class AppServiceProvider extends ServiceProvider
                 OpenJobsWidget::class,
                 BlogActivityWidget::class,
                 TopViewedPostsWidget::class,
+
+                // phase-18 §8.10 (F-8.3). Phase 18 owns these three keys and is the ONLY phase that
+                // registers them: the spine and phase-10-12 both used to declare them, and a
+                // DashboardRegistry key declared twice is two cards that look identical and disagree.
+                FeeCollectedTodayWidget::class,
+                PendingFeesWidget::class,
+                OverdueFeesWidget::class,
             ]);
         } catch (Throwable $exception) {
             report($exception);

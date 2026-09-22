@@ -789,20 +789,32 @@ final class Sidebar
                                 'module' => 'student_fee_payments',
                                 'permission' => 'student_fee_payments.view_any',
                             ],
+                            // phase-18 §8.8. The cashier's worklist, not a fourth list of charges:
+                            // who owes what today, this week, and how late.
                             [
-                                'label' => 'Installments',
-                                'icon' => 'queue-list',
-                                'route' => 'admin.installments.index',
-                                'module' => 'installments',
-                                'permission' => 'installments.view_any',
+                                'label' => 'Fee Collection',
+                                'icon' => 'calculator',
+                                'route' => 'admin.fee-collection.index',
+                                'module' => 'student_fees',
+                                'permission' => 'student_fees.view_reports',
                             ],
+                            // phase-18 §4.1. Its own module because chasing and charging are different
+                            // rights: a Receptionist may send a reminder and may not edit a fee.
                             [
-                                'label' => 'Discounts',
-                                'icon' => 'tag',
-                                'route' => 'admin.fee-discounts.index',
-                                'module' => 'fee_discounts',
-                                'permission' => 'fee_discounts.view_any',
+                                'label' => 'Fee Reminders',
+                                'icon' => 'bell-alert',
+                                'route' => 'admin.fee-reminders.index',
+                                'module' => 'fee_reminders',
+                                'permission' => 'fee_reminders.view_any',
                             ],
+                            // **`admin.installments.index` and `admin.fee-discounts.index` are gone
+                            // from this menu, and no route of those names exists.** Phase 1 reserved
+                            // them before the shape of the phase was known; §7 has neither, because an
+                            // installment and a discount are only ever read in the context of the
+                            // charge they belong to — a flat list of "all installments in the
+                            // institute" answers no question anybody asks. A menu item whose route
+                            // does not exist is a visible link that 404s, which is the same class of
+                            // defect as D98 pointing the other way.
                         ],
                     ],
                     [

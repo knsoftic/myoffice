@@ -264,3 +264,35 @@ Schedule::command('progress:recompute')->dailyAt('02:40')->withoutOverlapping(30
 Schedule::command('timetable:verify-clashes')->dailyAt('02:50')->withoutOverlapping();
 Schedule::command('institute:verify-constraints')->dailyAt('03:00');
 Schedule::command('attendance:flag-unmarked')->dailyAt('20:00')->withoutOverlapping();
+
+/*
+|--------------------------------------------------------------------------
+| Institute: fees (phase-18 §10.4)
+|--------------------------------------------------------------------------
+| **Only one of these four changes anything, and it is the one whose whole job is a status.**
+|
+| `fees:mark-overdue` is the single thing in the system that introduces `overdue` on a quiet charge.
+| A receipt landing on an overdue charge moves it back through the same `deriveStatus()`, so the two
+| directions cannot disagree about what the word means. It runs before the reminders, because a
+| student should not be chased about a line the sweeper has not looked at yet.
+|
+| `fees:generate-monthly` is a no-op on almost every day of the month: it dispatches only for batches
+| whose monthly due day falls inside the next ten days, so the charges exist — and the reminders can
+| go out — before anybody is expected to pay. Running it twice raises nothing twice, and neither guard
+| is trusted alone: the job's uniqueness lock saves the work, `uq_sf_generation` saves the money.
+|
+| `fees:verify-plan-integrity` **reports and never repairs**, which is the same argument as
+| `attendance:recount` and the wallet reconciler. Every cache column is derivable from the rows
+| underneath, so a row that has drifted means something wrote it that should not have — and a silent
+| nightly repair would let that keep happening for a year with nobody the wiser. The drift IS the
+| evidence. `RecomputeStudentFeeCaches` is the repair, dispatched by somebody who has looked.
+|
+| `fees:installment-reminders` sends at most one message per line, per type, per day, and the guard
+| for that is `uq_sfr_dedupe` rather than a SELECT: the row is written FIRST and the notification goes
+| only when the INSERT won. A crash between the two would otherwise chase the student again tonight.
+*/
+
+Schedule::command('fees:generate-monthly')->dailyAt('00:20')->withoutOverlapping();
+Schedule::command('fees:mark-overdue')->dailyAt('01:00')->withoutOverlapping(30);
+Schedule::command('fees:verify-plan-integrity')->dailyAt('02:10')->withoutOverlapping(30);
+Schedule::command('fees:installment-reminders')->dailyAt('09:00')->withoutOverlapping(30);
