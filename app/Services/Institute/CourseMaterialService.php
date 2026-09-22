@@ -137,18 +137,25 @@ final class CourseMaterialService
 
             $before = $locked->only(['title', 'description', 'course_topic_id', 'is_downloadable', 'available_from', 'available_until', 'external_url']);
 
+            // Absent means unchanged; present-and-null means cleared. `?? null` would turn every key
+            // the caller did not send into an instruction to wipe the column, so a screen that posts
+            // one field would silently clear the release window.
+            $keep = static fn (string $key, mixed $current): mixed => array_key_exists($key, $attributes)
+                ? $attributes[$key]
+                : $current;
+
             $locked->forceFill([
-                'title' => $attributes['title'] ?? $locked->getAttribute('title'),
-                'description' => $attributes['description'] ?? null,
-                'course_topic_id' => $attributes['course_topic_id'] ?? null,
-                'teacher_id' => $attributes['teacher_id'] ?? $locked->getAttribute('teacher_id'),
+                'title' => $keep('title', $locked->getAttribute('title')),
+                'description' => $keep('description', $locked->getAttribute('description')),
+                'course_topic_id' => $keep('course_topic_id', $locked->getAttribute('course_topic_id')),
+                'teacher_id' => $keep('teacher_id', $locked->getAttribute('teacher_id')),
                 'is_downloadable' => $type instanceof CourseResourceType && ! $type->isFile()
                     ? true
-                    : (bool) ($attributes['is_downloadable'] ?? $locked->getAttribute('is_downloadable')),
-                'available_from' => $attributes['available_from'] ?? null,
-                'available_until' => $attributes['available_until'] ?? null,
-                'sort_order' => (int) ($attributes['sort_order'] ?? $locked->getAttribute('sort_order')),
-                'notes' => $attributes['notes'] ?? null,
+                    : (bool) $keep('is_downloadable', $locked->getAttribute('is_downloadable')),
+                'available_from' => $keep('available_from', $locked->getAttribute('available_from')),
+                'available_until' => $keep('available_until', $locked->getAttribute('available_until')),
+                'sort_order' => (int) $keep('sort_order', $locked->getAttribute('sort_order')),
+                'notes' => $keep('notes', $locked->getAttribute('notes')),
             ]);
 
             if (array_key_exists('external_url', $attributes) && $type instanceof CourseResourceType && ! $type->isFile()) {
