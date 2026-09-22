@@ -82,6 +82,8 @@ use App\Http\Controllers\Admin\Hr\SelfService\PayslipController as MyPayslipCont
 use App\Http\Controllers\Admin\Hr\SelfService\ProfileController as MyProfileController;
 use App\Http\Controllers\Admin\Hr\WorkShiftController;
 use App\Http\Controllers\Admin\Institute\AdmissionController;
+use App\Http\Controllers\Admin\Institute\AssignmentController;
+use App\Http\Controllers\Admin\Institute\AssignmentSubmissionController;
 use App\Http\Controllers\Admin\Institute\AttendanceController as StudentAttendanceController;
 use App\Http\Controllers\Admin\Institute\AttendanceReportController as StudentAttendanceReportController;
 use App\Http\Controllers\Admin\Institute\BatchController;
@@ -90,6 +92,7 @@ use App\Http\Controllers\Admin\Institute\ClassSessionController;
 use App\Http\Controllers\Admin\Institute\CourseCategoryController;
 use App\Http\Controllers\Admin\Institute\CourseController;
 use App\Http\Controllers\Admin\Institute\CourseInquiryController;
+use App\Http\Controllers\Admin\Institute\CourseMaterialController;
 use App\Http\Controllers\Admin\Institute\CourseOutlineController;
 use App\Http\Controllers\Admin\Institute\DemoClassController;
 use App\Http\Controllers\Admin\Institute\EnrollmentController;
@@ -2258,5 +2261,92 @@ Route::prefix('admin')
         Route::middleware('module:collaborator_commissions')->group(static function (): void {
             Route::get('collaborators/{collaborator}/statement', [StatementController::class, 'show'])->whereNumber('collaborator')->withTrashed()->middleware('can:collaborator_commissions.view_financial')->name('statements.show');
             Route::get('collaborators/{collaborator}/statement/export/{format}', [StatementController::class, 'export'])->whereNumber('collaborator')->withTrashed()->middleware('can:collaborator_commissions.export')->name('statements.export');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Course materials - phase-19-23 sec 7.1
+        |----------------------------------------------------------------------
+        |
+        | `assign` is the targeting ability and is deliberately separate from
+        | `edit`: deciding who receives a file is a different act from correcting
+        | its title. `download` is separate again, because reading the library is
+        | not the same as taking the bytes - a reviewer auditing what was shared
+        | needs the list and has no business with the files.
+        |
+        | Every download goes through MaterialAccessService, which logs before it
+        | streams (INV-19-4) and serves through SecureFileService's hardened
+        | headers. No route here reaches a file any other way.
+        |
+        */
+        Route::middleware('module:course_materials')->group(static function (): void {
+            Route::get('course-materials', [CourseMaterialController::class, 'index'])->middleware('can:course_materials.view_any')->name('course-materials.index');
+            Route::get('course-materials/create', [CourseMaterialController::class, 'create'])->middleware('can:course_materials.create')->name('course-materials.create');
+            Route::post('course-materials', [CourseMaterialController::class, 'store'])->middleware(['can:course_materials.create', 'throttle:30,1'])->name('course-materials.store');
+            Route::get('course-materials/export/{format}', [CourseMaterialController::class, 'export'])->middleware('can:course_materials.export')->name('course-materials.export');
+            Route::get('course-materials/{material}', [CourseMaterialController::class, 'show'])->whereNumber('material')->withTrashed()->middleware('can:course_materials.view')->name('course-materials.show');
+            Route::get('course-materials/{material}/edit', [CourseMaterialController::class, 'edit'])->whereNumber('material')->middleware('can:course_materials.edit')->name('course-materials.edit');
+            Route::put('course-materials/{material}', [CourseMaterialController::class, 'update'])->whereNumber('material')->middleware('can:course_materials.edit')->name('course-materials.update');
+            Route::post('course-materials/{material}/file', [CourseMaterialController::class, 'replaceFile'])->whereNumber('material')->middleware(['can:course_materials.upload', 'throttle:20,1'])->name('course-materials.file.replace');
+            Route::get('course-materials/{material}/download', [CourseMaterialController::class, 'download'])->whereNumber('material')->middleware('can:course_materials.download')->name('course-materials.download');
+            Route::post('course-materials/{material}/targets', [CourseMaterialController::class, 'storeTargets'])->whereNumber('material')->middleware('can:course_materials.assign')->name('course-materials.targets.store');
+            Route::delete('course-materials/{material}/targets/{target}', [CourseMaterialController::class, 'destroyTarget'])->whereNumber('material')->whereNumber('target')->middleware('can:course_materials.assign')->name('course-materials.targets.destroy');
+            Route::post('course-materials/{material}/status', [CourseMaterialController::class, 'status'])->whereNumber('material')->middleware('can:course_materials.change_status')->name('course-materials.status');
+            Route::delete('course-materials/{material}', [CourseMaterialController::class, 'destroy'])->whereNumber('material')->middleware('can:course_materials.delete')->name('course-materials.destroy');
+            Route::get('course-materials/{material}/engagement', [CourseMaterialController::class, 'engagement'])->whereNumber('material')->middleware('can:course_materials.view_reports')->name('course-materials.engagement');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Assignments - phase-19-23 sec 7.2
+        |----------------------------------------------------------------------
+        |
+        | There is no `restore` route: a soft-deleted assignment is one nobody
+        | ever submitted to (the policy refuses the delete otherwise), so the
+        | recovery path is the trashed filter on the index, not a second action.
+        |
+        */
+        Route::middleware('module:assignments')->group(static function (): void {
+            Route::get('assignments', [AssignmentController::class, 'index'])->middleware('can:assignments.view_any')->name('assignments.index');
+            Route::get('assignments/create', [AssignmentController::class, 'create'])->middleware('can:assignments.create')->name('assignments.create');
+            Route::post('assignments', [AssignmentController::class, 'store'])->middleware(['can:assignments.create', 'throttle:30,1'])->name('assignments.store');
+            Route::get('assignments/{assignment}', [AssignmentController::class, 'show'])->whereNumber('assignment')->withTrashed()->middleware('can:assignments.view')->name('assignments.show');
+            Route::get('assignments/{assignment}/edit', [AssignmentController::class, 'edit'])->whereNumber('assignment')->middleware('can:assignments.edit')->name('assignments.edit');
+            Route::put('assignments/{assignment}', [AssignmentController::class, 'update'])->whereNumber('assignment')->middleware('can:assignments.edit')->name('assignments.update');
+            Route::post('assignments/{assignment}/status', [AssignmentController::class, 'status'])->whereNumber('assignment')->middleware('can:assignments.change_status')->name('assignments.status');
+            Route::post('assignments/{assignment}/duplicate', [AssignmentController::class, 'duplicate'])->whereNumber('assignment')->middleware('can:assignments.create')->name('assignments.duplicate');
+            Route::get('assignments/{assignment}/brief', [AssignmentController::class, 'downloadBrief'])->whereNumber('assignment')->middleware('can:assignments.download')->name('assignments.brief.download');
+            Route::get('assignments/{assignment}/print', [AssignmentController::class, 'print'])->whereNumber('assignment')->middleware('can:assignments.print')->name('assignments.print');
+            Route::delete('assignments/{assignment}', [AssignmentController::class, 'destroy'])->whereNumber('assignment')->middleware('can:assignments.delete')->name('assignments.destroy');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Assignment submissions - phase-19-23 sec 7.2, sec 4.1
+        |----------------------------------------------------------------------
+        |
+        | A module of its own because grading is not authoring: a visiting trainer
+        | may read a roster's work without marking it, and a coordinator may mark
+        | without being able to publish new assignments. `edit` IS the mark-and-
+        | feedback ability.
+        |
+        | There is no destroy route, and there never will be. The ability is not
+        | registered, the policy returns false for every role, and the model
+        | refuses the act even for a Super Admin.
+        |
+        */
+        Route::middleware('module:assignment_submissions')->group(static function (): void {
+            Route::get('assignments/{assignment}/submissions', [AssignmentSubmissionController::class, 'index'])->whereNumber('assignment')->middleware('can:assignment_submissions.view_any')->name('assignment-submissions.index');
+            Route::post('assignments/{assignment}/submissions', [AssignmentSubmissionController::class, 'store'])->whereNumber('assignment')->middleware('can:assignment_submissions.create')->name('assignment-submissions.store');
+            Route::post('assignments/{assignment}/grade-bulk', [AssignmentSubmissionController::class, 'gradeBulk'])->whereNumber('assignment')->middleware(['can:assignment_submissions.edit', 'throttle:10,1'])->name('assignment-submissions.grade-bulk');
+            Route::post('assignments/{assignment}/release-marks', [AssignmentSubmissionController::class, 'release'])->whereNumber('assignment')->middleware('can:assignment_submissions.change_status')->name('assignment-submissions.release');
+            Route::post('assignments/{assignment}/mark-missed', [AssignmentSubmissionController::class, 'markMissed'])->whereNumber('assignment')->middleware('can:assignment_submissions.change_status')->name('assignment-submissions.mark-missed');
+            Route::get('assignments/{assignment}/export/{format}', [AssignmentSubmissionController::class, 'export'])->whereNumber('assignment')->middleware('can:assignment_submissions.export')->name('assignment-submissions.export');
+            Route::get('assignment-submissions/{submission}', [AssignmentSubmissionController::class, 'show'])->whereNumber('submission')->middleware('can:assignment_submissions.view')->name('assignment-submissions.show');
+            Route::post('assignment-submissions/{submission}/grade', [AssignmentSubmissionController::class, 'grade'])->whereNumber('submission')->middleware(['can:assignment_submissions.edit', 'throttle:60,1'])->name('assignment-submissions.grade');
+            Route::post('assignment-submissions/{submission}/return', [AssignmentSubmissionController::class, 'returnForRework'])->whereNumber('submission')->middleware('can:assignment_submissions.edit')->name('assignment-submissions.return');
+            Route::post('assignment-submissions/{submission}/amend', [AssignmentSubmissionController::class, 'amend'])->whereNumber('submission')->middleware('can:assignment_submissions.edit')->name('assignment-submissions.amend');
+            Route::get('assignment-submissions/{submission}/files/{file}', [AssignmentSubmissionController::class, 'downloadFile'])->whereNumber('submission')->whereNumber('file')->middleware('can:assignment_submissions.download')->name('assignment-submissions.file.download');
+            Route::get('assignment-submissions/{submission}/feedback-file', [AssignmentSubmissionController::class, 'downloadFeedback'])->whereNumber('submission')->middleware('can:assignment_submissions.download')->name('assignment-submissions.feedback.download');
         });
     });

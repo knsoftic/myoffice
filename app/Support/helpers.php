@@ -113,6 +113,29 @@ if (! function_exists('app_datetime')) {
     }
 }
 
+if (! function_exists('app_input_date')) {
+    /**
+     * A date for an `<input type="date">` — the browser's `Y-m-d`, not the reader's format.
+     *
+     * Deliberately outside the display-format family: an input handed a localized date renders blank
+     * and loses what the user was editing. See {@see Format::inputDate()}.
+     */
+    function app_input_date(mixed $value): string
+    {
+        return Format::inputDate($value);
+    }
+}
+
+if (! function_exists('app_input_datetime')) {
+    /**
+     * A moment for an `<input type="datetime-local">`, in the display timezone.
+     */
+    function app_input_datetime(mixed $value): string
+    {
+        return Format::inputDateTime($value);
+    }
+}
+
 if (! function_exists('app_number')) {
     /**
      * A plain number with the configured separators: app_number(1248) // '1,248'.

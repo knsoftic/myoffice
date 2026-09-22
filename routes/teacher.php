@@ -2,11 +2,14 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Teacher\AssignmentController as TeacherAssignmentController;
 use App\Http\Controllers\Teacher\AttendanceController;
 use App\Http\Controllers\Teacher\BatchController;
 use App\Http\Controllers\Teacher\DashboardController;
 use App\Http\Controllers\Teacher\DemoClassController;
+use App\Http\Controllers\Teacher\MaterialController as TeacherMaterialController;
 use App\Http\Controllers\Teacher\ProgressController;
+use App\Http\Controllers\Teacher\SubmissionController;
 use App\Http\Controllers\Teacher\TimetableController;
 use Illuminate\Support\Facades\Route;
 
@@ -95,5 +98,53 @@ Route::prefix('teacher')
             Route::get('batches/{batch}/progress', [ProgressController::class, 'show'])->whereNumber('batch')->middleware('can:teacher_portal.student_progress')->name('progress.show');
             Route::post('batches/{batch}/progress/topics/{topic}', [ProgressController::class, 'markForBatch'])->whereNumber('batch')->whereNumber('topic')->middleware('can:teacher_portal.progress_mark')->name('progress.store');
             Route::post('enrollments/{enrollment}/progress/topics/{topic}', [ProgressController::class, 'markForStudent'])->whereNumber('enrollment')->whereNumber('topic')->middleware('can:teacher_portal.progress_mark')->name('progress.student');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Materials - phase-19-23 sec 7.10
+        |----------------------------------------------------------------------
+        |
+        | Scoped by TeacherScope, which counts all four ways a teacher reaches a
+        | batch - named teacher, timetable entry, taught a session, or was the
+        | teacher a session was moved off. Leaving one out means a substitute who
+        | actually took the class cannot hand out the handout they used.
+        |
+        */
+        Route::middleware('module:course_materials')->group(static function (): void {
+            Route::get('materials', [TeacherMaterialController::class, 'index'])->middleware('can:teacher_portal.materials')->name('materials.index');
+            Route::get('materials/create', [TeacherMaterialController::class, 'create'])->middleware('can:teacher_portal.materials_upload')->name('materials.create');
+            Route::post('materials', [TeacherMaterialController::class, 'store'])->middleware(['can:teacher_portal.materials_upload', 'throttle:30,1'])->name('materials.store');
+            Route::put('materials/{material}', [TeacherMaterialController::class, 'update'])->whereNumber('material')->middleware('can:teacher_portal.materials_upload')->name('materials.update');
+            Route::post('materials/{material}/targets', [TeacherMaterialController::class, 'targets'])->whereNumber('material')->middleware('can:teacher_portal.materials_upload')->name('materials.targets');
+            Route::post('materials/{material}/status', [TeacherMaterialController::class, 'status'])->whereNumber('material')->middleware('can:teacher_portal.materials_upload')->name('materials.status');
+            Route::get('materials/{material}/download', [TeacherMaterialController::class, 'download'])->whereNumber('material')->middleware('can:teacher_portal.materials')->name('materials.download');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Assignments and marking - phase-19-23 sec 7.10
+        |----------------------------------------------------------------------
+        |
+        | `assignment_grade` is separate from `assignments` for the same reason
+        | phase-14-17 split `attendance_mark`: setting work and judging it are
+        | different rights, and a teaching assistant commonly holds exactly one.
+        |
+        */
+        Route::middleware('module:assignments')->group(static function (): void {
+            Route::get('assignments', [TeacherAssignmentController::class, 'index'])->middleware('can:teacher_portal.assignments')->name('assignments.index');
+            Route::get('assignments/create', [TeacherAssignmentController::class, 'create'])->middleware('can:teacher_portal.assignments')->name('assignments.create');
+            Route::post('assignments', [TeacherAssignmentController::class, 'store'])->middleware(['can:teacher_portal.assignments', 'throttle:30,1'])->name('assignments.store');
+            Route::put('assignments/{assignment}', [TeacherAssignmentController::class, 'update'])->whereNumber('assignment')->middleware('can:teacher_portal.assignments')->name('assignments.update');
+            Route::post('assignments/{assignment}/status', [TeacherAssignmentController::class, 'status'])->whereNumber('assignment')->middleware('can:teacher_portal.assignments')->name('assignments.status');
+        });
+
+        Route::middleware('module:assignment_submissions')->group(static function (): void {
+            Route::get('assignments/{assignment}/submissions', [SubmissionController::class, 'index'])->whereNumber('assignment')->middleware('can:teacher_portal.assignments')->name('submissions.index');
+            Route::post('assignments/{assignment}/grade-bulk', [SubmissionController::class, 'gradeBulk'])->whereNumber('assignment')->middleware('can:teacher_portal.assignment_grade')->name('submissions.grade-bulk');
+            Route::post('assignments/{assignment}/release-marks', [SubmissionController::class, 'release'])->whereNumber('assignment')->middleware('can:teacher_portal.assignment_grade')->name('submissions.release');
+            Route::get('submissions/{submission}', [SubmissionController::class, 'show'])->whereNumber('submission')->middleware('can:teacher_portal.assignments')->name('submissions.show');
+            Route::post('submissions/{submission}/grade', [SubmissionController::class, 'grade'])->whereNumber('submission')->middleware(['can:teacher_portal.assignment_grade', 'throttle:60,1'])->name('submissions.grade');
+            Route::get('submissions/{submission}/files/{file}', [SubmissionController::class, 'file'])->whereNumber('submission')->whereNumber('file')->middleware('can:teacher_portal.assignments')->name('submissions.file');
         });
     });

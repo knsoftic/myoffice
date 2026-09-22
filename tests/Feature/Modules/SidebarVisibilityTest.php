@@ -225,6 +225,9 @@ final class SidebarVisibilityTest extends TestCase
                 'Courses',
                 'All Courses',
                 'Categories',
+                // phase-19-23 §7.1: the material library, under Courses because a material belongs to
+                // the course it distributes — this is an act of distribution, not part of the syllabus.
+                'Materials',
                 // phase-14-17 §7.3-§7.4: the admission pipeline. `Students` is a parent like
                 // `Courses`; `Applications` is its own entry because the §67 inbox is its own module
                 // (§4.1) — a receptionist triages it without holding `students.create`.
@@ -268,6 +271,10 @@ final class SidebarVisibilityTest extends TestCase
                 'Fee Receipts',
                 'Fee Collection',
                 'Fee Reminders',
+                // phase-19-23 §7.2. `Assessments` is a parent: it appears the moment one of its
+                // children has a route, and Exams and Results stay hidden until Phase 20 ships theirs.
+                'Assessments',
+                'Assignments',
                 // phase-03 §7-§8: the nine Website CMS entries whose routes now exist.
                 'Website Overview',
                 'Sections',
@@ -375,10 +382,12 @@ final class SidebarVisibilityTest extends TestCase
                 PanelType::Collaborator => ['Dashboard', 'My Projects', 'Wallet', 'Commissions', 'Payouts',
                     'Statements'],
                 // phase-17 added the register and the syllabus to both panels; phase-18 added the
-                // student's own fees, which Phase 1 had reserved an entry for and never had a route to.
-                PanelType::Student => ['Dashboard', 'Timetable', 'Attendance', 'Progress', 'Fees'],
+                // student's own fees, which Phase 1 had reserved an entry for and never had a route to;
+                // phase-19 added the material library and assignments to both.
+                PanelType::Student => ['Dashboard', 'Timetable', 'Attendance', 'Progress',
+                    'Materials', 'Assignments', 'Fees'],
                 PanelType::Teacher => ['Dashboard', 'My Batches', 'My Students', 'Timetable',
-                    'Demo Classes', 'Attendance'],
+                    'Demo Classes', 'Attendance', 'Materials', 'Assignments'],
                 default => ['Dashboard'],
             };
 

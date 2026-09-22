@@ -2,10 +2,12 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Student\AssignmentController as StudentAssignmentController;
 use App\Http\Controllers\Student\AttendanceController;
 use App\Http\Controllers\Student\BatchController;
 use App\Http\Controllers\Student\DashboardController;
 use App\Http\Controllers\Student\FeeController;
+use App\Http\Controllers\Student\MaterialController;
 use App\Http\Controllers\Student\ProgressController;
 use App\Http\Controllers\Student\TimetableController;
 use Illuminate\Support\Facades\Route;
@@ -118,5 +120,53 @@ Route::prefix('student')
                 ->whereNumber('payment')
                 ->middleware('can:student_portal.payments')
                 ->name('payments.receipt');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Materials - phase-19-23 sec 7.9
+        |----------------------------------------------------------------------
+        |
+        | `material_download` is a separate permission from `materials` so a
+        | fee-blocked student can still be shown the library and told why the
+        | files are unavailable. Hiding the list as well would leave them
+        | guessing what they were missing.
+        |
+        | Every action re-runs MaterialAccessService::grantFor() against live
+        | state (sec 6.2 D-19-4): a student suspended, un-enrolled or fee-blocked
+        | five minutes ago does not still get the bytes because the link was on a
+        | page they were once allowed to see.
+        |
+        */
+        Route::middleware('module:course_materials')->group(static function (): void {
+            Route::get('materials', [MaterialController::class, 'index'])->middleware('can:student_portal.materials')->name('materials.index');
+            Route::get('materials/{material}', [MaterialController::class, 'show'])->whereNumber('material')->middleware('can:student_portal.materials')->name('materials.show');
+            Route::get('materials/{material}/download', [MaterialController::class, 'download'])->whereNumber('material')->middleware(['can:student_portal.material_download', 'throttle:60,1'])->name('materials.download');
+            Route::get('materials/{material}/open', [MaterialController::class, 'open'])->whereNumber('material')->middleware('can:student_portal.material_download')->name('materials.open');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Assignments - phase-19-23 sec 7.9
+        |----------------------------------------------------------------------
+        |
+        | `assignment_submit` is separate from `assignments`: reading the brief
+        | and handing work in are different rights, and a student whose account
+        | is restricted may keep the first without the second.
+        |
+        | The withdraw route is the only deletion a student has, and it reaches
+        | drafts only - work handed in is never withdrawn.
+        |
+        */
+        Route::middleware('module:assignments')->group(static function (): void {
+            Route::get('assignments', [StudentAssignmentController::class, 'index'])->middleware('can:student_portal.assignments')->name('assignments.index');
+            Route::get('assignments/{assignment}', [StudentAssignmentController::class, 'show'])->whereNumber('assignment')->middleware('can:student_portal.assignments')->name('assignments.show');
+            Route::get('assignments/{assignment}/brief', [StudentAssignmentController::class, 'brief'])->whereNumber('assignment')->middleware('can:student_portal.assignments')->name('assignments.brief');
+            Route::post('assignments/{assignment}/submission', [StudentAssignmentController::class, 'start'])->whereNumber('assignment')->middleware('can:student_portal.assignment_submit')->name('assignments.submission.start');
+            Route::post('assignments/{assignment}/resubmit', [StudentAssignmentController::class, 'resubmit'])->whereNumber('assignment')->middleware(['can:student_portal.assignment_submit', 'throttle:10,1'])->name('submissions.resubmit');
+            Route::post('submissions/{submission}/submit', [StudentAssignmentController::class, 'submit'])->whereNumber('submission')->middleware(['can:student_portal.assignment_submit', 'throttle:10,1'])->name('submissions.submit');
+            Route::delete('submissions/{submission}', [StudentAssignmentController::class, 'withdraw'])->whereNumber('submission')->middleware('can:student_portal.assignment_submit')->name('submissions.withdraw');
+            Route::get('submissions/{submission}/files/{file}', [StudentAssignmentController::class, 'file'])->whereNumber('submission')->whereNumber('file')->middleware('can:student_portal.assignment_submit')->name('submissions.file');
+            Route::get('submissions/{submission}/feedback-file', [StudentAssignmentController::class, 'feedback'])->whereNumber('submission')->middleware('can:student_portal.assignments')->name('submissions.feedback');
         });
     });

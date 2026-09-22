@@ -155,6 +155,35 @@ final class Format
     /**
      * '3 hours ago' — the relative form, in the viewer's timezone.
      */
+    /**
+     * A value for an `<input type="date">`, in the only format a browser accepts: `Y-m-d`.
+     *
+     * **This is a wire format, not a display format, and that distinction is the whole point.** Every
+     * other renderer here honours `general.date_format`; this one must not, because an input given
+     * `12 Sep 2026` silently shows blank and the user loses the value they were editing. It is a named
+     * method rather than a `->format('Y-m-d')` at the call site so that the difference is visible, and
+     * so `NoHardcodedFormatsTest` can keep catching the mistake it exists to catch.
+     *
+     * The **display timezone still applies**: the field shows the day the reader is in, which is the
+     * day they will type against.
+     */
+    public static function inputDate(mixed $value): string
+    {
+        return self::carbon($value)?->format('Y-m-d') ?? '';
+    }
+
+    /**
+     * A value for an `<input type="datetime-local">`: `Y-m-d\TH:i`, the format HTML requires.
+     *
+     * Converted into the display timezone first, so the time in the box is the time the reader was
+     * just shown on the page beside it. Seconds are dropped because the control does not show them
+     * unless `step` asks for them, and a value carrying them is silently rejected by some browsers.
+     */
+    public static function inputDateTime(mixed $value): string
+    {
+        return self::moment($value)?->format('Y-m-d\TH:i') ?? '';
+    }
+
     public static function forHumans(mixed $value): string
     {
         $date = self::moment($value);

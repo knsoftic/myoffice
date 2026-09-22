@@ -76,6 +76,8 @@ use App\Models\Hr\PayrollRunItem;
 use App\Models\Hr\SalaryComponent;
 use App\Models\Hr\SalaryStructure;
 use App\Models\Hr\WorkShift;
+use App\Models\Institute\Assignment;
+use App\Models\Institute\AssignmentSubmission;
 use App\Models\Institute\Batch;
 use App\Models\Institute\Classroom;
 use App\Models\Institute\ClassSession;
@@ -83,6 +85,7 @@ use App\Models\Institute\Course;
 use App\Models\Institute\CourseCategory;
 use App\Models\Institute\CourseInquiry;
 use App\Models\Institute\CourseLecture;
+use App\Models\Institute\CourseMaterial;
 use App\Models\Institute\CourseModule;
 use App\Models\Institute\CourseTopic;
 use App\Models\Institute\CourseTopicAssignment;
@@ -169,11 +172,14 @@ use App\Policies\Hr\PayrollRunPolicy;
 use App\Policies\Hr\SalaryComponentPolicy;
 use App\Policies\Hr\SalaryStructurePolicy;
 use App\Policies\Hr\WorkShiftPolicy;
+use App\Policies\Institute\AssignmentPolicy;
+use App\Policies\Institute\AssignmentSubmissionPolicy;
 use App\Policies\Institute\BatchPolicy;
 use App\Policies\Institute\ClassroomPolicy;
 use App\Policies\Institute\ClassSessionPolicy;
 use App\Policies\Institute\CourseCategoryPolicy;
 use App\Policies\Institute\CourseInquiryPolicy;
+use App\Policies\Institute\CourseMaterialPolicy;
 use App\Policies\Institute\CourseOutlinePolicy;
 use App\Policies\Institute\CoursePolicy;
 use App\Policies\Institute\DemoClassPolicy;
@@ -382,6 +388,11 @@ class AppServiceProvider extends ServiceProvider
         StudentFeeInstallment::class => StudentFeeInstallmentPolicy::class,
         StudentFeeDiscount::class => StudentFeeDiscountPolicy::class,
         StudentFeeReminder::class => StudentFeeReminderPolicy::class,
+
+        // phase-19-23 §9.
+        CourseMaterial::class => CourseMaterialPolicy::class,
+        Assignment::class => AssignmentPolicy::class,
+        AssignmentSubmission::class => AssignmentSubmissionPolicy::class,
     ];
 
     /**
