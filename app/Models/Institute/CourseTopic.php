@@ -95,7 +95,7 @@ class CourseTopic extends Model
      * than a draft. The tables belong to phases 16 and 17, so each is checked only if it exists — which
      * is what lets this run correctly before those phases ship and keep working after.
      *
-     * @return array<string, int>  table => how many rows reference it
+     * @return array<string, int> table => how many rows reference it
      */
     public function references(): array
     {

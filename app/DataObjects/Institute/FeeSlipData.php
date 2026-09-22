@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace App\DataObjects\Institute;
 
 use App\Models\Institute\StudentFee;
+use App\Models\Institute\StudentFeeDiscount;
+use App\Models\Institute\StudentFeeInstallment;
+use App\Models\Institute\StudentFeePayment;
 use App\Support\Money;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -25,9 +28,9 @@ use Illuminate\Support\Collection;
 final readonly class FeeSlipData
 {
     /**
-     * @param  Collection<int, \App\Models\Institute\StudentFeeInstallment>  $installments
-     * @param  Collection<int, \App\Models\Institute\StudentFeePayment>  $payments
-     * @param  Collection<int, \App\Models\Institute\StudentFeeDiscount>  $discounts
+     * @param  Collection<int, StudentFeeInstallment>  $installments
+     * @param  Collection<int, StudentFeePayment>  $payments
+     * @param  Collection<int, StudentFeeDiscount>  $discounts
      * @param  array{collaborator: string, base: string, base_amount: string, rate: string, amount: string}|null  $commission
      */
     public function __construct(

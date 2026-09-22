@@ -8,8 +8,10 @@ use App\Enums\EnrollmentStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Student\Concerns\ResolvesTheSignedInStudent;
 use App\Models\Institute\Batch;
+use App\Models\Institute\ClassSession;
 use App\Models\Institute\StudentBatchEnrollment;
 use App\Models\Institute\Teacher;
+use App\Models\Institute\TimetableEntry;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -69,8 +71,8 @@ final class BatchController extends Controller
         // took a class. A substitute who covered one Tuesday is one of their teachers.
         $teacherIds = collect()
             ->merge(Batch::query()->whereIn('id', $batchIds)->pluck('teacher_id'))
-            ->merge(\App\Models\Institute\TimetableEntry::query()->whereIn('batch_id', $batchIds)->pluck('teacher_id'))
-            ->merge(\App\Models\Institute\ClassSession::query()->whereIn('batch_id', $batchIds)->pluck('teacher_id'))
+            ->merge(TimetableEntry::query()->whereIn('batch_id', $batchIds)->pluck('teacher_id'))
+            ->merge(ClassSession::query()->whereIn('batch_id', $batchIds)->pluck('teacher_id'))
             ->filter()
             ->unique()
             ->values();

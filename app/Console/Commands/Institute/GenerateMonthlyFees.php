@@ -6,9 +6,11 @@ namespace App\Console\Commands\Institute;
 
 use App\Jobs\Institute\GenerateMonthlyFeeCharges;
 use App\Models\Institute\Batch;
+use App\Models\Institute\Course;
 use App\Models\Institute\StudentAdmission;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
+use Illuminate\Support\Collection;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
@@ -104,9 +106,9 @@ final class GenerateMonthlyFees extends Command
     }
 
     /**
-     * @return \Illuminate\Support\Collection<int, Batch>
+     * @return Collection<int, Batch>
      */
-    private function batchesWithMonthlyFees(): \Illuminate\Support\Collection
+    private function batchesWithMonthlyFees(): Collection
     {
         return Batch::query()
             ->when($this->option('batch') !== null, fn ($q) => $q->whereKey((int) $this->option('batch')))
@@ -118,7 +120,7 @@ final class GenerateMonthlyFees extends Command
                     // Either the admission carries its own figure, or the course does. A batch where
                     // neither does has nothing to raise, and this command does not invent one.
                     $q->where('monthly_fee', '>', 0)
-                        ->orWhereIn('course_id', \App\Models\Institute\Course::query()
+                        ->orWhereIn('course_id', Course::query()
                             ->where('monthly_fee', '>', 0)
                             ->select('id'));
                 })

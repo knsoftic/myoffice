@@ -6,6 +6,7 @@ namespace App\Dashboard\Widgets\Finance;
 
 use App\Dashboard\Widget;
 use App\Dashboard\WidgetGroup;
+use App\Enums\FinanceReportType;
 use App\Services\Finance\FinanceReportService;
 use App\Support\DateRange;
 use App\Support\Money;
@@ -77,11 +78,11 @@ final class RevenueThisMonthWidget extends Widget
 
         try {
             $current = Money::of((string) ($this->reports
-                ->report(\App\Enums\FinanceReportType::Income, $range, $viewer)->totals['amount'] ?? Money::ZERO));
+                ->report(FinanceReportType::Income, $range, $viewer)->totals['amount'] ?? Money::ZERO));
 
             $previousRange = $range->previous();
             $previous = Money::of((string) ($this->reports
-                ->report(\App\Enums\FinanceReportType::Income, $previousRange, $viewer)->totals['amount'] ?? Money::ZERO));
+                ->report(FinanceReportType::Income, $previousRange, $viewer)->totals['amount'] ?? Money::ZERO));
         } catch (Throwable) {
             return ['available' => false, 'range_label' => $range->label()];
         }

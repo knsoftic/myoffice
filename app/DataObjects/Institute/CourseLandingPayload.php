@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace App\DataObjects\Institute;
 
+use App\Models\Cms\Faq;
+use App\Models\Cms\StudentReview;
 use App\Models\Institute\Course;
+use App\Models\Institute\CourseModule;
+use App\Models\Institute\CourseTopicResource;
 use Illuminate\Support\Collection;
 
 /**
@@ -21,12 +25,12 @@ use Illuminate\Support\Collection;
 final readonly class CourseLandingPayload
 {
     /**
-     * @param  Collection<int, \App\Models\Institute\CourseModule>  $modules  active only, ordered, with their topics
-     * @param  Collection<int, \App\Models\Institute\CourseTopicResource>  $publicResources
-     * @param  Collection<int, \App\Models\Cms\Faq>  $faqs
+     * @param  Collection<int, CourseModule>  $modules  active only, ordered, with their topics
+     * @param  Collection<int, CourseTopicResource>  $publicResources
+     * @param  Collection<int, Faq>  $faqs
      * @param  Collection<int, mixed>  $trainers  empty until Phase 16 ships `teachers`
      * @param  Collection<int, mixed>  $upcomingBatches  empty until Phase 16 ships `batches`
-     * @param  Collection<int, \App\Models\Cms\StudentReview>  $reviews
+     * @param  Collection<int, StudentReview>  $reviews
      * @param  list<string>  $requirements
      * @param  list<string>  $outcomes
      */

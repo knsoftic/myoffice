@@ -6,6 +6,7 @@ namespace App\Models\Institute;
 
 use App\Enums\DeliveryMode;
 use App\Enums\PreferredTiming;
+use App\Enums\ReferralSource;
 use App\Enums\StudentApplicationStatus;
 use App\Models\Branch;
 use App\Models\Collaborator\Collaborator;
@@ -74,7 +75,7 @@ class StudentApplication extends Model
             'course_inquiry_id' => 'integer',
             'collaborator_id' => 'integer',
             'referral_visit_id' => 'integer',
-            'referral_source' => \App\Enums\ReferralSource::class,
+            'referral_source' => ReferralSource::class,
             'duplicate_of_application_id' => 'integer',
             'reviewed_by' => 'integer',
             'converted_student_id' => 'integer',

@@ -20,9 +20,9 @@ final readonly class PlanRedistribution
 {
     /**
      * @param  array<int, string>  $amounts  new amount per line id, for lines that changed
-     * @param  list<int>           $cancel   line ids reduced to zero, to be cancelled with the reason
-     * @param  string              $unconsumed  the signed remainder no live line could take ('0.00' normally)
-     * @param  string|null         $newLineAmount  a positive delta with no live unpaid line left to grow
+     * @param  list<int>  $cancel  line ids reduced to zero, to be cancelled with the reason
+     * @param  string  $unconsumed  the signed remainder no live line could take ('0.00' normally)
+     * @param  string|null  $newLineAmount  a positive delta with no live unpaid line left to grow
      */
     public function __construct(
         public array $amounts = [],

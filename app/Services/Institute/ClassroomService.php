@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services\Institute;
 
-use App\Enums\ClassSessionStatus;
 use App\Enums\ClassroomType;
+use App\Enums\ClassSessionStatus;
 use App\Models\Institute\Classroom;
 use App\Models\User;
 use App\Services\Institute\Exceptions\CourseRuleException;

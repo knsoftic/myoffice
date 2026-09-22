@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models\Institute;
 
 use App\Enums\Gender;
+use App\Enums\ReferralSource;
 use App\Enums\StudentStatus;
 use App\Models\Branch;
 use App\Models\Collaborator\Collaborator;
@@ -72,7 +73,7 @@ class Student extends Model
             'branch_id' => 'integer',
             'collaborator_id' => 'integer',
             'referral_visit_id' => 'integer',
-            'referral_source' => \App\Enums\ReferralSource::class,
+            'referral_source' => ReferralSource::class,
             'status' => StudentStatus::class,
             'gender' => Gender::class,
             'date_of_birth' => 'date',

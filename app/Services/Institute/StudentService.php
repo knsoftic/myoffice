@@ -6,6 +6,7 @@ namespace App\Services\Institute;
 
 use App\Enums\StudentStatus;
 use App\Enums\UserStatus;
+use App\Models\Branch;
 use App\Models\Institute\Student;
 use App\Models\User;
 use App\Services\Institute\Exceptions\CourseRuleException;
@@ -71,7 +72,7 @@ final class StudentService
 
             $student->forceFill([
                 'student_code' => $this->numbers->nextStudentCode(
-                    $branchId === null ? null : \App\Models\Branch::find($branchId),
+                    $branchId === null ? null : Branch::find($branchId),
                 ),
                 'branch_id' => $branchId,
                 'phone' => $this->normalisePhone((string) ($data['phone'] ?? '')),

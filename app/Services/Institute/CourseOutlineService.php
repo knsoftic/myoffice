@@ -45,13 +45,13 @@ final class CourseOutlineService
 {
     /** Where a syllabus resource lives on the public disk (§2.8). */
     /**
-      * The private disk, against §2.8's own line — see D21. A resource that is not `is_public` needs
-      * `course_outline.view`, and a file the web server serves directly has no permission in front of
-      * it: `Storage::url()` would hand out an address that stays valid after the resource is hidden,
-      * after it is deleted, and after the person who was shown it leaves. Two controllers serve these
-      * files instead, and each re-runs its own rule.
-      */
-     private const RESOURCE_DISK = 'local';
+     * The private disk, against §2.8's own line — see D21. A resource that is not `is_public` needs
+     * `course_outline.view`, and a file the web server serves directly has no permission in front of
+     * it: `Storage::url()` would hand out an address that stays valid after the resource is hidden,
+     * after it is deleted, and after the person who was shown it leaves. Two controllers serve these
+     * files instead, and each re-runs its own rule.
+     */
+    private const RESOURCE_DISK = 'local';
 
     /** 25 MB. Bigger than any slide deck and smaller than a video somebody should be linking instead. */
     private const MAX_RESOURCE_BYTES = 25 * 1024 * 1024;

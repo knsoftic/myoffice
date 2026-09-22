@@ -9,6 +9,7 @@ use App\Models\Institute\StudentCourseProgress;
 use App\Services\Institute\CourseProgressService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
@@ -91,7 +92,7 @@ final class RecomputeProgress extends Command
 
         return Batch::query()
             ->whereHas('sessions', static fn ($q) => $q->where('updated_at', '>=', $since))
-            ->orWhereIn('id', \Illuminate\Support\Facades\DB::table('batch_topic_coverage')
+            ->orWhereIn('id', DB::table('batch_topic_coverage')
                 ->where('updated_at', '>=', $since)
                 ->select('batch_id'))
             ->pluck('id')

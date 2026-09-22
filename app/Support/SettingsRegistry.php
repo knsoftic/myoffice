@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Support;
 
-use App\Enums\RemainderPlacement;
 use App\Enums\Cms\SitemapChangeFrequency;
 use App\Enums\FixedCommissionRelease;
 use App\Enums\ProgressBasis;
+use App\Enums\RemainderPlacement;
 use App\Enums\StudentFeeType;
 use App\Enums\ThemePreference;
 use App\Enums\Weekday;
@@ -3633,7 +3633,6 @@ final class SettingsRegistry
                 'span' => 4,
                 'sort' => 130,
             ],
-
 
             // phase-18 §5 — the ten fee keys, all into the existing `institute` group. Nothing here is
             // a new group and nothing redefines a key Phase 2 or the spine already declared

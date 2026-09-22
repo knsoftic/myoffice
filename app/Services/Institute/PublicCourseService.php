@@ -6,6 +6,7 @@ namespace App\Services\Institute;
 
 use App\DataObjects\Institute\CatalogueQuery;
 use App\DataObjects\Institute\CourseLandingPayload;
+use App\Models\Cms\Faq;
 use App\Models\Cms\StudentReview;
 use App\Models\Institute\Course;
 use App\Models\Institute\CourseCategory;
@@ -260,7 +261,7 @@ final class PublicCourseService
     /**
      * Phase 3's `faqs` rows, published only (§2.10).
      *
-     * @return Collection<int, \App\Models\Cms\Faq>
+     * @return Collection<int, Faq>
      */
     private function faqsFor(Course $course): Collection
     {

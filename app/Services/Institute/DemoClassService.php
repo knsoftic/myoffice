@@ -17,6 +17,7 @@ use App\Models\User;
 use App\Services\Institute\Exceptions\CourseRuleException;
 use App\Services\Institute\Exceptions\ScheduleClashException;
 use Illuminate\Database\DatabaseManager;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
@@ -264,9 +265,9 @@ final class DemoClassService
      * answer. It marks nothing itself: whether an attendee turned up is a fact only a person in the
      * room has, and a job that guessed would put a no-show on somebody's record.
      *
-     * @return \Illuminate\Database\Eloquent\Collection<int, DemoClass>
+     * @return Collection<int, DemoClass>
      */
-    public function unmarkedPast(?Carbon $now = null): \Illuminate\Database\Eloquent\Collection
+    public function unmarkedPast(?Carbon $now = null): Collection
     {
         $now ??= Carbon::now();
 

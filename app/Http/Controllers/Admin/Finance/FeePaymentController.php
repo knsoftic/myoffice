@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Admin\Finance;
 
 use App\DataObjects\Finance\RecordPaymentData;
 use App\DataObjects\Finance\RefundData;
+use App\DataObjects\Institute\FeeSlipOptions;
 use App\Enums\CommissionProcessingState;
 use App\Enums\PaymentMethod;
 use App\Enums\ReceivedPaymentStatus;
@@ -16,6 +17,7 @@ use App\Models\Collaborator\Collaborator;
 use App\Models\Institute\StudentFee;
 use App\Models\Institute\StudentFeePayment;
 use App\Services\Finance\PaymentService;
+use App\Services\Institute\FeeSlipBuilder;
 use App\Support\CsvWriter;
 use App\Support\DateRange;
 use App\Support\Money;
@@ -208,10 +210,26 @@ final class FeePaymentController extends Controller
         ]);
     }
 
-    public function receipt(StudentFeePayment $payment): View
+    /**
+     * **Phase 18 §6.7.2 owns this document now, and both panels print the same one.**
+     *
+     * Phase 10 shipped a receipt on the admin layout, before there was a print layout or a
+     * `FeeSlipBuilder` to build one. It could not meet the rules §6.7.2 later stated — both dates
+     * labelled, a balance carrying its own print timestamp, a VOID watermark with the reversal number,
+     * a REPRINT stamp — and a second template for one receipt is where those eventually get forgotten
+     * in one copy and not the other. `resources/views/fees/receipt.blade.php` is the document; the
+     * staff and student routes differ only in the `FeeSlipOptions` they construct.
+     */
+    public function receipt(Request $request, StudentFeePayment $payment, FeeSlipBuilder $slips): View
     {
-        return view('admin.fee-payments.receipt', [
-            'payment' => $payment->load('fee:id,fee_number,fee_type,student_id', 'receivedBy:id,name'),
+        $printCount = max(1, (int) $request->integer('print_count', 1));
+
+        return view('fees.receipt', [
+            'receipt' => $slips->forReceipt($payment, FeeSlipOptions::forStaff(
+                viewerMaySeeCommission: (bool) $request->user()?->can('collaborator_commissions.view_financial'),
+                isReprint: $printCount > 1,
+                printCount: $printCount,
+            )),
         ]);
     }
 

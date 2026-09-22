@@ -6,6 +6,7 @@ namespace App\Dashboard\Widgets\Finance;
 
 use App\Dashboard\Widget;
 use App\Dashboard\WidgetGroup;
+use App\Enums\FinanceReportType;
 use App\Services\Finance\FinanceReportService;
 use App\Support\DateRange;
 use App\Support\Money;
@@ -84,7 +85,7 @@ final class ExpensesByCategoryChartWidget extends Widget
         $viewer = request() instanceof Request ? request()->user() : null;
 
         try {
-            $result = $this->reports->report(\App\Enums\FinanceReportType::Expenses, $range, $viewer);
+            $result = $this->reports->report(FinanceReportType::Expenses, $range, $viewer);
         } catch (Throwable) {
             return ['available' => false, 'labels' => [], 'values' => [], 'slices' => []];
         }

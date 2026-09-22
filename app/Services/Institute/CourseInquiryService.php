@@ -7,15 +7,14 @@ namespace App\Services\Institute;
 use App\Enums\CourseInquiryStatus;
 use App\Enums\FollowUpOutcome;
 use App\Enums\InquirySource;
+use App\Enums\UserStatus;
 use App\Models\Institute\CourseInquiry;
 use App\Models\Institute\CourseInquiryFollowUp;
-use App\Enums\UserStatus;
 use App\Models\User;
 use App\Services\Institute\Exceptions\CourseRuleException;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 
 /**
  * The institute's funnel head (§86, §68, phase-14-17 §6.12).

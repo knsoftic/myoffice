@@ -15,6 +15,7 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -56,7 +57,7 @@ final class PaymentRegisterController extends Controller
         $union = $this->union($request, $range, $allowed);
 
         $payments = $union === null
-            ? new \Illuminate\Pagination\LengthAwarePaginator([], 0, 25, (int) $request->input('page', 1), [
+            ? new LengthAwarePaginator([], 0, 25, (int) $request->input('page', 1), [
                 'path' => $request->url(), 'query' => $request->query(),
             ])
             : $this->db->query()->fromSub($union, 'p')

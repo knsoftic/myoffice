@@ -76,7 +76,7 @@ final class TeacherService
      */
     public function update(Teacher $teacher, array $data, ?User $actor = null): Teacher
     {
-        return $this->db->transaction(function () use ($teacher, $data, $actor): Teacher {
+        return $this->db->transaction(function () use ($teacher, $data): Teacher {
             $columns = $this->columns($data);
 
             // Identity and salary belong to the employee record while one is linked (§6.11); the form

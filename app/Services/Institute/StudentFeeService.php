@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services\Institute;
 
+use App\DataObjects\Finance\RecordPaymentData;
+use App\DataObjects\Finance\RefundData;
 use App\DataObjects\Institute\DiscountData;
 use App\DataObjects\Institute\FeeStructureData;
 use App\DataObjects\Institute\FeeStructureResult;
@@ -14,6 +16,7 @@ use App\DataObjects\Institute\OverdueSweepResult;
 use App\Enums\FeeDiscountType;
 use App\Enums\InstallmentStatus;
 use App\Enums\ReceivedPaymentStatus;
+use App\Enums\ReversalType;
 use App\Enums\StudentFeeStatus;
 use App\Enums\StudentFeeType;
 use App\Models\Institute\Student;
@@ -23,9 +26,6 @@ use App\Models\Institute\StudentFeeDiscount;
 use App\Models\Institute\StudentFeeInstallment;
 use App\Models\Institute\StudentFeePayment;
 use App\Models\User;
-use App\DataObjects\Finance\RecordPaymentData;
-use App\DataObjects\Finance\RefundData;
-use App\Enums\ReversalType;
 use App\Services\Finance\DocumentNumberService;
 use App\Services\Finance\PaymentService;
 use App\Services\Institute\Exceptions\FeeRuleException;
@@ -35,9 +35,11 @@ use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Closure;
 use Illuminate\Database\DatabaseManager;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 use LogicException;
 use Throwable;
 
@@ -592,7 +594,7 @@ final class StudentFeeService
                 'approved_at' => Carbon::now(),
                 'effective_on' => Carbon::now(Format::timezone())->toDateString(),
                 'reverses_discount_id' => $discount->getKey(),
-                'idempotency_key' => (string) \Illuminate\Support\Str::ulid(),
+                'idempotency_key' => (string) Str::ulid(),
                 'created_by' => $actor?->getKey(),
                 'updated_by' => $actor?->getKey(),
             ]);
@@ -1715,9 +1717,9 @@ final class StudentFeeService
     }
 
     /**
-     * @return \Illuminate\Database\Eloquent\Builder<StudentFee>
+     * @return Builder<StudentFee>
      */
-    private function liveChargesFor(Student|StudentAdmission $subject): \Illuminate\Database\Eloquent\Builder
+    private function liveChargesFor(Student|StudentAdmission $subject): Builder
     {
         $query = StudentFee::query()->whereNot('status', StudentFeeStatus::Cancelled->value);
 

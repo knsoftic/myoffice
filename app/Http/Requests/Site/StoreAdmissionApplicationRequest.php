@@ -9,6 +9,7 @@ use App\Enums\DeliveryMode;
 use App\Enums\PreferredTiming;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 /**
  * §67's public admission form (phase-14-17 §6.4, §7.10).
@@ -82,9 +83,9 @@ final class StoreAdmissionApplicationRequest extends FormRequest
         ];
     }
 
-    public function withValidator(\Illuminate\Validation\Validator $validator): void
+    public function withValidator(Validator $validator): void
     {
-        $validator->after(function (\Illuminate\Validation\Validator $v): void {
+        $validator->after(function (Validator $v): void {
             $rendered = (int) $this->input('form_rendered_at', 0);
 
             if ($rendered > 0 && (time() - $rendered) < self::MINIMUM_SECONDS) {

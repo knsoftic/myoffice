@@ -15,6 +15,7 @@ use App\Services\Institute\StudentFeeService;
 use App\Support\Money;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
@@ -87,9 +88,9 @@ final class VerifyFeeIntegrity extends Command
     }
 
     /**
-     * @return \Illuminate\Support\Collection<int, StudentFee>
+     * @return Collection<int, StudentFee>
      */
-    private function scope(): \Illuminate\Support\Collection
+    private function scope(): Collection
     {
         if ($this->option('fee') !== null) {
             return StudentFee::query()->where('fee_number', (string) $this->option('fee'))->get();

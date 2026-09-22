@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Enums;
 
 use App\Enums\Concerns\HasOptions;
+use Carbon\CarbonInterface;
 
 /**
  * A day of the week (`timetable_entries.day_of_week`, §71).
@@ -76,7 +77,7 @@ enum Weekday: string
         return $this === self::Saturday || $this === self::Sunday;
     }
 
-    public static function fromDate(\Carbon\CarbonInterface $date): self
+    public static function fromDate(CarbonInterface $date): self
     {
         return match ($date->dayOfWeekIso) {
             1 => self::Monday,
