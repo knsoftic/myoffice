@@ -11,6 +11,7 @@ use App\Models\Institute\Student;
 use App\Models\Institute\StudentApplication;
 use App\Services\Institute\StudentApplicationService;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -195,7 +196,7 @@ final class StudentApplicationController extends Controller
     */
 
     /**
-     * @return \Illuminate\Database\Eloquent\Builder<StudentApplication>
+     * @return Builder<StudentApplication>
      */
     private function filtered(Request $request)
     {

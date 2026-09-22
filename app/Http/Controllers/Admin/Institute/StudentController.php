@@ -13,6 +13,7 @@ use App\Models\Institute\Course;
 use App\Models\Institute\Student;
 use App\Services\Institute\StudentService;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -218,7 +219,7 @@ final class StudentController extends Controller
     */
 
     /**
-     * @return \Illuminate\Database\Eloquent\Builder<Student>
+     * @return Builder<Student>
      */
     private function filtered(Request $request)
     {

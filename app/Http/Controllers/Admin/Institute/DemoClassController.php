@@ -14,6 +14,7 @@ use App\Models\Institute\Student;
 use App\Models\Institute\StudentApplication;
 use App\Services\Institute\DemoClassService;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -193,7 +194,7 @@ final class DemoClassController extends Controller
     }
 
     /**
-     * @return \Illuminate\Database\Eloquent\Builder<DemoClass>
+     * @return Builder<DemoClass>
      */
     private function filtered(Request $request)
     {

@@ -93,9 +93,15 @@ use App\Http\Controllers\Admin\Institute\CourseInquiryController;
 use App\Http\Controllers\Admin\Institute\CourseOutlineController;
 use App\Http\Controllers\Admin\Institute\DemoClassController;
 use App\Http\Controllers\Admin\Institute\EnrollmentController;
+use App\Http\Controllers\Admin\Institute\FeeCollectionController;
+use App\Http\Controllers\Admin\Institute\FeeDiscountController;
+use App\Http\Controllers\Admin\Institute\FeeReminderController;
+use App\Http\Controllers\Admin\Institute\FeeStructureController;
+use App\Http\Controllers\Admin\Institute\InstallmentPlanController;
 use App\Http\Controllers\Admin\Institute\ProgressController as StudentProgressController;
 use App\Http\Controllers\Admin\Institute\StudentApplicationController;
 use App\Http\Controllers\Admin\Institute\StudentController;
+use App\Http\Controllers\Admin\Institute\StudentFeeController;
 use App\Http\Controllers\Admin\Institute\TeacherController;
 use App\Http\Controllers\Admin\Institute\TimetableController;
 use App\Http\Controllers\Admin\LeadActivityController;
@@ -1366,6 +1372,102 @@ Route::prefix('admin')
             // A refund is a `payment_reversals` row, so it carries that module's create permission
             // rather than the receipt's.
             Route::post('fee-payments/{payment}/refund', [FeePaymentController::class, 'refund'])->whereNumber('payment')->middleware('can:payment_reversals.create')->name('fee-payments.refund');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | phase-18 §7 — the fee document side
+        |----------------------------------------------------------------------
+        |
+        | Phase 10 shipped the money path (the eight `fee-payments.*` routes
+        | above); this is what raises, reduces, schedules and prints the charge
+        | the money is paid against.
+        |
+        | **The literal segments sit before `{fee}` so they win the match**, the
+        | same reason `fee-payments/export` does. `student-fees/create` and
+        | `student-fees/export/csv` would otherwise both be read as a fee id.
+        |
+        | **A preview writes nothing and says so in its name.** Both of them are
+        | GET, both are throttled, and both exist so the wizard can show the
+        | arithmetic before anybody commits — a plan whose lines do not sum to
+        | the net fee, or a structure that does not match what the student
+        | agreed, is better caught on screen than by a 422.
+        |
+        | There is no `edit`, no `update` and no `destroy` for a charge: an
+        | amount that moved after a commission was computed from it would
+        | silently change what a partner earned, so a correction is a discount
+        | row and a charge with money against it is cancelled, never deleted.
+        |
+        */
+        Route::middleware('module:student_fees')->group(static function (): void {
+            Route::get('student-fees', [StudentFeeController::class, 'index'])->middleware('can:student_fees.view_any')->name('student-fees.index');
+            Route::get('student-fees/create', [StudentFeeController::class, 'create'])->middleware('can:student_fees.create')->name('student-fees.create');
+            Route::post('student-fees', [StudentFeeController::class, 'store'])->middleware('can:student_fees.create')->name('student-fees.store');
+            Route::get('student-fees/export/{format}', [StudentFeeController::class, 'export'])->middleware('can:student_fees.export')->name('student-fees.export');
+            Route::post('student-fees/generate-monthly', [FeeStructureController::class, 'generateMonthly'])->middleware(['can:student_fees.create', 'throttle:5,1'])->name('student-fees.generate-monthly');
+            Route::get('student-fees/{fee}', [StudentFeeController::class, 'show'])->whereNumber('fee')->middleware('can:view,fee')->name('student-fees.show');
+            Route::get('student-fees/{fee}/slip', [StudentFeeController::class, 'slip'])->whereNumber('fee')->middleware('can:student_fees.print')->name('student-fees.slip');
+            Route::post('student-fees/{fee}/cancel', [StudentFeeController::class, 'cancel'])->whereNumber('fee')->middleware('can:changeStatus,fee')->name('student-fees.cancel');
+            Route::post('student-fees/{fee}/reopen', [StudentFeeController::class, 'reopen'])->whereNumber('fee')->middleware('can:changeStatus,fee')->name('student-fees.reopen');
+
+            // The structure wizard (§8.3). `preview` is read-only; `store` is duplicate-proof by
+            // INSERT, so the throttle bounds the cost of a wedged client rather than guarding money.
+            Route::get('admissions/{admission}/fee-structure/preview', [FeeStructureController::class, 'preview'])->whereNumber('admission')->middleware(['can:student_fees.create', 'throttle:60,1'])->name('fee-structures.preview');
+            Route::post('admissions/{admission}/fee-structure', [FeeStructureController::class, 'store'])->whereNumber('admission')->middleware(['can:student_fees.create', 'throttle:10,1'])->name('fee-structures.store');
+            Route::get('admissions/{admission}/fee-structure/slip', [FeeStructureController::class, 'slip'])->whereNumber('admission')->middleware('can:student_fees.print')->name('fee-structures.slip');
+
+            // The cashier's worklist. It reads and never writes; collecting goes through the spine's
+            // modal, so the one money path stays the one money path.
+            Route::get('fee-collection', [FeeCollectionController::class, 'index'])->middleware('can:student_fees.view_reports')->name('fee-collection.index');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | phase-18 §7 — plans, discounts and waivers
+        |----------------------------------------------------------------------
+        |
+        | A plan and a discount are separate modules from the charge because
+        | they are separate rights: a Course Coordinator may read a fee and must
+        | not reduce one.
+        |
+        | **`installments.waive` carries `change_status` and the policy demands
+        | `fee_discounts.approve` on top** (§6.1, spine §2.18.2). A waiver parks
+        | an amount on the line *and* writes a discount row that lowers the net
+        | fee, so the line permission alone would let somebody give money away
+        | one installment at a time.
+        |
+        | **A discount is reversed, never edited or deleted**, so there is no
+        | route for either — `trg_sfd_no_delete` and `FinancialRow` back that at
+        | the database and the model, and `reverse` needs `approve` because
+        | undoing a discount is an authority question, not a typo question.
+        |
+        */
+        Route::middleware('module:installments')->group(static function (): void {
+            Route::get('student-fees/{fee}/installments/preview', [InstallmentPlanController::class, 'preview'])->whereNumber('fee')->middleware(['can:installments.create', 'throttle:60,1'])->name('installments.preview');
+            Route::post('student-fees/{fee}/installments', [InstallmentPlanController::class, 'store'])->whereNumber('fee')->middleware('can:installments.create')->name('student-fees.installments.store');
+            Route::put('student-fees/{fee}/installments', [InstallmentPlanController::class, 'rebuild'])->whereNumber('fee')->middleware('can:installments.edit')->name('student-fees.installments.rebuild');
+            Route::post('installments/{installment}/waive', [InstallmentPlanController::class, 'waive'])->whereNumber('installment')->middleware('can:changeStatus,installment')->name('installments.waive');
+        });
+
+        Route::middleware('module:fee_discounts')->group(static function (): void {
+            Route::post('student-fees/{fee}/discounts', [FeeDiscountController::class, 'store'])->whereNumber('fee')->middleware('can:fee_discounts.create')->name('student-fees.discounts.store');
+            Route::post('fee-discounts/{discount}/reverse', [FeeDiscountController::class, 'reverse'])->whereNumber('discount')->middleware('can:fee_discounts.approve')->name('fee-discounts.reverse');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | phase-18 §4.1 — telling a student they owe money
+        |----------------------------------------------------------------------
+        |
+        | Its own module, because chasing and charging are different rights: a
+        | Receptionist may send a reminder and must not edit a fee. There is no
+        | edit and no destroy — a sent message cannot be un-sent, and the row is
+        | the evidence somebody disputing being chased would want (D19).
+        |
+        */
+        Route::middleware('module:fee_reminders')->group(static function (): void {
+            Route::get('fee-reminders', [FeeReminderController::class, 'index'])->middleware('can:fee_reminders.view_any')->name('fee-reminders.index');
+            Route::post('student-fees/{fee}/reminders', [FeeReminderController::class, 'store'])->whereNumber('fee')->middleware(['can:fee_reminders.create', 'throttle:30,1'])->name('fee-reminders.store');
         });
 
         /*

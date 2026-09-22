@@ -16,6 +16,7 @@ use App\Models\User;
 use App\Services\Institute\CourseInquiryService;
 use App\Services\Institute\StudentApplicationService;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -293,7 +294,7 @@ final class CourseInquiryController extends Controller
     */
 
     /**
-     * @return \Illuminate\Database\Eloquent\Builder<CourseInquiry>
+     * @return Builder<CourseInquiry>
      */
     private function filtered(Request $request)
     {

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\Student\AttendanceController;
 use App\Http\Controllers\Student\BatchController;
 use App\Http\Controllers\Student\DashboardController;
+use App\Http\Controllers\Student\FeeController;
 use App\Http\Controllers\Student\ProgressController;
 use App\Http\Controllers\Student\TimetableController;
 use Illuminate\Support\Facades\Route;
@@ -82,4 +83,40 @@ Route::prefix('student')
         Route::get('progress', [ProgressController::class, 'index'])
             ->middleware(['module:student_progress', 'can:student_portal.progress'])
             ->name('progress.index');
+
+        /*
+        |----------------------------------------------------------------------
+        | phase-18 §8.9 — their own fees, and nothing else
+        |----------------------------------------------------------------------
+        |
+        | Every lookup starts from the `students` row this user *is*, and a
+        | charge that is not theirs is a **404 rather than a 403** (§9): a 403
+        | confirms the row exists, which turns an id into something worth
+        | guessing.
+        |
+        | The slip route forces `FeeSlipOptions::studentCopy()` in the
+        | controller, so no query parameter can talk it into printing a
+        | commission rate or amount (§6.7.1, §112).
+        |
+        */
+        Route::middleware('module:student_fees')->group(static function (): void {
+            Route::get('fees', [FeeController::class, 'index'])
+                ->middleware('can:student_portal.fees')
+                ->name('fees.index');
+
+            Route::get('fees/{fee}', [FeeController::class, 'show'])
+                ->whereNumber('fee')
+                ->middleware('can:student_portal.fees')
+                ->name('fees.show');
+
+            Route::get('fees/{fee}/slip', [FeeController::class, 'slip'])
+                ->whereNumber('fee')
+                ->middleware('can:student_portal.fees')
+                ->name('fees.slip');
+
+            Route::get('payments/{payment}/receipt', [FeeController::class, 'receipt'])
+                ->whereNumber('payment')
+                ->middleware('can:student_portal.payments')
+                ->name('payments.receipt');
+        });
     });

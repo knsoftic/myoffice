@@ -14,7 +14,6 @@ use App\Models\Institute\Teacher;
 use App\Services\Institute\AttendanceReportService;
 use App\Services\Institute\AttendanceService;
 use Illuminate\Contracts\View\View;
-use Illuminate\Database\Query\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;

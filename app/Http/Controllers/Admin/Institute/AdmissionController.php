@@ -14,6 +14,7 @@ use App\Models\Institute\StudentAdmission;
 use App\Models\User;
 use App\Services\Institute\AdmissionService;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -285,7 +286,7 @@ final class AdmissionController extends Controller
     */
 
     /**
-     * @return \Illuminate\Database\Eloquent\Builder<StudentAdmission>
+     * @return Builder<StudentAdmission>
      */
     private function filtered(Request $request)
     {

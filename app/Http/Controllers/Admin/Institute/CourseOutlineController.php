@@ -14,13 +14,13 @@ use App\Models\Institute\CourseTopic;
 use App\Models\Institute\CourseTopicAssignment;
 use App\Models\Institute\CourseTopicResource;
 use App\Services\Institute\CourseOutlineService;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
-use Symfony\Component\HttpFoundation\StreamedResponse;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * The three-level outline — `admin.course-outline.*` and the four node resources

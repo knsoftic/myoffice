@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Site\AdmissionController as SiteAdmissionController;
 use App\Http\Controllers\Site\BlogController;
 use App\Http\Controllers\Site\CareerController;
 use App\Http\Controllers\Site\ContactController;
+use App\Http\Controllers\Site\CourseController as SiteCourseController;
 use App\Http\Controllers\Site\HomeController;
 use App\Http\Controllers\Site\PortfolioController;
 use App\Http\Controllers\Site\PreviewController;
-use App\Http\Controllers\Site\AdmissionController as SiteAdmissionController;
-use App\Http\Controllers\Site\CourseController as SiteCourseController;
 use App\Http\Controllers\Site\PublicInvoiceController;
 use App\Http\Controllers\Site\ReferralController;
 use App\Http\Controllers\Site\RobotsController;
