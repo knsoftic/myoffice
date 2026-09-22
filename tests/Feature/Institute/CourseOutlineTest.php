@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Institute;
 
+use App\Models\Institute\ClassSession;
 use App\Models\Institute\CourseLecture;
 use App\Models\Institute\CourseTopic;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -197,7 +198,7 @@ final class CourseOutlineTest extends TestCase
         $batch = $this->batch($course, [], $actor);
         $this->slot($batch, actor: $actor);
 
-        $session = \App\Models\Institute\ClassSession::query()
+        $session = ClassSession::query()
             ->where('batch_id', $batch->getKey())
             ->orderBy('session_date')
             ->firstOrFail();

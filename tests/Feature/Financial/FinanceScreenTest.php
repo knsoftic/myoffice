@@ -4,14 +4,19 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Financial;
 
+use App\Dashboard\Widgets\Finance\ExpensesThisMonthWidget;
+use App\Dashboard\Widgets\Finance\RevenueThisMonthWidget;
 use App\Enums\ExpenseStatus;
+use App\Enums\FinanceReportType;
 use App\Enums\InvoiceStatus;
 use App\Models\Finance\Expense;
 use App\Models\Finance\Invoice;
 use App\Models\Finance\PaymentMethodOption;
+use App\Services\Finance\FinanceReportService;
 use App\Services\Finance\InvoiceService;
 use App\Services\Finance\PaymentMethodService;
 use App\Support\DateRange;
+use Database\Seeders\PaymentMethodSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\URL;
@@ -306,7 +311,7 @@ final class FinanceScreenTest extends TestCase
     #[Test]
     public function switching_a_method_off_removes_it_from_every_form_at_once(): void
     {
-        $this->seed(\Database\Seeders\PaymentMethodSeeder::class);
+        $this->seed(PaymentMethodSeeder::class);
 
         $methods = app(PaymentMethodService::class);
         $methods->flush();
@@ -327,7 +332,7 @@ final class FinanceScreenTest extends TestCase
     #[Test]
     public function a_method_with_money_against_it_cannot_be_deleted(): void
     {
-        $this->seed(\Database\Seeders\PaymentMethodSeeder::class);
+        $this->seed(PaymentMethodSeeder::class);
 
         $cash = PaymentMethodOption::query()->where('code', 'cash')->firstOrFail();
         $unused = PaymentMethodOption::query()->where('code', 'card')->firstOrFail();
@@ -391,19 +396,19 @@ final class FinanceScreenTest extends TestCase
 
         $this->actingAs($actor);
 
-        $reports = app(\App\Services\Finance\FinanceReportService::class);
+        $reports = app(FinanceReportService::class);
         $range = DateRange::month();
 
-        $revenue = app(\App\Dashboard\Widgets\Finance\RevenueThisMonthWidget::class)->data($range);
-        $expenses = app(\App\Dashboard\Widgets\Finance\ExpensesThisMonthWidget::class)->data($range);
+        $revenue = app(RevenueThisMonthWidget::class)->data($range);
+        $expenses = app(ExpensesThisMonthWidget::class)->data($range);
 
         $this->assertSame(
-            (string) $reports->report(\App\Enums\FinanceReportType::Income, $range, $actor)->totals['amount'],
+            (string) $reports->report(FinanceReportType::Income, $range, $actor)->totals['amount'],
             (string) $revenue['current'],
         );
 
         $this->assertSame(
-            (string) $reports->report(\App\Enums\FinanceReportType::Expenses, $range, $actor)->totals['amount'],
+            (string) $reports->report(FinanceReportType::Expenses, $range, $actor)->totals['amount'],
             (string) $expenses['current'],
         );
     }

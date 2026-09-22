@@ -9,6 +9,7 @@ use App\Enums\EnrollmentStatus;
 use App\Models\Institute\Batch;
 use App\Services\Institute\Exceptions\BatchCapacityExceeded;
 use App\Services\Institute\Exceptions\CourseRuleException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\Test;
@@ -256,7 +257,7 @@ final class BatchEnrollmentTest extends TestCase
         $other = $this->seat($from->refresh(), actor: $actor);
 
         // A forked transfer chain is two answers to one question, and `uq_sbe_transfer` refuses it.
-        $this->expectException(\Illuminate\Database\UniqueConstraintViolationException::class);
+        $this->expectException(UniqueConstraintViolationException::class);
 
         DB::table('student_batch_enrollments')
             ->where('id', $other->getKey())

@@ -6,7 +6,11 @@ namespace Tests\Feature\Institute;
 
 use App\Models\Branch;
 use App\Models\Institute\Student;
+use App\Models\Institute\StudentAdmission;
+use App\Support\PermissionRegistry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Route;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Feature\Concerns\InteractsWithRbac;
 use Tests\Feature\Institute\Concerns\BuildsAdmissions;
@@ -104,12 +108,12 @@ final class AdmissionAuthorizationTest extends TestCase
         // The module declares no `delete` ability at all (§4.1), so there is no permission to hold...
         $this->assertNotContains(
             'student_applications.delete',
-            \App\Support\PermissionRegistry::permissionNames(),
+            PermissionRegistry::permissionNames(),
         );
 
         // ...and no route to call it with.
         $this->assertFalse(
-            \Illuminate\Support\Facades\Route::has('admin.student-applications.destroy'),
+            Route::has('admin.student-applications.destroy'),
         );
 
         // The policy refuses everybody who is subject to it. A Super Admin passes `Gate::before`
@@ -196,7 +200,7 @@ final class AdmissionAuthorizationTest extends TestCase
         $actor = $this->createSuperAdmin();
         $admission = $this->admission(actor: $actor);
 
-        \App\Models\Institute\StudentAdmission::query()
+        StudentAdmission::query()
             ->whereKey($admission->getKey())
             ->update(['figures_locked_at' => now()]);
 
@@ -276,7 +280,7 @@ final class AdmissionAuthorizationTest extends TestCase
         $this->assertTrue($deleter->can('delete', $student));
 
         // Phase 18 writes this; the test does what that phase will.
-        \Illuminate\Support\Facades\DB::table('student_fees')->insert([
+        DB::table('student_fees')->insert([
             'student_id' => $student->getKey(),
             'student_admission_id' => $admission->getKey(),
             'fee_number' => 'FEE-TEST-1',

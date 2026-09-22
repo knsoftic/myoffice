@@ -7,7 +7,9 @@ namespace Tests\Feature\Institute;
 use App\Enums\ClassCancellationReason;
 use App\Enums\StudentAttendanceStatus;
 use App\Models\Institute\StudentAttendance;
+use App\Models\User;
 use App\Services\Institute\Exceptions\AttendanceRuleException;
+use App\Services\Institute\Exceptions\CourseRuleException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -345,7 +347,7 @@ final class AttendanceTest extends TestCase
         try {
             $this->sessionService()->cancel($marked->refresh(), ClassCancellationReason::Holiday, 'Strike.', $actor);
             $this->fail('a class with a register cannot be called off');
-        } catch (\App\Services\Institute\Exceptions\CourseRuleException $e) {
+        } catch (CourseRuleException $e) {
             $this->assertStringContainsString('people were in the room', $e->getMessage());
         }
 
@@ -436,7 +438,7 @@ final class AttendanceTest extends TestCase
     |--------------------------------------------------------------------------
     */
 
-    private function oneMarkedRow(\App\Models\User $actor): StudentAttendance
+    private function oneMarkedRow(User $actor): StudentAttendance
     {
         $batch = $this->runningBatch(actor: $actor);
         $enrollment = $this->seat($batch, options: ['enrolled_on' => Carbon::today()->subMonth()->toDateString()], actor: $actor);

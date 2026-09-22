@@ -9,6 +9,7 @@ use App\Enums\CourseInquiryStatus;
 use App\Enums\StudentApplicationStatus;
 use App\Enums\StudentStatus;
 use App\Models\Institute\StudentAdmission;
+use App\Services\Institute\BatchService;
 use App\Services\Institute\Exceptions\CourseRuleException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use PHPUnit\Framework\Attributes\Test;
@@ -249,7 +250,7 @@ final class AdmissionPipelineTest extends TestCase
 
         // A real batch: Phase 16 attached the foreign key this column always declared, so an invented
         // id is now refused by the database rather than quietly accepted.
-        $batch = app(\App\Services\Institute\BatchService::class)->create([
+        $batch = app(BatchService::class)->create([
             'code' => 'FEE-RULE-1',
             'name' => 'Fee rule batch',
             'course_id' => $admission->course_id,

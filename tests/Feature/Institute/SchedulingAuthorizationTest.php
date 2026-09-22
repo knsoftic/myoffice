@@ -8,6 +8,7 @@ use App\Models\Branch;
 use App\Models\Institute\Batch;
 use App\Models\Institute\ClassSession;
 use App\Models\Institute\Teacher;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Feature\Concerns\InteractsWithRbac;
@@ -262,7 +263,7 @@ final class SchedulingAuthorizationTest extends TestCase
         $this->actingAs($user)->get(route('teacher.batches.index'))->assertNotFound();
     }
 
-    private function teacherLoginFor(Teacher $teacher): \App\Models\User
+    private function teacherLoginFor(Teacher $teacher): User
     {
         $user = $this->teacherService()->createLogin($teacher, $this->createSuperAdmin());
 

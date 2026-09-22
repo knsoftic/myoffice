@@ -10,6 +10,7 @@ use App\Enums\ClassSessionStatus;
 use App\Enums\TeacherStatus;
 use App\Enums\Weekday;
 use App\Models\Institute\ClassSession;
+use App\Models\User;
 use App\Services\Institute\Exceptions\CourseRuleException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -223,7 +224,7 @@ final class TimetableTest extends TestCase
         $this->assertSame(ClassSessionStatus::Cancelled, $session->status);
         $this->assertSame('Public holiday.', $session->cancellation_detail);
         $this->assertNull($session->active_guard, 'the hour is released');
-        $this->assertDatabaseHas('class_sessions', ['id' => $session->getKey()], );
+        $this->assertDatabaseHas('class_sessions', ['id' => $session->getKey()]);
     }
 
     #[Test]
@@ -332,7 +333,7 @@ final class TimetableTest extends TestCase
     |--------------------------------------------------------------------------
     */
 
-    private function firstSessionOf(\App\Models\User $actor): ClassSession
+    private function firstSessionOf(User $actor): ClassSession
     {
         // With a teacher: a class that started with nobody on it has no "who was supposed to
         // take this" to remember, and that is a different test from the ones these are.

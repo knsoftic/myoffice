@@ -4,12 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Institute;
 
-use App\Enums\StudentAttendanceStatus;
 use App\Models\Branch;
-use App\Models\Institute\ClassSession;
 use App\Models\Institute\StudentAttendance;
 use App\Models\Institute\Teacher;
 use App\Models\User;
+use App\Support\PermissionRegistry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use PHPUnit\Framework\Attributes\Test;
@@ -147,8 +146,8 @@ final class RegisterAuthorizationTest extends TestCase
     {
         // §4.2: every row is derived and re-derivable, so deleting one would destroy nothing and
         // repair nothing. The ability does not exist to be granted.
-        $this->assertNotContains('student_progress.delete', \App\Support\PermissionRegistry::permissionNames());
-        $this->assertNotContains('student_progress.restore', \App\Support\PermissionRegistry::permissionNames());
+        $this->assertNotContains('student_progress.delete', PermissionRegistry::permissionNames());
+        $this->assertNotContains('student_progress.restore', PermissionRegistry::permissionNames());
     }
 
     /*

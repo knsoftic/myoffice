@@ -7,12 +7,11 @@ namespace Tests\Feature\Institute;
 use App\Enums\CourseInquiryStatus;
 use App\Enums\FollowUpOutcome;
 use App\Models\Institute\CourseInquiry;
-use App\Models\Institute\CourseInquiryFollowUp;
 use App\Models\User;
 use App\Services\Institute\Exceptions\CourseRuleException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
-use LogicException;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Feature\Concerns\InteractsWithRbac;
 use Tests\Feature\Institute\Concerns\BuildsAdmissions;
@@ -170,7 +169,7 @@ final class CourseInquiryTest extends TestCase
     public function the_follow_up_log_has_no_soft_delete_column(): void
     {
         $this->assertFalse(
-            \Illuminate\Support\Facades\Schema::hasColumn('course_inquiry_follow_ups', 'deleted_at'),
+            Schema::hasColumn('course_inquiry_follow_ups', 'deleted_at'),
             'D-IN-2: a contact log with a deleted_at is one whose count nobody can stand behind',
         );
     }

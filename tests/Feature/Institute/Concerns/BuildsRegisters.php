@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Institute\Concerns;
 
-use App\Enums\BatchStatus;
 use App\Enums\StudentAttendanceStatus;
 use App\Models\Institute\Batch;
 use App\Models\Institute\ClassSession;

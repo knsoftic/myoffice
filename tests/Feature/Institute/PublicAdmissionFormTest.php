@@ -6,6 +6,7 @@ namespace Tests\Feature\Institute;
 
 use App\Enums\StudentApplicationStatus;
 use App\Models\Institute\StudentApplication;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
@@ -70,7 +71,7 @@ final class PublicAdmissionFormTest extends TestCase
         $actor = $this->createSuperAdmin();
         $course = $this->publishedCourse(actor: $actor);
 
-        $usersBefore = \App\Models\User::query()->count();
+        $usersBefore = User::query()->count();
 
         $this->becomeGuest();
 
@@ -81,7 +82,7 @@ final class PublicAdmissionFormTest extends TestCase
         $this->assertDatabaseCount('student_applications', 1);
         $this->assertDatabaseCount('students', 0);
         $this->assertDatabaseCount('student_admissions', 0);
-        $this->assertSame($usersBefore, \App\Models\User::query()->count());
+        $this->assertSame($usersBefore, User::query()->count());
 
         $application = StudentApplication::query()->firstOrFail();
 
