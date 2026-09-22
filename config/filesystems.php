@@ -38,6 +38,24 @@ return [
             'report' => false,
         ],
 
+        // phase-19-23 §6.3 binds "disk `private` is storage/app/private", and every
+        // storage_disk column in phases 19-23 defaults to 'private'. Laravel 12 already
+        // roots `local` there, so this is the same directory under the name five phase
+        // contracts use — not a second location. It differs from `local` in two ways that
+        // matter: `serve` is off, so no framework route can ever hand out one of these
+        // files (§6.2 [D-19-4] — a private file is served only by a controller that
+        // re-runs the permission chain), and `throw` is on, so a failed write is a loud
+        // 500 rather than a silent false that would surface as a validation error.
+        // Phases 4, 5 and 14 keep writing 'local'; both names resolve to the same bytes,
+        // and storage_disk records which one wrote each row.
+        'private' => [
+            'driver' => 'local',
+            'root' => storage_path('app/private'),
+            'serve' => false,
+            'throw' => true,
+            'report' => false,
+        ],
+
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),

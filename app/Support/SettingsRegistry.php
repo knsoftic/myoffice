@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Support;
 
 use App\Enums\Cms\SitemapChangeFrequency;
+use App\Enums\CourseResourceType;
 use App\Enums\FixedCommissionRelease;
 use App\Enums\ProgressBasis;
 use App\Enums\RemainderPlacement;
@@ -3779,6 +3780,177 @@ final class SettingsRegistry
                 'span' => 4,
                 'sort' => 200,
             ],
+
+            // ---------------------------------------------------------------------------------
+            // phase-19-23 §5.1 — materials and assignments.
+            // ---------------------------------------------------------------------------------
+
+            'material_max_upload_mb' => [
+                'label' => 'Largest material file',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:2048'],
+                'default' => 50,
+                'help' => 'Per file. The effective limit is the smallest of this, the security '
+                    .'group’s upload cap, and whatever PHP itself will accept — raising this alone '
+                    .'does not raise the others.',
+                'suffix' => 'MB',
+                'span' => 4,
+                'sort' => 300,
+            ],
+            'material_allowed_types' => [
+                'label' => 'Kinds of material that may be shared',
+                'type' => self::TYPE_MULTISELECT,
+                'rules' => ['required', 'array', 'min:1'],
+                // Declared in the enum's own case order, which is the order the checkboxes render
+                // and therefore the order an untouched save posts back. A set written in any other
+                // order makes a save that changed nothing look like an edit.
+                'default' => [
+                    CourseResourceType::Pdf->value,
+                    CourseResourceType::Document->value,
+                    CourseResourceType::Note->value,
+                    CourseResourceType::Slide->value,
+                    CourseResourceType::Image->value,
+                    CourseResourceType::Video->value,
+                    CourseResourceType::Audio->value,
+                    CourseResourceType::Zip->value,
+                    CourseResourceType::SourceCode->value,
+                    CourseResourceType::Link->value,
+                ],
+                'options' => CourseResourceType::options(),
+                'help' => 'Turning a kind off hides it from the upload form. Material already shared '
+                    .'under that kind keeps working — this governs what may be added, not what exists.',
+                'span' => 12,
+                'sort' => 310,
+            ],
+            'material_extra_extensions' => [
+                'label' => 'Extra extensions for design courses',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:255', 'regex:/^[A-Za-z0-9,\s]*$/'],
+                'default' => 'psd,ai,fig,sketch',
+                'help' => 'Comma separated, no dots. Intersected with the security group’s allowed '
+                    .'file types — an extension the security setting refuses stays refused however '
+                    .'this is written, and the never-uploadable list is absolute.',
+                'span' => 8,
+                'sort' => 320,
+            ],
+            'material_visible_after_batch_end_days' => [
+                'label' => 'Material access after a batch ends',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:3650'],
+                'default' => 90,
+                'help' => 'How long a completed batch keeps reaching its material. 0 cuts access the '
+                    .'day the batch ends.',
+                'suffix' => 'days',
+                'span' => 4,
+                'sort' => 330,
+            ],
+            'material_download_log_retention_days' => [
+                'label' => 'Keep the material access log for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:3650'],
+                'default' => 365,
+                'help' => '0 keeps it for ever. The log is who opened which file and when — it is the '
+                    .'first thing anybody investigating a leak asks for, so shorten it deliberately.',
+                'suffix' => 'days',
+                'span' => 4,
+                'sort' => 340,
+            ],
+            'material_notify_on_publish' => [
+                'label' => 'Tell students when material is published',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Notifies the targeted audience once, when the material is first published. '
+                    .'Re-aiming it later tells only the audience that had not already been told.',
+                'span' => 4,
+                'sort' => 350,
+            ],
+
+            'assignment_submission_max_mb' => [
+                'label' => 'Largest submission file',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:512'],
+                'default' => 20,
+                'help' => 'Per file. An assignment may ask for less; it can never ask for more.',
+                'suffix' => 'MB',
+                'span' => 4,
+                'sort' => 360,
+            ],
+            'assignment_max_files_default' => [
+                'label' => 'Files a submission may carry',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:10'],
+                'default' => 3,
+                'help' => 'Prefills a new assignment. The database refuses anything outside 1–10.',
+                'span' => 4,
+                'sort' => 370,
+            ],
+            'assignment_max_attempts_default' => [
+                'label' => 'Attempts a student may make',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:10'],
+                'default' => 3,
+                'help' => 'Prefills a new assignment. Every attempt keeps its own row and its own '
+                    .'files; a resubmission supersedes its predecessor rather than replacing it.',
+                'span' => 4,
+                'sort' => 380,
+            ],
+            'assignment_late_submission_default' => [
+                'label' => 'Accept late work by default',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Prefills a new assignment. Late work is still marked late — this decides '
+                    .'whether it is accepted at all, not whether it counts as on time.',
+                'span' => 4,
+                'sort' => 390,
+            ],
+            'assignment_late_penalty_default_percentage' => [
+                'label' => 'Default late penalty',
+                'type' => self::TYPE_DECIMAL,
+                // `decimal:0,4` is what refuses exponent notation — `numeric` alone accepts `1E1`
+                // and stores it, which would put a value no percentage column can parse behind a
+                // field that looked validated.
+                'rules' => ['required', 'numeric', 'decimal:0,4', 'min:0', 'max:100'],
+                'default' => '0.0000',
+                'help' => 'Percent of the assignment’s total marks, deducted once from a late '
+                    .'submission. 0 records the lateness without costing anything.',
+                'suffix' => '%',
+                'span' => 4,
+                'sort' => 400,
+            ],
+            'assignment_deadline_reminder_hours' => [
+                'label' => 'Deadline reminders',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:100', 'regex:/^\s*\d{1,4}(\s*,\s*\d{1,4})*\s*$/'],
+                'default' => '48,12',
+                'help' => 'Comma-separated hours before the deadline. “48,12” warns two days out and '
+                    .'again the evening before. Empty sends none.',
+                'suffix' => 'hours before',
+                'span' => 8,
+                'sort' => 410,
+            ],
+            'assignment_auto_close_on_deadline' => [
+                'label' => 'Close an assignment automatically',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Closes a published assignment once its late cutoff has passed — or its '
+                    .'deadline, when late work is not accepted. Closed still shows students the brief '
+                    .'and their own marks; it only stops collection.',
+                'span' => 4,
+                'sort' => 420,
+            ],
+            'assignment_release_marks_immediately' => [
+                'label' => 'Show marks as soon as they are entered',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Prefills a new assignment. Turning it off lets a teacher mark a whole batch '
+                    .'privately and release every mark in one go.',
+                'span' => 4,
+                'sort' => 430,
+            ],
         ];
     }
 
@@ -4262,8 +4434,18 @@ final class SettingsRegistry
                 ],
                 // Phase 2 review low 6: gif is allowed by default so a GIF profile photo is accepted
                 // (uploads are content-sniffed; php-family extensions stay refused whatever this says).
-                'default' => 'pdf,doc,docx,xls,xlsx,csv,png,jpg,jpeg,gif,webp,zip',
-                'help' => 'Comma-separated extensions. An upload field accepts only its own types that are also listed here (profile photos today). Script and executable types are never accepted.',
+                //
+                // phase-19-23 widened the default rather than the rule. §5.1 defaults
+                // `institute.material_allowed_types` to **all ten** of §79's kinds, which is a
+                // statement that all ten work out of the box — and with the Phase 1 list they did
+                // not: video and audio offered no extension at all, and slides and notes collapsed
+                // to PDF. The list below is the union of what the existing upload maps actually
+                // name, so widening it **cannot widen any single field**: every uploader passes its
+                // own map to `uploadExtensions()`, which intersects. Client documents gain nothing
+                // from `mp4` because `ClientDocumentService::TYPES` has never listed it.
+                'default' => 'pdf,doc,docx,xls,xlsx,ppt,pptx,odt,ods,odp,rtf,txt,md,csv,'
+                    .'png,jpg,jpeg,gif,webp,mp4,webm,ogv,mov,mp3,ogg,weba,m4a,wav,zip,7z',
+                'help' => 'Comma-separated extensions. An upload field accepts only its own types that are also listed here — this narrows every field and widens none. Script and executable types are never accepted, whatever this says.',
                 'span' => 8,
                 'sort' => 60,
             ],

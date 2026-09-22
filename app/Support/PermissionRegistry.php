@@ -701,7 +701,20 @@ final class PermissionRegistry
                 'icon' => 'folder-open',
                 'is_core' => false,
                 'sort' => 540,
-                'abilities' => self::merge(self::CRUD, self::FILES, self::RESTORE),
+                // phase-19-23 §4.2. `assign` **is** the targeting ability — course / batch / student
+                // — and it is separate from `edit` on purpose: deciding who receives a file is a
+                // different act from correcting its title, and a coordinator may be trusted with one
+                // and not the other. `upload` creates, `download` streams, `view_reports` opens the
+                // engagement report. REPORTS already carries `export`.
+                'abilities' => self::merge(
+                    self::CRUD,
+                    self::FILES,
+                    self::RESTORE,
+                    self::ASSIGN,
+                    self::STATUS,
+                    self::REPORTS,
+                    self::LOGS,
+                ),
             ],
             'students' => [
                 'name' => 'Students',
@@ -933,7 +946,44 @@ final class PermissionRegistry
                 'icon' => 'clipboard-document',
                 'is_core' => false,
                 'sort' => 670,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::ASSIGN, self::FILES, self::RESTORE),
+                // phase-19-23 §4.2. `print` is the printable assignment sheet for a physical class —
+                // a real request from §80, not a CRUD leftover.
+                'abilities' => self::merge(
+                    self::CRUD_FULL,
+                    self::STATUS,
+                    self::ASSIGN,
+                    self::FILES,
+                    self::RESTORE,
+                    self::REPORTS,
+                    self::LOGS,
+                    [Ability::Print],
+                ),
+            ],
+            'assignment_submissions' => [
+                'name' => 'Assignment Submissions',
+                'group' => ModuleGroup::Institute,
+                'icon' => 'clipboard-document-check',
+                'is_core' => false,
+                'sort' => 675,
+                // phase-19-23 §4.1: **grading is not authoring.** A visiting trainer may read a
+                // roster's work without marking it, and a coordinator may mark without being able to
+                // publish new assignments — neither of which is expressible if both live under
+                // `assignments.edit`.
+                //
+                // `edit` **is** the mark-and-feedback ability. `create` exists only for "record an
+                // offline submission on a student's behalf".
+                //
+                // **No `delete` and no `restore`, deliberately** (§2.7). Marked work is somebody's
+                // record; an ability that is never registered cannot be granted by mistake, and the
+                // model's `deleting` hook refuses it even for a Super Admin, whom `Gate::before`
+                // would otherwise wave past every policy.
+                'abilities' => self::merge(
+                    self::READ,
+                    [Ability::Create, Ability::Edit, Ability::Download],
+                    self::STATUS,
+                    self::REPORTS,
+                    self::LOGS,
+                ),
             ],
             'exams' => [
                 'name' => 'Exams',
@@ -1314,6 +1364,11 @@ final class PermissionRegistry
                     'timetable',
                     'attendance',
                     'materials',
+                    // phase-19-23 §4.3. Separate from `materials` so a fee-blocked student can still
+                    // be shown the list and told why the files are unavailable. Hiding the library
+                    // entirely would leave them guessing what they were missing; hiding only the
+                    // bytes is the honest version of the same restriction.
+                    'material_download',
                     'assignments',
                     'assignment_submit',
                     'exams',
@@ -1506,6 +1561,7 @@ final class PermissionRegistry
         'installments' => ['student_fees'],
         'fee_discounts' => ['student_fees'],
         'assignments' => ['batches'],
+        'assignment_submissions' => ['assignments'],
         'exams' => ['batches'],
         'results' => ['exams'],
         'certificates' => ['students', 'courses'],
