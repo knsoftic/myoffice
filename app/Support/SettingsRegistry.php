@@ -3866,6 +3866,21 @@ final class SettingsRegistry
                 'sort' => 350,
             ],
 
+            'material_block_on_outstanding_fee' => [
+                'label' => 'Withhold material while fees are outstanding',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                // Default off. §4.3 asks for the capability — it is the whole reason
+                // `student_portal.material_download` is a separate permission from
+                // `student_portal.materials` — but withholding coursework over money is a policy an
+                // institute chooses, not one the software should impose on first boot.
+                'default' => false,
+                'help' => 'The student still sees the library and is told why the files are '
+                    .'unavailable. Hiding the list as well would leave them guessing what they were '
+                    .'missing, which is a worse version of the same restriction.',
+                'span' => 6,
+                'sort' => 355,
+            ],
             'assignment_submission_max_mb' => [
                 'label' => 'Largest submission file',
                 'type' => self::TYPE_NUMBER,
