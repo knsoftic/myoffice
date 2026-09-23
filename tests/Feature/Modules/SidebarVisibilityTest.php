@@ -237,6 +237,8 @@ final class SidebarVisibilityTest extends TestCase
                 'Course Inquiries',
                 'Applications',
                 'Demo Classes',
+                // phase-19-23 §7.5: the card register, beside the students it belongs to.
+                'ID Cards',
                 // phase-14-17 §7.5-§7.6: scheduling. `Teachers` and `Classrooms` are their own
                 // entries — a room is its own module (§4.1), so a branch administrator can be given
                 // the rooms without the batches that fill them. `Batches` is a parent carrying the
@@ -279,6 +281,12 @@ final class SidebarVisibilityTest extends TestCase
                 'Exams',
                 'Results',
                 'Grade Scales',
+                // phase-19-23 §7.5. Phase 21's three. `ID Cards` sits up with the student screens
+                // rather than here, beside Applications and Demo Classes — a card is something the
+                // office issues to a student, not an assessment — and `Print Templates` is last
+                // because it is the only one of the three that holds no student data at all.
+                'Certificates',
+                'Print Templates',
                 // phase-03 §7-§8: the nine Website CMS entries whose routes now exist.
                 'Website Overview',
                 'Sections',
@@ -390,7 +398,15 @@ final class SidebarVisibilityTest extends TestCase
                 // phase-19 added the material library and assignments to both; phase-20 added exams
                 // and results, which Phase 1 had likewise reserved on both panels and never routed.
                 PanelType::Student => ['Dashboard', 'Timetable', 'Attendance', 'Progress',
-                    'Materials', 'Assignments', 'Exams', 'Results', 'Fees'],
+                    'Materials', 'Assignments', 'Exams', 'Results',
+                    // phase-19-23 §7.9: their own issued certificates and their own card. Neither
+                    // screen writes anything, and neither takes an id from the URL.
+                    'Certificates', 'Student card', 'Fees'],
+                // **The teacher panel gains nothing from Phase 21, and that is not an omission.**
+                // §7.10 gives a teacher one certificate route and it takes a batch —
+                // `teacher/batches/{batch}/certificate-candidates` — so there is no static link a
+                // sidebar could carry. It is reached from the batch, which is where somebody asking
+                // "can my students be certified?" already is.
                 PanelType::Teacher => ['Dashboard', 'My Batches', 'My Students', 'Timetable',
                     'Demo Classes', 'Attendance', 'Materials', 'Assignments', 'Exams', 'Results'],
                 default => ['Dashboard'],

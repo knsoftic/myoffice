@@ -95,6 +95,19 @@ class StudentIdCard extends Model
         return 'student_id_cards';
     }
 
+    /**
+     * Stamped onto every `activity_log` row this model writes.
+     *
+     * Separate from `moduleSlug()` on purpose: that one answers "which module owns this record?" for
+     * the policy and the module gate, and this one fills a column. They happen to agree here, and a
+     * model that let them drift would be one whose changes are invisible to the activity log's own
+     * module filter — which is how an audit trail quietly stops covering a phase.
+     */
+    protected function activityModule(): ?string
+    {
+        return 'student_id_cards';
+    }
+
     public function isUsable(): bool
     {
         return $this->status->isUsable() && ! $this->isExpired();

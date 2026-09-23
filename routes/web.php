@@ -251,7 +251,7 @@ Route::middleware(['signed', 'invoice_link'])->group(function (): void {
 | card does not exist because it is not a certificate.
 |
 */
-Route::middleware('throttle:120,1')->group(static function (): void {
+Route::middleware(['site', 'throttle:120,1'])->group(static function (): void {
     Route::get('verify', [VerificationController::class, 'index'])->name('site.verify.index');
     Route::post('verify', [VerificationController::class, 'submit'])->name('site.verify.submit');
     Route::get('verify/{code}', [VerificationController::class, 'show'])
