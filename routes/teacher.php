@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Teacher\CertificateController as TeacherCertificateController;
 use App\Http\Controllers\Teacher\AssignmentController as TeacherAssignmentController;
 use App\Http\Controllers\Teacher\AttendanceController;
 use App\Http\Controllers\Teacher\BatchController;
@@ -181,6 +182,27 @@ Route::prefix('teacher')
             Route::get('results', [TeacherResultController::class, 'index'])->middleware('can:teacher_portal.results')->name('results.index');
             Route::get('exams/{exam}/results', [TeacherResultController::class, 'sheet'])->whereNumber('exam')->middleware('can:teacher_portal.results_entry')->name('results.sheet');
             Route::post('exams/{exam}/results', [TeacherResultController::class, 'save'])->whereNumber('exam')->middleware(['can:teacher_portal.results_entry', 'throttle:30,1'])->name('results.save');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Certificate candidates - phase-19-23 sec 7.10, sec 9.3
+        |----------------------------------------------------------------------
+        |
+        | Read only, and deliberately the only certificate route on this panel:
+        | sec 9.3 gives a teacher a 403 on issuing, revoking, replacing and on
+        | templates. What is theirs to know is which of their own students have
+        | met the rules, because they are the person who can do something about
+        | attendance or a missing exam.
+        |
+        | Scoped through TeacherScope, and a batch that is not theirs is a 404.
+        |
+        */
+        Route::middleware('module:certificates')->group(static function (): void {
+            Route::get('batches/{batch}/certificate-candidates', [TeacherCertificateController::class, 'candidates'])
+                ->whereNumber('batch')
+                ->middleware('can:teacher_portal.certificates')
+                ->name('certificates.candidates');
         });
 
     });

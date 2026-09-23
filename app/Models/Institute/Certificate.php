@@ -154,7 +154,38 @@ class Certificate extends Model
             }
         });
 
-        static::deleting(static function (self $certificate): never {
+        /*
+         * **A draft may go; a document may not — D138.**
+         *
+         * INV-21-1 protects a certificate *number*: issued once, never reused, never re-numbered,
+         * never deleted. A draft has no number, no `qr_payload` and no public page, so there is
+         * nothing of it for the invariant to protect — which is why the policy, the route table and
+         * `destroy()` all treat a draft as disposable.
+         *
+         * This hook originally refused **every** delete, which made `admin.certificates.destroy` a
+         * guaranteed 500: the policy said yes and the model threw. Refusing only what was once a
+         * document satisfies §2.14 and the route table at the same time, and it is the layer that
+         * actually holds — `Gate::before` hands a Super Admin past every policy before one runs
+         * (D124), so a policy alone protects nothing from the role most able to do damage.
+         *
+         * **Soft, never hard.** A deleted draft keeps its row, so `freshCode()`'s `withTrashed()`
+         * check keeps its verification code reserved: a code allocated once is never handed to a
+         * second document, even a document nobody was given. `forceDelete` is refused outright,
+         * here as well as in the policy, for the same reason.
+         */
+        static::deleting(static function (self $certificate): void {
+            if ($certificate->isForceDeleting()) {
+                throw new LogicException(sprintf(
+                    'Certificate %s cannot be erased. Its verification code was allocated and must '
+                    .'stay reserved, so even a discarded draft keeps its row.',
+                    (string) ($certificate->getAttribute('certificate_number') ?? '#'.$certificate->getKey()),
+                ));
+            }
+
+            if ($certificate->isDraft()) {
+                return;
+            }
+
             throw new LogicException(sprintf(
                 'Certificate %s is never deleted (INV-21-1). Revoke it with a reason — a document '
                 .'somebody is holding stays on the record, and its verification page has to keep '

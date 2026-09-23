@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Student\CertificateController as StudentCertificateController;
 use App\Http\Controllers\Student\AssignmentController as StudentAssignmentController;
 use App\Http\Controllers\Student\AttendanceController;
 use App\Http\Controllers\Student\BatchController;
@@ -226,6 +227,42 @@ Route::prefix('student')
                 ->whereNumber('enrollment')
                 ->middleware('can:student_portal.results')
                 ->name('results.card');
+        });
+
+
+        /*
+        |----------------------------------------------------------------------
+        | Certificates and the ID card - phase-19-23 sec 7.9, sec 9.3
+        |----------------------------------------------------------------------
+        |
+        | Issued certificates only. A draft is a document nobody has decided to
+        | give them yet, and a revoked one is one the institute has withdrawn -
+        | both are 404 here, and so is anybody else's, so nothing is learned
+        | from the difference.
+        |
+        | The card route takes no id at all: a student holds one live card and
+        | the panel resolves it from the signed-in student's own row.
+        |
+        */
+        Route::middleware('module:certificates')->group(static function (): void {
+            Route::get('certificates', [StudentCertificateController::class, 'index'])
+                ->middleware('can:student_portal.certificates')
+                ->name('certificates.index');
+
+            Route::get('certificates/{certificate}/pdf', [StudentCertificateController::class, 'pdf'])
+                ->whereNumber('certificate')
+                ->middleware('can:student_portal.certificates')
+                ->name('certificates.pdf');
+        });
+
+        Route::middleware('module:student_id_cards')->group(static function (): void {
+            Route::get('id-card', [StudentCertificateController::class, 'card'])
+                ->middleware('can:student_portal.id_card')
+                ->name('id-card.show');
+
+            Route::get('id-card/pdf', [StudentCertificateController::class, 'cardPdf'])
+                ->middleware('can:student_portal.id_card')
+                ->name('id-card.pdf');
         });
 
     });

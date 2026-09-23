@@ -4296,6 +4296,19 @@ final class SettingsRegistry
                 'span' => 3,
                 'sort' => 700,
             ],
+            'certificate_bulk_issue_max' => [
+                'label' => 'Most certificates issued in one go',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:500'],
+                'default' => 100,
+                // Issuing spends a number from the institute's sequence and freezes a document per
+                // row, so one accidental request should not be able to spend five hundred of them.
+                // Each certificate is still issued on its own and a refusal stops only that one.
+                'help' => 'A ceiling on one request. Each certificate is still checked and issued '
+                    .'separately, and one refusal leaves the rest alone.',
+                'span' => 3,
+                'sort' => 710,
+            ],
         ];
     }
 

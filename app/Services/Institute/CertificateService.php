@@ -93,6 +93,60 @@ final class CertificateService
     }
 
     /**
+     * Edit a draft (§7.5 — `PUT /admin/certificates/{certificate}`, drafts only).
+     *
+     * **Only a draft, and only the fields somebody chose.** Everything else on a certificate is a
+     * snapshot taken from the record at draft time; re-deriving it here would quietly move a date or
+     * a grade the office had already settled. The five fields below are exactly the five the draft
+     * form offers, and an absent key means unchanged — D121's rule, applied at its third call site.
+     *
+     * A `print_template_id` set to null is a real instruction: it means "print on whatever the
+     * institute's default is", and a certificate issued before any template existed has to be able
+     * to say that.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function updateDraft(Certificate $certificate, array $data, ?User $actor = null): Certificate
+    {
+        $actor ??= Auth::user();
+
+        if ($certificate->status !== CertificateStatus::Draft) {
+            throw CourseRuleException::refuse('status', sprintf(
+                'This certificate is %s. Only a draft can be edited — an issued one is corrected by '
+                .'revoking it and issuing a replacement.',
+                mb_strtolower($certificate->status->label()),
+            ));
+        }
+
+        $writable = ['print_template_id', 'grade_scale_id', 'completion_date', 'grade', 'grade_point', 'percentage', 'notes'];
+
+        $changes = [];
+
+        foreach ($writable as $field) {
+            if (array_key_exists($field, $data)) {
+                $changes[$field] = $data[$field];
+            }
+        }
+
+        if ($changes === []) {
+            return $certificate;
+        }
+
+        return DB::transaction(function () use ($certificate, $changes, $actor): Certificate {
+            $before = $certificate->only(array_keys($changes));
+
+            $certificate->forceFill($changes)->save();
+
+            $this->audit($certificate, 'Certificate draft edited', [
+                'old' => $before,
+                'attributes' => $changes,
+            ], self::MODULE);
+
+            return $certificate->refresh();
+        });
+    }
+
+    /**
      * Hand it over. One transaction, and the point of no return.
      *
      * Eligibility is re-run here rather than trusted from the draft — see the class note. An
@@ -288,6 +342,8 @@ final class CertificateService
      */
     public function markPrinted(Certificate $certificate, ?User $actor = null): Certificate
     {
+        $this->assertPrintable($certificate);
+
         $actor ??= Auth::user();
 
         return DB::transaction(function () use ($certificate, $actor): Certificate {
@@ -413,6 +469,78 @@ final class CertificateService
      */
     public function renderPdf(Certificate $certificate): string
     {
+        $this->assertPrintable($certificate);
+
+        $template = $this->templateFor($certificate);
+
+        return $this->renderer->render(
+            $template,
+            $this->templates->render($template, $this->tokensFor($certificate)),
+            (string) ($certificate->getAttribute('certificate_number') ?? 'Certificate'),
+        );
+    }
+
+    /**
+     * The same document as HTML, for the browser's print dialog.
+     *
+     * **Same template, same tokens, same snapshots as `renderPdf()`** — the two share every step but
+     * the last, so what somebody sees on screen and what lands in the PDF cannot disagree. A screen
+     * that rendered from a different path would eventually show a grade the PDF did not.
+     */
+    public function renderHtml(Certificate $certificate): string
+    {
+        $this->assertPrintable($certificate);
+
+        $template = $this->templateFor($certificate);
+
+        return $this->templates->render($template, $this->tokensFor($certificate));
+    }
+
+    /**
+     * The verification code, grouped for reading aloud.
+     *
+     * A screen and a printed certificate must show the same grouping, so both go through
+     * `QrCodeService::forDisplay()` — this exists only so a Blade file never has to reach into the
+     * container for a service to render one field.
+     */
+    public function displayCodeFor(Certificate $certificate): string
+    {
+        return $this->qr->forDisplay((string) $certificate->getAttribute('verification_code'));
+    }
+
+    /**
+     * Refuse to render anything a draft.
+     *
+     * **`CertificatePolicy::print()` already says this and it is not enough — D124.** `Gate::before`
+     * allows a Super Admin everything *before* a policy runs, so the policy protects a draft from
+     * everybody except the one role most able to hand one out. A draft has no number and no
+     * `qr_payload`: printed, it is an unverifiable document on institute letterhead, and its
+     * "Reprint #2" line would be counting copies of something that was never issued.
+     *
+     * So the refusal lives here, below the gate, where every route to a printed page passes through.
+     */
+    private function assertPrintable(Certificate $certificate): void
+    {
+        if ($certificate->status->isPublic()) {
+            return;
+        }
+
+        throw CourseRuleException::refuse('status', sprintf(
+            'This certificate is %s, so there is nothing to print: it has no number and its QR code '
+            .'resolves to nothing. Issue it first.',
+            mb_strtolower($certificate->status->label()),
+        ));
+    }
+
+    /**
+     * The template this certificate prints with: its own, or the institute's default.
+     *
+     * A certificate issued before any template existed still has to be printable, which is why the
+     * fallback is here rather than the column being required. With neither, the refusal names what
+     * to do rather than throwing on a null.
+     */
+    public function templateFor(Certificate $certificate): PrintTemplate
+    {
         $template = $certificate->template ?? $this->defaultTemplate();
 
         if ($template === null) {
@@ -423,11 +551,7 @@ final class CertificateService
             );
         }
 
-        return $this->renderer->render(
-            $template,
-            $this->templates->render($template, $this->tokensFor($certificate)),
-            (string) ($certificate->getAttribute('certificate_number') ?? 'Certificate'),
-        );
+        return $template;
     }
 
     /**
@@ -485,13 +609,18 @@ final class CertificateService
      */
     private function tokensFor(Certificate $certificate): array
     {
-        $signatories = (array) ($certificate->template?->getAttribute('signatories') ?? []);
+        // The **resolved** template, not `$certificate->template`: a certificate that names none
+        // prints on the institute's default, and its signatories are that template's business too.
+        // Reading the relation alone left the three signatory lines blank on exactly those rows.
+        $template = $this->templateFor($certificate);
+
+        $signatories = (array) ($template->getAttribute('signatories') ?? []);
 
         $tokens = [
             'certificate_number' => (string) ($certificate->getAttribute('certificate_number') ?? ''),
             'verification_code' => $this->qr->forDisplay((string) $certificate->getAttribute('verification_code')),
             'verification_url' => (string) ($certificate->getAttribute('qr_payload') ?? ''),
-            'qr' => $this->qrImageFor($certificate),
+            'qr' => $this->qrImageFor($certificate, $template),
             'issued_on' => app_date($certificate->getAttribute('issued_on')),
 
             'student_name' => (string) $certificate->getAttribute('student_name_snapshot'),
@@ -538,11 +667,9 @@ final class CertificateService
      * Empty rather than a thrown exception: a template that omits `{qr}` is a legitimate design, and
      * a certificate whose `show_qr` is off should print without one rather than refusing.
      */
-    private function qrImageFor(Certificate $certificate): string
+    private function qrImageFor(Certificate $certificate, PrintTemplate $template): string
     {
-        $template = $certificate->template;
-
-        if ($template !== null && ! (bool) $template->getAttribute('show_qr')) {
+        if (! (bool) $template->getAttribute('show_qr')) {
             return '';
         }
 
@@ -550,7 +677,7 @@ final class CertificateService
             return '';
         }
 
-        $size = (float) ($template?->getAttribute('qr_size_mm') ?? 25.0);
+        $size = (float) $template->getAttribute('qr_size_mm');
 
         return sprintf(
             '<img src="%s" alt="" style="width:%smm;height:%smm">',

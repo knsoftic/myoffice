@@ -94,9 +94,13 @@ final class PrintTemplateController extends Controller
                 'cards' => $print_template->idCards()->count(),
             ],
             'canEdit' => (bool) $request->user()?->can('update', $print_template),
+            'canCreate' => (bool) $request->user()?->can('create', PrintTemplate::class),
             'canChangeStatus' => (bool) $request->user()?->can('changeStatus', $print_template),
             'canDelete' => (bool) $request->user()?->can('delete', $print_template),
-            'canPreview' => (bool) $request->user()?->can('print', $print_template),
+            // §7.5 gates the preview on `view`, not `print`: it renders example values and no
+            // student data, so it is part of reading a template. The flag has to agree with the
+            // route, or the screen offers a button that 403s.
+            'canPreview' => (bool) $request->user()?->can('view', $print_template),
         ]);
     }
 
@@ -127,6 +131,47 @@ final class PrintTemplateController extends Controller
     }
 
     /**
+     * Copy a template so a redesign can be worked on without touching the one in use.
+     *
+     * The copy lands **inactive and as nobody's default**, and the screen goes straight to its
+     * editor — duplicating is the first step of a redesign, not a publication.
+     */
+    public function duplicate(Request $request, PrintTemplate $print_template): RedirectResponse
+    {
+        Gate::authorize('create', PrintTemplate::class);
+        Gate::authorize('view', $print_template);
+
+        $copy = $this->templates->duplicate($print_template, $request->user());
+
+        return redirect()
+            ->route('admin.print-templates.edit', $copy)
+            ->with('toast', [
+                'type' => 'success',
+                'message' => 'Copied. It is retired and is nobody’s default until you say so.',
+            ]);
+    }
+
+    /**
+     * The token reference for this template's kind.
+     *
+     * A screen of its own rather than only the panel inside the editor, because it is the thing
+     * somebody wants open on a second monitor while they write HTML — and because it holds no
+     * student data at all, so it is readable by anybody who may read the template.
+     */
+    public function tokens(Request $request, PrintTemplate $print_template): View
+    {
+        Gate::authorize('view', $print_template);
+
+        return view('admin.print-templates.tokens', [
+            'template' => $print_template,
+            'tokens' => PrintTokenRegistry::grouped($print_template->type),
+            'groups' => PrintTokenRegistry::GROUPS,
+            'used' => (array) ($print_template->getAttribute('tokens_used') ?? []),
+            'unknown' => PrintTokenRegistry::unknownIn($print_template->type, $print_template->getAttribute('body_html')),
+        ]);
+    }
+
+    /**
      * The preview, rendered with example values.
      *
      * Returned as HTML rather than a PDF: adjusting a margin should not cost a dompdf render each
@@ -134,7 +179,11 @@ final class PrintTemplateController extends Controller
      */
     public function preview(Request $request, PrintTemplate $print_template): Response
     {
-        Gate::authorize('print', $print_template);
+        // `view`, matching the route and §7.5. The preview holds no student data at all — that is
+        // what makes `print_templates` safe to grant on its own to a designer — so gating it on the
+        // ability to print a *document* would have been a stricter check than the thing deserves,
+        // and one the screen's own button did not agree with.
+        Gate::authorize('view', $print_template);
 
         $html = $this->templates->preview($print_template);
 

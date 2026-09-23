@@ -1076,6 +1076,12 @@ final class PermissionRegistry
                 // An ability whose scope a policy narrows is a different thing from one no route can
                 // ever honour.
                 //
+                // **`download` is a synonym the policy resolves to `print`.** §7.5 gates the PDF
+                // route on `certificates.print`, because printing a certificate and saving a PDF of
+                // it are the same act by two routes — `CertificatePolicy::download()` says so in one
+                // line. The ability stays declared so a role that already holds it keeps working,
+                // and so the distinction is available if an institute ever wants it.
+                //
                 // **`upload` goes.** Nothing in this phase uploads to a certificate: the PDF is
                 // generated, the QR is generated, the signature images belong to the template. An
                 // ability nobody can use is an ability somebody grants by mistake — the same
@@ -1474,6 +1480,11 @@ final class PermissionRegistry
                     // Phase 16 §4.3 — the name and public bio of their OWN teachers, nothing else.
                     'teachers',
                     'certificates',
+                    // phase-19-23 §7.9. Separate from `certificates` because they are different
+                    // documents answering different questions: a certificate says a course was
+                    // completed, a card says somebody is a student here today. An institute that
+                    // does not issue cards should not have to withhold certificates to hide them.
+                    'id_card',
                     'fees',
                     'installments',
                     'payments',
@@ -1511,6 +1522,11 @@ final class PermissionRegistry
                     // Phase 16 §4.3 — separate from `student_progress` on purpose: a visiting trainer
                     // may be allowed to read a register without being allowed to write it.
                     'progress_mark',
+                    // phase-19-23 §7.10, §9.3. **Read only, and there is no writing ability to pair
+                    // it with.** A teacher sees who on their own batches could be certified, which is
+                    // useful to them; issuing, revoking and replacing are the office's, and §9.3 says
+                    // 403 on every one of them.
+                    'certificates',
                     'demo_classes',
                     'reports',
                     'meetings',

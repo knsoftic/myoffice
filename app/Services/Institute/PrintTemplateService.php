@@ -197,6 +197,66 @@ final class PrintTemplateService
     }
 
     /**
+     * Copy a template so a variant can be designed without risking the one in use (§7.5).
+     *
+     * **The copy is inactive and is nobody's default.** Duplicating is how somebody starts a redesign,
+     * and a redesign that went live the moment it was created would print on the next certificate
+     * issued — which is the opposite of why they duplicated instead of editing.
+     *
+     * The code has to be unique, so a suffix is appended and checked rather than assumed: `-COPY`,
+     * then `-COPY-2` and so on. Ten attempts is a ceiling rather than a loop that cannot fail.
+     */
+    public function duplicate(PrintTemplate $template, ?User $actor = null): PrintTemplate
+    {
+        return DB::transaction(function () use ($template): PrintTemplate {
+            $copy = new PrintTemplate;
+
+            $copy->forceFill(array_merge(
+                $template->only([
+                    'type', 'branch_id', 'paper_size', 'orientation', 'width_mm', 'height_mm',
+                    'margin_mm', 'background_image_path', 'logo_path', 'body_html', 'custom_css',
+                    'tokens_used', 'signatories', 'show_qr', 'qr_size_mm', 'sort_order',
+                ]),
+                [
+                    'code' => $this->freshCode($template),
+                    'name' => mb_substr($template->getAttribute('name').' (copy)', 0, 150),
+                    'description' => $template->getAttribute('description'),
+                    // See the note: a copy never goes live on its own.
+                    'is_default' => false,
+                    'is_active' => false,
+                    // The cached render belongs to the row it was made from.
+                    'preview_path' => null,
+                ],
+            ));
+
+            $copy->save();
+
+            return $copy->refresh();
+        });
+    }
+
+    /** A code nothing else holds, derived from the one being copied so it stays recognisable. */
+    private function freshCode(PrintTemplate $template): string
+    {
+        $base = mb_substr((string) $template->getAttribute('code'), 0, 24);
+
+        for ($attempt = 1; $attempt <= 10; $attempt++) {
+            $code = $attempt === 1 ? $base.'-COPY' : $base.'-COPY-'.$attempt;
+
+            $taken = PrintTemplate::query()->withTrashed()->where('code', $code)->exists();
+
+            if (! $taken) {
+                return $code;
+            }
+        }
+
+        throw CourseRuleException::refuse(
+            'code',
+            'There are already ten copies of this template. Rename or remove one before making another.',
+        );
+    }
+
+    /**
      * Make this the default for its (type, branch).
      *
      * The previous default is cleared **first**, inside the same transaction: `uq_pt_default` permits

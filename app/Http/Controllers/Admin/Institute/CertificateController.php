@@ -15,12 +15,14 @@ use App\Models\Institute\PrintTemplate;
 use App\Models\Institute\StudentBatchEnrollment;
 use App\Services\Institute\CertificateEligibilityService;
 use App\Services\Institute\CertificateService;
+use App\Services\Institute\Exceptions\CourseRuleException;
 use App\Support\CsvWriter;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -71,7 +73,7 @@ final class CertificateController extends Controller
      * four different services (INV-23-1), and a query that reproduced them would be a second opinion
      * that could disagree with the one shown when somebody presses issue.
      */
-    public function candidates(Request $request): View
+    public function eligible(Request $request): View
     {
         Gate::authorize('create', Certificate::class);
 
@@ -85,13 +87,175 @@ final class CertificateController extends Controller
             ->paginate(25)
             ->withQueryString();
 
-        return view('admin.certificates.candidates', [
+        return view('admin.certificates.eligible', [
             'enrollments' => $enrollments,
             'reports' => $enrollments->getCollection()->mapWithKeys(
                 fn (StudentBatchEnrollment $e): array => [$e->getKey() => $this->eligibility->check($e)],
             ),
             'courses' => Course::query()->orderBy('name')->get(['id', 'name']),
             'batches' => Batch::query()->orderByDesc('id')->get(['id', 'code', 'name']),
+        ]);
+    }
+
+    /**
+     * The eligibility report for one enrolment, on its own.
+     *
+     * **It writes nothing**, which is why it is a GET behind `certificates.create` rather than
+     * anything stronger: it is the question "could I certify this student?", asked from a student's
+     * page or a batch register without leaving it. The same service answers it as answers it at
+     * issue time, so the two can never disagree.
+     */
+    public function eligibility(Request $request, StudentBatchEnrollment $enrollment): View
+    {
+        Gate::authorize('create', Certificate::class);
+
+        return view('admin.certificates.eligibility', [
+            'enrollment' => $enrollment->load([
+                'student:id,name,student_code',
+                'batch:id,code,name,course_id',
+                'batch.course:id,name,certificate_available',
+            ]),
+            'report' => $this->eligibility->check($enrollment),
+            'existing' => Certificate::query()
+                ->where('student_batch_enrollment_id', $enrollment->getKey())
+                ->orderByDesc('id')
+                ->get(['id', 'certificate_number', 'status', 'issued_on']),
+        ]);
+    }
+
+    /**
+     * The standalone draft form.
+     *
+     * The eligibility list is where most certificates start, because it shows the verdict beside the
+     * name. This exists for the other case: somebody who already knows which enrolment they want and
+     * arrived from the student's own page.
+     */
+    public function create(Request $request): View
+    {
+        Gate::authorize('create', Certificate::class);
+
+        $enrollment = $request->integer('enrollment') > 0
+            ? StudentBatchEnrollment::query()
+                ->with(['student:id,name,student_code', 'batch:id,code,name,course_id', 'batch.course:id,name'])
+                ->find($request->integer('enrollment'))
+            : null;
+
+        return view('admin.certificates.create', [
+            'enrollment' => $enrollment,
+            'report' => $enrollment === null ? null : $this->eligibility->check($enrollment),
+            'batches' => Batch::query()->orderByDesc('id')->get(['id', 'code', 'name']),
+            'templates' => PrintTemplate::query()
+                ->ofType(PrintTemplateType::Certificate)
+                ->active()
+                ->ordered()
+                ->get(['id', 'code', 'name']),
+        ]);
+    }
+
+    /**
+     * Edit a draft.
+     *
+     * The policy allows `update` only on a draft and the service refuses anything else, which is
+     * two layers for one rule on purpose: `Gate::before` hands a Super Admin past the policy before
+     * it runs (D124), so the service is the one that actually holds.
+     */
+    public function update(Request $request, Certificate $certificate): RedirectResponse
+    {
+        Gate::authorize('update', $certificate);
+
+        $validated = $request->validate([
+            'print_template_id' => ['nullable', 'integer', Rule::exists('print_templates', 'id')->withoutTrashed()],
+            'grade_scale_id' => ['nullable', 'integer', Rule::exists('grade_scales', 'id')->withoutTrashed()],
+            'completion_date' => ['nullable', 'date'],
+            'grade' => ['nullable', 'string', 'max:8'],
+            'grade_point' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:10'],
+            'percentage' => ['nullable', 'numeric', 'decimal:0,4', 'min:0', 'max:100'],
+            'notes' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $this->certificates->updateDraft($certificate, $validated, $request->user());
+
+        return back()->with('toast', ['type' => 'success', 'message' => 'Draft updated.']);
+    }
+
+    /**
+     * Issue a set of drafts in one go.
+     *
+     * **Each one is authorised and issued on its own**, and a refusal stops that certificate rather
+     * than the batch: an office issuing thirty certificates should not lose twenty-nine because the
+     * thirtieth student's fee is outstanding. The result says how many went through and names what
+     * stopped the rest, because "24 of 30 issued" with no list is a worse answer than none.
+     *
+     * No override is accepted here at all. An override is a judgement about one student, recorded
+     * with a reason; a reason pasted across thirty certificates is not a judgement, it is a formality.
+     */
+    public function bulkIssue(Request $request): RedirectResponse
+    {
+        // No class-level gate here: `CertificatePolicy::changeStatus()` asks about a *certificate*,
+        // so there is nothing to ask it at class level. The route carries
+        // `can:certificates.change_status`, and each row below is authorised on its own — which is
+        // the check that matters, because it is the one that knows about branches.
+        $max = max(1, (int) setting('institute.certificate_bulk_issue_max', 100));
+
+        $validated = $request->validate([
+            'certificate_ids' => ['required', 'array', 'min:1', 'max:'.$max],
+            'certificate_ids.*' => ['integer', Rule::exists('certificates', 'id')],
+        ]);
+
+        $issued = 0;
+        $refused = [];
+
+        foreach (Certificate::query()->whereIn('id', $validated['certificate_ids'])->get() as $certificate) {
+            if ($request->user()?->cannot('changeStatus', $certificate)) {
+                $refused[] = sprintf('%s — not yours to issue', $certificate->getAttribute('student_name_snapshot'));
+
+                continue;
+            }
+
+            try {
+                $this->certificates->issue($certificate, $request->user(), '');
+                $issued++;
+            } catch (CourseRuleException $e) {
+                $refused[] = sprintf(
+                    '%s — %s',
+                    $certificate->getAttribute('student_name_snapshot'),
+                    implode(' ', $e->validator->errors()->all()),
+                );
+            }
+        }
+
+        return back()->with('toast', [
+            'type' => $refused === [] ? 'success' : 'warning',
+            'message' => $refused === []
+                ? sprintf('%s issued.', app_number($issued).' '.($issued === 1 ? 'certificate' : 'certificates'))
+                : sprintf(
+                    '%d issued. %d left as drafts: %s',
+                    $issued,
+                    count($refused),
+                    implode('; ', array_slice($refused, 0, 5)).(count($refused) > 5 ? ' …' : ''),
+                ),
+        ]);
+    }
+
+    /**
+     * Rebuild the stored PDF from the certificate's own snapshots.
+     *
+     * **It cannot change what the document says.** Everything it renders from is frozen, so this is
+     * for an operational accident — a cleared disk, a template whose logo file moved — rather than a
+     * correction. A correction is a revocation and a replacement.
+     */
+    public function regeneratePdf(Request $request, Certificate $certificate): RedirectResponse
+    {
+        // **`view`, not `update`.** `CertificatePolicy::update()` refuses anything but a draft, and an
+        // issued certificate is exactly the case this exists for. The ability comes from the route's
+        // `can:certificates.edit`; what the policy is asked here is the branch question.
+        Gate::authorize('view', $certificate);
+
+        $this->certificates->regeneratePdf($certificate);
+
+        return back()->with('toast', [
+            'type' => 'success',
+            'message' => 'The PDF has been rebuilt from the stored details. Nothing it says has changed.',
         ]);
     }
 
@@ -128,6 +292,10 @@ final class CertificateController extends Controller
             ]),
             // Re-run live, so the screen shows today's answer rather than the draft's.
             'report' => $enrollment === null ? null : $this->eligibility->check($enrollment),
+            // Grouped for reading aloud down a phone line. Formatted here rather than in the view,
+            // because a Blade file reaching into the container for a service is a second place the
+            // grouping could be decided.
+            'displayCode' => $this->certificates->displayCodeFor($certificate),
             'canEdit' => (bool) $request->user()?->can('update', $certificate),
             'canIssue' => (bool) $request->user()?->can('changeStatus', $certificate),
             'canApprove' => (bool) $request->user()?->can('approve', $certificate),
@@ -206,6 +374,83 @@ final class CertificateController extends Controller
                 'type' => 'success',
                 'message' => 'A replacement draft is ready, with fresh details. Issue it when you are happy.',
             ]);
+    }
+
+    /**
+     * Print it — rendered HTML, straight to the browser's print dialog.
+     *
+     * **HTML rather than the PDF**, because a browser prints a page the user can see first, and the
+     * PDF route exists for saving and emailing. Both render from the same stored snapshots through
+     * the same template, so the two cannot say different things.
+     *
+     * The print count is bumped here and on `pdf()`: both hand somebody a copy, and the "Reprint #n"
+     * line on the sheet is what stops two copies circulating as though both were the original.
+     */
+    public function print(Request $request, Certificate $certificate): Response
+    {
+        Gate::authorize('print', $certificate);
+
+        $this->certificates->markPrinted($certificate, $request->user());
+
+        $certificate->refresh();
+
+        return response()->view('admin.certificates.print', [
+            'certificate' => $certificate,
+            // The template comes with it, because the page has to print at the paper the template
+            // chose and under the stylesheet it carries. Resolving it in the view would be a second
+            // answer to "which template?" that could disagree with the renderer's.
+            'template' => $this->certificates->templateFor($certificate),
+            'body' => $this->certificates->renderHtml($certificate),
+        ]);
+    }
+
+    /**
+     * Stream the PDF, generating it on demand when the row has none.
+     *
+     * **Generated on demand rather than refused**, because a missing `pdf_path` is an operational
+     * accident — a cleared disk, a job that never ran — and not a reason to withhold a document
+     * somebody is entitled to. It is regenerated from the stored snapshots, so it is byte-identical
+     * in content to the original whatever the template has done since.
+     */
+    public function pdf(Request $request, Certificate $certificate): Response
+    {
+        Gate::authorize('download', $certificate);
+
+        $this->certificates->markPrinted($certificate, $request->user());
+
+        $bytes = $this->certificates->renderPdf($certificate);
+
+        return response($bytes, Response::HTTP_OK, [
+            'Content-Type' => 'application/pdf',
+            // `inline`, so it opens in the viewer rather than landing in Downloads. The filename is
+            // still set, because "save as" should not offer `pdf.pdf`.
+            'Content-Disposition' => sprintf(
+                'inline; filename="%s.pdf"',
+                (string) ($certificate->getAttribute('certificate_number') ?? 'certificate'),
+            ),
+            // A certificate names a student. No shared cache, ever (D21's reasoning, applied to a
+            // response rather than to a disk).
+            'Cache-Control' => 'no-store, private',
+        ]);
+    }
+
+    /**
+     * Who has scanned this certificate, and from where.
+     *
+     * Behind `certificates.view_logs` rather than `view`, because it is a different question: that
+     * somebody tried four hundred codes from one address is an operational fact about the
+     * verification endpoint, not part of a student's record.
+     */
+    public function verifications(Request $request, Certificate $certificate): View
+    {
+        Gate::authorize('viewLogs', $certificate);
+
+        return view('admin.certificates.verifications', [
+            'certificate' => $certificate,
+            'attempts' => $certificate->verifications()
+                ->orderByDesc('created_at')
+                ->paginate(50),
+        ]);
     }
 
     public function destroy(Request $request, Certificate $certificate): RedirectResponse

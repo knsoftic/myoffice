@@ -52,6 +52,11 @@ class DatabaseSeeder extends Seeder
             // `NoGradeScale` on a fresh install — correctly, but the first thing a new user does
             // should not be to discover a missing configuration row.
             GradeScaleSeeder::class,
+            // phase-19-23 §6.13. One default template per printable kind. `CertificateService`
+            // falls through to whichever row of the type carries `is_default`, so without this the
+            // first issue attempt on a fresh install fails on a missing template rather than on
+            // anything the user did.
+            PrintTemplateSeeder::class,
         ]);
     }
 }

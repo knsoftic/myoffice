@@ -87,6 +87,7 @@ use App\Http\Controllers\Admin\Institute\AssignmentSubmissionController;
 use App\Http\Controllers\Admin\Institute\AttendanceController as StudentAttendanceController;
 use App\Http\Controllers\Admin\Institute\AttendanceReportController as StudentAttendanceReportController;
 use App\Http\Controllers\Admin\Institute\BatchController;
+use App\Http\Controllers\Admin\Institute\CertificateController;
 use App\Http\Controllers\Admin\Institute\ClassroomController;
 use App\Http\Controllers\Admin\Institute\ClassSessionController;
 use App\Http\Controllers\Admin\Institute\CourseCategoryController;
@@ -103,11 +104,13 @@ use App\Http\Controllers\Admin\Institute\FeeDiscountController;
 use App\Http\Controllers\Admin\Institute\FeeReminderController;
 use App\Http\Controllers\Admin\Institute\FeeStructureController;
 use App\Http\Controllers\Admin\Institute\GradeScaleController;
+use App\Http\Controllers\Admin\Institute\PrintTemplateController;
 use App\Http\Controllers\Admin\Institute\InstallmentPlanController;
 use App\Http\Controllers\Admin\Institute\ProgressController as StudentProgressController;
 use App\Http\Controllers\Admin\Institute\ResultCardController;
 use App\Http\Controllers\Admin\Institute\StudentApplicationController;
 use App\Http\Controllers\Admin\Institute\StudentController;
+use App\Http\Controllers\Admin\Institute\StudentIdCardController;
 use App\Http\Controllers\Admin\Institute\StudentFeeController;
 use App\Http\Controllers\Admin\Institute\TeacherController;
 use App\Http\Controllers\Admin\Institute\TimetableController;
@@ -2441,5 +2444,114 @@ Route::prefix('admin')
             Route::get('exams/{exam}/result-cards', [ResultCardController::class, 'index'])->whereNumber('exam')->middleware('can:results.view_reports')->name('result-cards.index');
             Route::put('exam-results/{result}', [ExamResultController::class, 'amend'])->whereNumber('result')->middleware('can:results.edit')->name('exam-results.amend');
             Route::get('enrollments/{enrollment}/result-card', [ResultCardController::class, 'show'])->whereNumber('enrollment')->middleware('can:results.print')->name('result-cards.show');
+        });
+
+
+        /*
+        |----------------------------------------------------------------------
+        | Print templates - phase-19-23 sec 7.6, sec 4.1
+        |----------------------------------------------------------------------
+        |
+        | A module of its own because `body_html` is powerful. sec 4.1 makes it
+        | separately grantable so a designer can be given the certificate layout
+        | with no sight of a student record - and so somebody who issues
+        | certificates all day is not thereby handed the ability that decides
+        | what HTML a PDF renderer receives.
+        |
+        | `preview` is behind `print` and renders with PrintTokenRegistry's
+        | example values, never a real student's data. That is what makes the
+        | whole module safe to grant on its own.
+        |
+        | A used template is retired, never deleted: a document has to stay
+        | re-printable byte-identically. The destroy route is for one nobody has
+        | printed with.
+        |
+        */
+        Route::middleware('module:print_templates')->group(static function (): void {
+            Route::get('print-templates', [PrintTemplateController::class, 'index'])->middleware('can:print_templates.view_any')->name('print-templates.index');
+            Route::get('print-templates/create', [PrintTemplateController::class, 'create'])->middleware('can:print_templates.create')->name('print-templates.create');
+            Route::post('print-templates', [PrintTemplateController::class, 'store'])->middleware(['can:print_templates.create', 'throttle:30,1'])->name('print-templates.store');
+            Route::get('print-templates/{print_template}', [PrintTemplateController::class, 'show'])->whereNumber('print_template')->withTrashed()->middleware('can:print_templates.view')->name('print-templates.show');
+            Route::get('print-templates/{print_template}/edit', [PrintTemplateController::class, 'edit'])->whereNumber('print_template')->middleware('can:print_templates.edit')->name('print-templates.edit');
+            Route::put('print-templates/{print_template}', [PrintTemplateController::class, 'update'])->whereNumber('print_template')->middleware('can:print_templates.edit')->name('print-templates.update');
+            Route::get('print-templates/{print_template}/preview', [PrintTemplateController::class, 'preview'])->whereNumber('print_template')->middleware('can:print_templates.view')->name('print-templates.preview');
+            Route::post('print-templates/{print_template}/duplicate', [PrintTemplateController::class, 'duplicate'])->whereNumber('print_template')->middleware('can:print_templates.create')->name('print-templates.duplicate');
+            Route::get('print-templates/{print_template}/tokens', [PrintTemplateController::class, 'tokens'])->whereNumber('print_template')->middleware('can:print_templates.view')->name('print-templates.tokens');
+            Route::post('print-templates/{print_template}/default', [PrintTemplateController::class, 'setDefault'])->whereNumber('print_template')->middleware('can:print_templates.change_status')->name('print-templates.default');
+            Route::post('print-templates/{print_template}/deactivate', [PrintTemplateController::class, 'deactivate'])->whereNumber('print_template')->middleware('can:print_templates.change_status')->name('print-templates.deactivate');
+            Route::delete('print-templates/{print_template}', [PrintTemplateController::class, 'destroy'])->whereNumber('print_template')->middleware('can:print_templates.delete')->name('print-templates.destroy');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Certificates - phase-19-23 sec 7.6, sec 4.2
+        |----------------------------------------------------------------------
+        |
+        | `candidates` is the screen the phase exists for: enrolments that could
+        | be certified, each showing every eligibility rule with its actual
+        | value. "Why can't I issue this?" is answered by the UI rather than by
+        | a developer reading a log.
+        |
+        | `issue`, `revoke` and `reissue` are all change_status - sec 4.2 puts
+        | them behind one ability because they are the same person's job. The
+        | approve ability is separate and is what gates an OVERRIDE of a failing
+        | eligibility report; the controller authorises it only when an override
+        | reason is actually present, so an eligible certificate never demands
+        | a second right.
+        |
+        | The destroy route is for a DRAFT. An issued or revoked certificate is
+        | never deleted (INV-21-1) - the policy narrows the ability to drafts and
+        | the model refuses anything that gets past it, Super Admin included.
+        |
+        */
+        Route::middleware('module:certificates')->group(static function (): void {
+            Route::get('certificates', [CertificateController::class, 'index'])->middleware('can:certificates.view_any')->name('certificates.index');
+            Route::get('certificates/eligible', [CertificateController::class, 'eligible'])->middleware('can:certificates.create')->name('certificates.eligible');
+            Route::get('enrollments/{enrollment}/certificate/eligibility', [CertificateController::class, 'eligibility'])->whereNumber('enrollment')->middleware('can:certificates.create')->name('certificates.eligibility');
+            Route::get('certificates/create', [CertificateController::class, 'create'])->middleware('can:certificates.create')->name('certificates.create');
+            Route::post('certificates', [CertificateController::class, 'store'])->middleware(['can:certificates.create', 'throttle:30,1'])->name('certificates.store');
+            Route::get('certificates/export/{format}', [CertificateController::class, 'export'])->middleware('can:certificates.export')->name('certificates.export');
+            Route::get('certificates/{certificate}', [CertificateController::class, 'show'])->whereNumber('certificate')->withTrashed()->middleware('can:certificates.view')->name('certificates.show');
+            Route::put('certificates/{certificate}', [CertificateController::class, 'update'])->whereNumber('certificate')->middleware('can:certificates.edit')->name('certificates.update');
+            Route::post('certificates/{certificate}/issue', [CertificateController::class, 'issue'])->whereNumber('certificate')->middleware('can:certificates.change_status')->name('certificates.issue');
+            Route::post('certificates/bulk-issue', [CertificateController::class, 'bulkIssue'])->middleware(['can:certificates.change_status', 'throttle:5,1'])->name('certificates.bulk-issue');
+            Route::post('certificates/{certificate}/revoke', [CertificateController::class, 'revoke'])->whereNumber('certificate')->middleware('can:certificates.change_status')->name('certificates.revoke');
+            Route::post('certificates/{certificate}/reissue', [CertificateController::class, 'reissue'])->whereNumber('certificate')->middleware('can:certificates.create')->name('certificates.reissue');
+            Route::get('certificates/{certificate}/print', [CertificateController::class, 'print'])->whereNumber('certificate')->middleware('can:certificates.print')->name('certificates.print');
+            Route::get('certificates/{certificate}/pdf', [CertificateController::class, 'pdf'])->whereNumber('certificate')->middleware('can:certificates.print')->name('certificates.pdf');
+            Route::post('certificates/{certificate}/regenerate-pdf', [CertificateController::class, 'regeneratePdf'])->whereNumber('certificate')->middleware('can:certificates.edit')->name('certificates.pdf.regenerate');
+            Route::get('certificates/{certificate}/verifications', [CertificateController::class, 'verifications'])->whereNumber('certificate')->middleware('can:certificates.view_logs')->name('certificates.verifications');
+            Route::delete('certificates/{certificate}', [CertificateController::class, 'destroy'])->whereNumber('certificate')->middleware('can:certificates.delete')->name('certificates.destroy');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Student ID cards - phase-19-23 sec 7.6, sec 4.2
+        |----------------------------------------------------------------------
+        |
+        | There is NO destroy route, and `student_id_cards.delete` is not a
+        | registered ability. A certificate has a draft - a document nobody has
+        | been given - and a card does not: it is numbered, snapshotted and
+        | printed in one step, so every row is a card that existed in the world.
+        | A card that was issued stays on the register, marked lost, damaged,
+        | replaced or revoked.
+        |
+        | `print` gates batch printing as well as one card, bounded by
+        | institute.id_card_batch_print_max - a ceiling the service enforces,
+        | because a route cannot count.
+        |
+        */
+        Route::middleware('module:student_id_cards')->group(static function (): void {
+            Route::get('student-id-cards', [StudentIdCardController::class, 'index'])->middleware('can:student_id_cards.view_any')->name('student-id-cards.index');
+            Route::get('student-id-cards/create', [StudentIdCardController::class, 'create'])->middleware('can:student_id_cards.create')->name('student-id-cards.create');
+            Route::post('student-id-cards', [StudentIdCardController::class, 'store'])->middleware(['can:student_id_cards.create', 'throttle:30,1'])->name('student-id-cards.store');
+            Route::get('student-id-cards/export/{format}', [StudentIdCardController::class, 'export'])->middleware('can:student_id_cards.export')->name('student-id-cards.export');
+            Route::get('student-id-cards/{card}', [StudentIdCardController::class, 'show'])->whereNumber('card')->withTrashed()->middleware('can:student_id_cards.view')->name('student-id-cards.show');
+            Route::post('student-id-cards/{card}/status', [StudentIdCardController::class, 'status'])->whereNumber('card')->middleware('can:student_id_cards.change_status')->name('student-id-cards.status');
+            Route::post('student-id-cards/{card}/replace', [StudentIdCardController::class, 'replace'])->whereNumber('card')->middleware('can:student_id_cards.create')->name('student-id-cards.replace');
+            Route::get('student-id-cards/{card}/print', [StudentIdCardController::class, 'print'])->whereNumber('card')->middleware('can:student_id_cards.print')->name('student-id-cards.print');
+            Route::post('student-id-cards/batch-print', [StudentIdCardController::class, 'batchPrint'])->middleware(['can:student_id_cards.print', 'throttle:10,1'])->name('student-id-cards.batch-print');
+            Route::post('student-id-cards/bulk-issue', [StudentIdCardController::class, 'bulkIssue'])->middleware(['can:student_id_cards.create', 'throttle:5,1'])->name('student-id-cards.bulk-issue');
+            Route::get('student-id-cards/{card}/pdf', [StudentIdCardController::class, 'pdf'])->whereNumber('card')->middleware('can:student_id_cards.print')->name('student-id-cards.pdf');
         });
     });

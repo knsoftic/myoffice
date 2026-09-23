@@ -11,10 +11,12 @@ use App\Models\Institute\Batch;
 use App\Models\Institute\Course;
 use App\Models\Institute\StudentBatchEnrollment;
 use App\Models\Institute\StudentIdCard;
+use App\Services\Institute\Exceptions\CourseRuleException;
 use App\Services\Institute\StudentIdCardService;
 use App\Support\CsvWriter;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -23,7 +25,7 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * The student ID card register — `admin.id-cards.*` (§85, phase-19-23 §7.6).
+ * The student ID card register — `admin.student-id-cards.*` (§85, phase-19-23 §7.6).
  *
  * **There is no destroy action and there never will be.** A certificate has a draft — a document
  * nobody has been given, which is reasonable to discard. A card does not: it is numbered,
@@ -52,7 +54,7 @@ final class StudentIdCardController extends Controller
             ->paginate(20)
             ->withQueryString();
 
-        return view('admin.id-cards.index', [
+        return view('admin.student-id-cards.index', [
             'cards' => $cards,
             'statuses' => IdCardStatus::cases(),
             'courses' => Course::query()->orderBy('name')->get(['id', 'name']),
@@ -75,7 +77,7 @@ final class StudentIdCardController extends Controller
      * Filtered by the absence of an active card rather than by a join on every card, so a student
      * whose card was lost last term appears here again — which is the whole point of the screen.
      */
-    public function candidates(Request $request): View
+    public function create(Request $request): View
     {
         Gate::authorize('create', StudentIdCard::class);
 
@@ -89,7 +91,7 @@ final class StudentIdCardController extends Controller
             ->paginate(25)
             ->withQueryString();
 
-        return view('admin.id-cards.candidates', [
+        return view('admin.student-id-cards.create', [
             'enrollments' => $enrollments,
             'batches' => Batch::query()->orderByDesc('id')->get(['id', 'code', 'name']),
             // The screen says so before somebody presses issue and gets a refusal.
@@ -109,7 +111,7 @@ final class StudentIdCardController extends Controller
         );
 
         return redirect()
-            ->route('admin.id-cards.show', $card)
+            ->route('admin.student-id-cards.show', $card)
             ->with('toast', [
                 'type' => 'success',
                 'message' => sprintf('Card %s issued.', (string) $card->getAttribute('card_number')),
@@ -120,13 +122,14 @@ final class StudentIdCardController extends Controller
     {
         Gate::authorize('view', $card);
 
-        return view('admin.id-cards.show', [
+        return view('admin.student-id-cards.show', [
             'card' => $card->load([
                 'student:id,name,student_code', 'course:id,name', 'batch:id,code,name',
                 'branch:id,name', 'template:id,code,name',
                 'replacementOf:id,card_number', 'replacedBy:id,card_number,replacement_of_id',
                 'revoker:id,name', 'lastPrinter:id,name',
             ]),
+            'displayCode' => $this->cards->displayCodeFor($card),
             'canChangeStatus' => (bool) $request->user()?->can('changeStatus', $card),
             'canReplace' => (bool) $request->user()?->can('create', StudentIdCard::class) && $card->status->isReplaceable(),
             'canPrint' => (bool) $request->user()?->can('print', $card),
@@ -174,7 +177,7 @@ final class StudentIdCardController extends Controller
         $replacement = $this->cards->replace($card, $validated['reason'], $request->user());
 
         return redirect()
-            ->route('admin.id-cards.show', $replacement)
+            ->route('admin.student-id-cards.show', $replacement)
             ->with('toast', [
                 'type' => 'success',
                 'message' => sprintf('Replacement %s issued.', (string) $replacement->getAttribute('card_number')),
@@ -187,8 +190,89 @@ final class StudentIdCardController extends Controller
 
         $this->cards->markPrinted($card, $request->user());
 
-        return response()->view('admin.id-cards.print', [
-            'cards' => collect([$card->load(['student:id,name,student_code'])]),
+        return response()->view('admin.student-id-cards.print', $this->printData(
+            StudentIdCard::query()->whereKey($card->getKey())->get(),
+        ));
+    }
+
+    /**
+     * Issue a card to every student on a set of enrolments.
+     *
+     * **Each one is issued on its own and a refusal stops only that student**, because the commonest
+     * reason a card cannot be issued — no photograph on file — applies to one student in a batch of
+     * thirty, and losing the other twenty-nine to it would be absurd. The result names who was left
+     * out, so the office knows exactly whose photo to chase.
+     */
+    public function bulkIssue(Request $request): RedirectResponse
+    {
+        Gate::authorize('create', StudentIdCard::class);
+
+        $max = max(1, (int) setting('institute.id_card_batch_print_max', 100));
+
+        $validated = $request->validate([
+            'enrollment_ids' => ['required', 'array', 'min:1', 'max:'.$max],
+            'enrollment_ids.*' => ['integer', Rule::exists('student_batch_enrollments', 'id')],
+        ]);
+
+        $issued = 0;
+        $refused = [];
+
+        // **The whole student row, not a chosen few columns.** `issue()` snapshots a name, a roll
+        // number, a registration number, a joining date and a guardian's phone off this model; a
+        // partial select hands it nulls for everything it did not ask for, and `student_code_snapshot`
+        // is `NOT NULL`, so the first bulk issue was a 1048 from the database. A select list is an
+        // optimisation on a *read*; this is a read that feeds a write.
+        $enrollments = StudentBatchEnrollment::query()
+            ->with('student')
+            ->whereIn('id', $validated['enrollment_ids'])
+            ->get();
+
+        foreach ($enrollments as $enrollment) {
+            try {
+                $this->cards->issue($enrollment, [], $request->user());
+                $issued++;
+            } catch (CourseRuleException $e) {
+                $refused[] = sprintf(
+                    '%s — %s',
+                    $enrollment->student?->getAttribute('name') ?? 'Unknown student',
+                    implode(' ', $e->validator->errors()->all()),
+                );
+            }
+        }
+
+        return back()->with('toast', [
+            'type' => $refused === [] ? 'success' : 'warning',
+            'message' => $refused === []
+                ? sprintf('%d %s issued.', $issued, $issued === 1 ? 'card' : 'cards')
+                : sprintf(
+                    '%d issued. %d skipped: %s',
+                    $issued,
+                    count($refused),
+                    implode('; ', array_slice($refused, 0, 5)).(count($refused) > 5 ? ' …' : ''),
+                ),
+        ]);
+    }
+
+    /**
+     * Stream the card as a PDF at its template's paper size.
+     *
+     * Generated on demand from the card's own snapshots rather than read back from a stored file: a
+     * card is small, the render is cheap, and a missing `pdf_path` should not withhold a document
+     * somebody is entitled to.
+     */
+    public function pdf(Request $request, StudentIdCard $card): Response
+    {
+        Gate::authorize('print', $card);
+
+        $this->cards->markPrinted($card, $request->user());
+
+        $bytes = $this->cards->renderPdf($card->refresh());
+
+        return response($bytes, Response::HTTP_OK, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => sprintf('inline; filename="%s.pdf"', (string) $card->getAttribute('card_number')),
+            // A card names a student and carries their photograph. No shared cache, ever.
+            'Cache-Control' => 'no-store, private',
         ]);
     }
 
@@ -225,7 +309,7 @@ final class StudentIdCardController extends Controller
             $this->cards->markPrinted($card, $request->user());
         }
 
-        return response()->view('admin.id-cards.print', ['cards' => $cards]);
+        return response()->view('admin.student-id-cards.print', $this->printData($cards));
     }
 
     public function export(Request $request, string $format): StreamedResponse
@@ -255,6 +339,46 @@ final class StudentIdCardController extends Controller
     }
 
     // -------------------------------------------------------------------------------------------
+
+    /**
+     * The sheet of cards, each already rendered, plus the paper they share.
+     *
+     * **Rendered here rather than in the view**, so the print page holds no card logic at all: a
+     * Blade file that built tokens would be a second renderer, and the one thing a printed card must
+     * never do is disagree with the PDF of itself.
+     *
+     * **The paper comes from the first card's template.** Every card on a sheet is the same size in
+     * practice, and a page that tried to honour three different paper sizes at once would honour
+     * none of them. A mixed selection prints at the first card's size, which is visible on screen
+     * before anybody presses print.
+     *
+     * **An Eloquent collection, not a base one.** `collect([$card])` has no `load()`, so the single
+     * card route was a 500 the moment it went through here — the two entry points look alike and are
+     * not the same type.
+     *
+     * @param  EloquentCollection<int, StudentIdCard>  $cards
+     * @return array<string, mixed>
+     */
+    private function printData(EloquentCollection $cards): array
+    {
+        $cards->load(['student:id,name,student_code']);
+
+        $rendered = $cards->map(fn (StudentIdCard $card): array => [
+            'card' => $card,
+            'body' => $this->cards->renderHtml($card),
+        ]);
+
+        $template = $cards->isEmpty() ? null : $this->cards->templateFor($cards->first());
+
+        [$width, $height] = $template === null ? [null, null] : $template->dimensionsMm();
+
+        return [
+            'rendered' => $rendered,
+            'template' => $template,
+            'widthMm' => $width,
+            'heightMm' => $height,
+        ];
+    }
 
     /** The one filtered query the index, the counts and the export all read. */
     private function filtered(Request $request): Builder

@@ -11,7 +11,7 @@
 | **Database** | `my_office` (utf8mb4_unicode_ci) |
 | **Created** | 2026-09-12 |
 | **Last updated** | 2026-09-23 |
-| **Current phase** | PHASE 20 complete — next: PHASE 21, certificates + ID cards |
+| **Current phase** | PHASE 21 complete — next: PHASE 22, tickets + meetings + messaging + notifications |
 
 ---
 
@@ -245,6 +245,14 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D130 | **A Form Request that accepts what the service will refuse produces a worse error than refusing it.** | `StoreGradeScaleRequest` allowed `decimal:0,4` on band edges while `GradeBandValidator` reasons at two throughout — so `39.9950` and `40.0000` came back as *"F (up to 40.00) and C (from 40.00) overlap"*, a message about two numbers the administrator can see are different. The same request validated a band's colour as a hex code, but `x-ui.badge` resolves colours from a literal map so Tailwind's scanner sees every class: a hex value is not merely off-convention, it is unrenderable, and would have shown as the fallback slate while the stored row insisted it was green. Both are the same mistake — **the validation layer inventing its own idea of the domain instead of taking the one already in the codebase.** The vocabulary was already there: `GradeScaleSeeder` and every enum's `color()` speak it. |
 | D131 | **A form must not offer a field the service does not write.** | `ExamService::update()` deliberately never touches `scheduled_date`: moving an exam takes a reason and re-runs the clash check, so it has its own entry point. The shared exam form offered an editable date on the edit screen anyway — a coordinator who changed it would be told "Exam updated" and see the old date, with nothing anywhere saying why. This is D121 in a new place: **a save that quietly declines part of what it was given is worse than one that fails.** The field is now read-only on every edit, published or not, and points at the reschedule panel. A test asserts that `update()` ignores a submitted date, so the day somebody "fixes" the form by re-enabling the input, the test explains what they have actually built. |
 | D132 | **Do not tighten a contract rule because it looks like a misconfiguration.** | `GradeBandValidator` allows a scale whose bands all agree — every band passing, or every band failing. That reads like an obvious bug (nobody can ever fail!), and the one-line change to require exactly one pass/fail transition was already written before the contract was reread. §6.9 says **at most** one transition, and [D-20-2] is why: when an exam carries a `passing_marks` above zero it decides the outcome outright and the bands are only a naming ladder, so a participation scale with no fail band is a real thing. Two of my own assertions had by then contradicted each other, which is the useful signal — when a new test disagrees with an old one, one of them is wrong and **the contract decides which**, not whichever was written more recently. The permissive behaviour now carries a test *and* the reason, so the next person tempted by the same one-line change reads the argument instead of making it again. |
+| D133 | **A render probe proves a page does not crash, not that it says anything true.** | Phase 20's render pass drove all 24 screens through the router and got 200s and intentional 404s everywhere — and shipped views printing `teachers.employee_id`, which is a **bigint foreign key to `employees`**, not a readable staff code. An examiner rendered as a raw integer, or as an empty cell when the column was null, and neither is an error: the page was structurally perfect and factually wrong. What found it was reading every column the views touch back against `information_schema`. The two probes answer different questions and neither substitutes for the other — **a render probe is a crash test; a column sweep is a correctness test** — and a phase that ships screens wants both. The sweep is cheap: one query per column, and it also caught that every Phase 21 snapshot column matches the width of the column it copies, which is the difference between a certificate carrying a student's name and carrying the first 32 characters of it. |
+| D134 | **A dropdown built from an "active" scope silently unassigns anything that has since become inactive.** | The examiner select was `Teacher::teaching()`, which filters to active teachers. Edit an exam whose examiner has left, and they are simply not in the list — so the form posts no `teacher_id`, the service reads "absent means unchanged"… except `update()` writes the whole attribute set, so absent became null. The screen then said "Exam updated" and the examiner was gone. This is D121 and D131 a third time and the pattern is now explicit: **a select that scopes its options must always include the value the row already holds**, active or not. The same applies to a retired grade scale, which INV-20-4 deliberately keeps alive so an old exam stays explicable — and would have been dropped from its own exam's edit form for exactly the same reason. |
+| D135 | **Work assigned to a phase by the contract is that phase's, even when the phase closes without noticing.** | Phase 20's deliverable list includes `ExamStatisticsService`. Phase 20 shipped without it and its change log recorded that the service "belongs with Phase 23" — a sentence I wrote, plausibly, about a service nothing yet called. Phase 21's pre-flight then found `CertificateEligibilityService` and `CertificateService` both reading it, and the phase blocked before a line of it was written. It shipped as a **Phase 20 completion commit** rather than as Phase 21 work, because the history should say what the thing is: a debt from the phase that owed it, paid before the next one built on the hole. The general rule: when a later phase discovers a dependency an earlier one was contracted to provide, **finish the earlier phase first, in its own commit** — folding it into the current phase hides which phase was actually incomplete, and the next person reading the tracker sees two green ticks and one unexplained service. |
+| D136 | **A pre-flight that checks what a phase leans on is worth more than the code it delays.** | Before writing Phase 21, every service, column, setting key and permission it calls was checked against the live application. It cost perhaps twenty queries and found: `ExamStatisticsService` missing entirely (D135); `GradeScale::hasBeenUsed()` not asking certificates while its docblock claimed it did; `DocumentNumberService` living in `Finance`, not `Core`; the attendance setting being `attendance_minimum_percentage` while a stored orphan called `minimum_attendance_percentage` sits in the seeder's reserved list, so reading the obvious name would have returned a default and silently ignored the institute's configuration; and `TYPE_NUMBER` storing as `integer`, which would have shaved the decimals off a `decimal(8,4)` percentage setting. Every one of those is a defect that compiles, lints, and behaves plausibly. **The Phase 19 lesson was that probing beats assuming after the code is written; this is the same lesson moved earlier** — and earlier is cheaper, because nothing has been built on the assumption yet. |
+| D137 | **A sanitiser with a fixed `class` allowlist decides what a stylesheet can select, and the seeded defaults found out first.** | `PrintTemplateSeeder`'s three templates were written with the class names the layouts wanted — `.doc`, `.card`, `.hdr` — and every one of them is stripped by `RichText::sanitize()`, which keeps only the tokens in `RichText::CLASSES`. The HTML would have saved cleanly, the stylesheet would have saved cleanly, and each rule would have selected nothing: a fresh install's very first certificate prints unstyled, teaching whoever opens the editor that the editor is broken. Nothing would have gone red, because a missing class is not an error anywhere. The defaults now style by element and by the allowlisted tokens (`text-center`, `lead`, `note`, `muted`, `highlight`), the seeder **refuses to write a template whose stylesheet sanitises to nothing or whose tokens do not survive**, and `PrintTemplateTest` walks every class selector in every seeded stylesheet and asserts the sanitiser keeps it. The general shape is D130's: **the layer that writes must speak the vocabulary the layer that validates already has**, and here that vocabulary is a constant one `grep` away. |
+| D138 | **Two sentences of one contract disagreed, and the code implemented both.** | §2.14's rules paragraph says the policy refuses `delete` *for every role*; §7.5's route table ships `DELETE /admin/certificates/{certificate}` annotated *drafts only — policy*. So `CertificatePolicy::delete()` allows a draft, `destroy()` calls `->delete()`, the screen offers the button — and the model's `deleting` hook threw on everything, which made that button a guaranteed 500. Neither half was wrong on its own; together they were unrunnable. **INV-21-1 is the tie-breaker, and it is about a certificate *number*:** issued once, never reused, never re-numbered, never deleted. A draft has no number, no `qr_payload` and no public page, so there is nothing of it for the invariant to protect. The hook now refuses anything that was ever a document and lets a draft go — **soft**, never hard, because `freshCode()` checks `withTrashed()` and a verification code allocated once must never be handed to a second document; `forceDelete` is refused in the model as well as the policy, since `Gate::before` walks a Super Admin past every policy before one runs (D124). The general rule this adds to D132: **when a contract contradicts itself, the invariant decides, not whichever sentence is nearer the code you are writing** — and the reconciliation gets stated in both places so the next reader finds the argument instead of the contradiction. |
+| D139 | **A column list is an optimisation on a read. A read that feeds a write must be whole.** | `StudentIdCardController::bulkIssue()` loaded its enrolments with `->with('student:id,name,photo_path')` — the three columns the screen needed — and handed the result to `StudentIdCardService::issue()`, which snapshots a name, a roll number, a registration number, a joining date and a guardian's phone off that same model. Everything it had not asked for came back null, and `student_code_snapshot` is `NOT NULL`, so the first bulk issue was a 1048 from the database rather than a sentence. The single-card path was fine, because it had never narrowed the select. **The tell is the direction the model is travelling**: a partial select is safe when the model is on its way to a screen and unsafe the moment it is on its way to a service, because the service knows columns the caller was not thinking about. Found the same run as a sibling: `printData()` typed its parameter as `Illuminate\Support\Collection` and `collect([$card])` satisfied it, so `->load()` — an Eloquent method — was a `BadMethodCallException` on the single-card print. Two shapes that look alike and are not the same type. |
+| D140 | **D124 for the third time: a hard rule under `Gate::before` is not a rule.** | `CertificatePolicy::print()` refuses a draft — "it has no number and no QR payload, so the document would be unverifiable the moment it left the building" — and `Gate::before` allows a Super Admin everything before a policy runs. So the one role most able to hand out an unverifiable certificate on institute letterhead was the only role nothing stopped, and the `print_count` it bumped would have been counting copies of a document that was never issued. The refusal now lives in `CertificateService::assertPrintable()`, called by `renderHtml()`, `renderPdf()` and `markPrinted()` — below the gate, on every route to a printed page. This is the same shape as D124's `Assignment` hook and Phase 19's `AssignmentSubmission` one, and three occurrences make it a rule rather than an anecdote: **when a policy sentence contains the word "never", the policy is the wrong layer.** A policy decides who may try; only the model or the service can decide what is possible. |
 ---
 
 ## 5. Phase Tracker
@@ -669,7 +677,27 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ### [x] PHASE 19 — Course material + assignments (2026-09-23)
 ### [x] PHASE 20 — Exams + results (2026-09-23)
-### [ ] PHASE 21 — Certificates (public QR verification) + student ID cards
+### [x] PHASE 21 — Certificates (public QR verification) + student ID cards (2026-09-23)
+
+| Done | What |
+|---|---|
+| [x] | Four tables — `print_templates`, `certificates`, `certificate_verifications`, `student_id_cards` — with three generated STORED guard columns (`default_guard`, `live_guard` ×2), because MariaDB tolerates unlimited NULLs in a unique index and that is the whole mechanism |
+| [x] | Five enums (`PrintTemplateType`, `PaperSize`, `PageOrientation`, `CertificateStatus`, `IdCardStatus`), every one string(32) in its column and asserted to fit — D126 |
+| [x] | `PrintTokenRegistry`: 31 certificate, 20 card and 26 result-card tokens, the only place a token name exists, with `raw` declared per token and deliberately short |
+| [x] | Six services — templates, certificates, eligibility, verification, cards, PDF rendering — plus `layouts/document`, the chromeless shell an admin-designed document prints into |
+| [x] | The public verification page: rate-limited **before** the lookup, `hash_equals()` after, every attempt logged, and one identical 404 for a draft, an opt-out, a deleted row and a code nobody issued |
+| [x] | 48 routes across three panels and the public site, reconciled name by name against §7.5 — including eleven the sidebar was already linking to under the contract's names and nine that had not been built |
+| [x] | 20 screens, and a student's own certificates and card on the student panel; a teacher's candidate list on theirs, read-only, 403 on every write (§9.3) |
+| [x] | `PrintTemplateSeeder`: one default per printable kind, idempotent, never overwriting a redesign, and refusing to write a template whose stylesheet sanitises to nothing — D137 |
+| [x] | 121 acceptance tests across six files, plus the 12 `PaperSize` unit cases: the lifecycle, the eligibility rules, the verification endpoint against a hostile caller, the template sanitiser, authorization across five roles, and the manifest |
+| [ ] | The notification classes `CertificateIssued`, `CertificateRevoked`, `IdCardIssued` and `IdCardExpiring` are **Phase 22's** (§13.3), along with `PrintTemplateChanged` |
+| [ ] | `ResultCardBuilder` rendering *through* a `result_card` template is Phase 23's: Phase 20's result card renders from its own Blade view, and the seeded template is there so the editor is not empty when it lands |
+
+> **Release note** — certificates and cards are printed from `print_templates`, never from a hard-coded
+> layout, and every issued document keeps its own snapshots so a rename never rewrites a printed page.
+> The verification page at `/verify/{code}` needs no account and is the one public write path in the
+> institute.
+
 ### [ ] PHASE 22 — Tickets, meetings, internal messaging, notifications
 ### [ ] PHASE 23 — Reports, analytics, activity log, audit trail, global search, exports
 ### [ ] PHASE 24 — Security, financial integrity, responsive and performance testing
@@ -678,6 +706,129 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 ---
 
 ## 6. Change Log
+
+### 2026-09-23 — Phase 21: certificates, the public verification page, and student cards
+
+**Shipped.** Four tables, five enums, four models, one registry, six services, three policies, three
+Form Requests, five controllers across three panels, 48 routes, 20 screens, one seeded template per
+printable kind, and one public page that anybody can reach without an account.
+
+**The spine.** A template is HTML with `{tokens}` in it, sanitised on save and again on render, and
+never compiled. A certificate is drafted from an enrolment with every rule's verdict on screen,
+issued with a number it keeps for ever, and from that moment says exactly what it said when somebody
+was handed it. A card is numbered, snapshotted and printed in one step, with its own copy of the
+student's photograph. Both carry a QR code that resolves on a page needing no login, and every scan
+of it is logged.
+
+**The one unauthenticated write path in the institute got the most attention.** `/verify/{code}` is
+rate-limited *before* the lookup rather than after — throttling after querying would let somebody
+time the database while being told to slow down — matched with `hash_equals()`, logged whatever the
+answer, and answered from a whitelist built with `array_intersect_key` so a column added to
+`certificates` next year is invisible there until somebody adds it to two places on purpose. A draft,
+a privacy opt-out, a soft-deleted row and a code nobody ever issued all render the same page with the
+same 404, because *this code is real but hidden* is exactly the fact a privacy opt-out exists to
+conceal. A revoked certificate is the single exception: it resolves and says so, with the reason,
+because somebody holding a revoked certificate is precisely who the page is for.
+
+**Six defects found by probing, before a test existed to go red.** `getOriginal('status')` applies
+the model's cast, so the immutability hook was casting an enum to string and fatalling — and it threw
+on *every* update, including the print-count bump that makes a reprint possible. A `CHECK` requiring
+a non-empty `submitted_code` turned an empty box and a press of the button into a 500 on a public
+form. An override could reach the `no_live_certificate` rule and come back as a raw 1062 with no
+sentence attached. A `<x-site.button type="submit">` is a link component, so the public form would
+never have submitted. An interpolated Tailwind class (`bg-{{ $colour }}-50`) is invisible to the
+scanner — D130, in my own new code, one phase after writing it down. And `Student` had no `idCards()`
+relation, so the candidates query would have thrown on the first visit.
+
+**D137 is the one worth reading.** The three seeded default templates were written with the class
+names their layouts wanted — `.doc`, `.card`, `.hdr` — and `RichText` keeps `class` only for the
+tokens on its own allowlist. The HTML would have saved cleanly, the stylesheet would have saved
+cleanly, and every rule would have selected nothing: a fresh install's first certificate prints
+unstyled, and the first person to open the editor concludes the editor is broken. Nothing goes red,
+because a missing class is not an error anywhere. The defaults now style by element and by the
+allowlisted tokens, the seeder **refuses to write a template whose stylesheet sanitises to nothing**,
+and a test walks every class selector in every seeded stylesheet.
+
+**Reconciling the routes against §7.5 was worth more than it looked.** Eleven route names had drifted
+— `admin.id-cards.*` where the contract says `admin.student-id-cards.*`, `candidates` where it says
+`eligible` and `create` — and the sidebar had been written against the *contract's* names, so the ID
+card entry was a link to a route that did not exist. That is D109's failure mode exactly, and it was
+sitting in the navigation. The sweep also found nine routes the contract names that had not been
+built at all: the single-enrolment eligibility report, the standalone draft form, editing a draft,
+bulk issue for both documents, PDF regeneration, a card PDF, template duplication and the token
+reference. All nine now exist, and the manifest test asserts every one against the permission the
+contract gives it.
+
+**`layouts/document` is a second print layout and the docblock says why.** `layouts/print` is the
+company letterhead — every invoice and payslip comes off the printer looking like a sibling — and a
+certificate is the opposite kind of document: its entire appearance is a row somebody designed, down
+to the institute name and where the logo sits. Printing one inside the letterhead would brand the
+page twice and force an A4 portrait frame around an 85.6 mm card. The new shell contributes only the
+paper, plus two marks a template author must not be able to style away: the REVOKED watermark and the
+"Reprint #3" line that stops two copies circulating as though both were the original.
+
+### 2026-09-23 — Phase 20 closed, and the service Phase 21 went looking for
+
+**The gate is green: 3,383 passing, 0 failing, 102,909 assertions in 3,162 seconds.** That is the whole
+cross-phase suite, not Phase 20's own tests, and it is the first time it has run clean end to end since
+Phase 19 opened.
+
+**Two Phase 20 defects were still in it when it went green**, because neither is something a test goes
+red on. Both were found by checking the code against the schema rather than by running it.
+
+`teachers.employee_id` is a **bigint foreign key to `employees`**, not a readable staff code — and the
+exam index, show page and form all printed it directly. An examiner showed as a raw integer, or as
+nothing when the column was null. `class-sessions` and `timetable` have been reading `teachers.name`
+all along. The render probe could not have caught this: it proves a page returns 200, not that the page
+says something true.
+
+Behind it, the examiner dropdown was built from `Teacher::teaching()`, which filters to active
+teachers. Editing an exam whose examiner had since left would drop them from the list, and saving would
+post no `teacher_id` at all — silently unassigning them while reporting "Exam updated". That is D121 and
+D131 a third time. The dropdown now always includes whoever the exam already names, and the same fix
+covers a retired grade scale, which INV-20-4 keeps alive precisely so an old exam stays explicable.
+
+**`ExamStatisticsService` was contracted to Phase 20 and I wrote that it belonged to Phase 23.** The
+Phase 21 pre-flight is what caught it: `CertificateEligibilityService`'s `exams_passed` rule reads
+`forStudent()`, and `CertificateService` resolves a certificate's grade through `aggregateFor()`. Phase
+21 cannot issue a certificate without either, so it shipped as a Phase 20 completion commit with
+`AggregateGrade` and `StudentExamStats` beside it, and thirteen tests that were green on the first run.
+
+It exists because INV-23-1 says a report never re-implements a figure. The certificate grade and the
+result card read one calculation, so they cannot produce two different As — and the one printed on a
+certificate is the one nobody can correct afterwards.
+
+Three decisions inside it are worth stating because each could reasonably have gone the other way. An
+exam with **no weight is weighted equally with its peers**, so a set where every weight is null is a
+plain mean: null-as-zero would silently drop an exam from the average, and null-as-100 would swamp the
+rest. A course with **no major exam has "passed them all"**, because a short practical course may
+legitimately have none and the alternative makes the rule impossible rather than strict. And an
+**aggregate over nothing is null, never zero** — 0% on a certificate says the student scored nothing,
+which is a different and defamatory claim.
+
+`forBatch()` and `forCourse()` are deliberately absent. Their only consumers are Phase 23's reports, and
+building a return shape before anything reads it is how it comes out plausible, gets consumed, and then
+has to change.
+
+**Two smaller things the same sweep turned up.** `Money::div()` takes two arguments and `ResultSummary`
+passed three; PHP ignores the extra silently, so the `, 4` never did anything — and `div()` rounds to
+`Money::SCALE` (two) regardless, so it was also asking for a precision the method does not offer.
+Harmless, removed. And `GradeScale::hasBeenUsed()` asks results and exams but not certificates, while
+its own docblock — written in Phase 20 in anticipation — already claims certificates hold a scale alive.
+The relation cannot exist until the `Certificate` model does, so the docblock now says **Phase 21 must
+add both in one commit**; otherwise a scale used solely by a certificate passes the friendly check and
+fails with a raw constraint violation instead of a sentence.
+
+**dompdf and simple-qrcode are installed**, in a commit of their own so a lockfile change is never mixed
+with a behaviour change. `config/dompdf.php` is published with three options pinned off and each
+carrying its reason. `enable_remote` is the one that matters: with it on, an `<img src="http://…">`
+inside a print template makes **the server** fetch a URL chosen by whoever holds
+`print_templates.edit` — server-side request forgery with a WYSIWYG editor attached, reachable by a role
+an institute would happily give a designer, precisely because the module exists to be granted
+separately from anything holding student data. `enable_javascript` defaulted to **true** and is now
+false: it embeds any `<script>` the source carried into the PDF for the reader's viewer to run, so the
+blast radius is somebody else's machine rather than ours, which is exactly why it is easy to leave on
+and wrong to.
 
 ### 2026-09-23 — Phase 20: exams, results, and a status nobody could write
 
@@ -2502,6 +2653,8 @@ data, all with a named fix:
 | T40 | **Phase 5's full acceptance suite (phase-05 §11) is not written.** `tests/Feature/Crm/CrmSmokeTest.php` (6 tests) is the integration gate only: it proves the screens answer, the permissions bite, the services number their records and the client panel is isolated — it does not walk the contract's FT rows. | med | Owed before Phase 5 can be called acceptance-complete. Every other phase closed with its FT map ticked; this one closed on the gate because the build predates this session. |
 | T41 | `docs-pending/phase-05-integration.md` C.7 (contract deviations) and W.5 (search not applied on some CRM screens, staff logo upload missing) are carried forward as written. | low | Fold into the Phase 5 acceptance work (T40). |
 | T42 | `App\Services\Finance\DocumentNumberService` landed in Phase 4's commit although D27 assigns it to Phase 5. | low | Harmless: Phase 5 is still its first and only consumer (`lead_no`, `client_code`). Noted so the D27 attribution is not read as a contradiction later. |
+| T43 | Seven permission rows in the database are no longer declared in `PermissionRegistry`: `certificates.upload`, `results.delete`, `results.restore`, `student_id_cards.delete`, `student_id_cards.restore`, `student_progress.delete`, `student_progress.restore`. | low | `PermissionSeeder` names them on every run and deliberately does **not** delete them — dropping a row a role still holds would silently narrow that role. Harmless while they exist: no route and no policy consults one. Remove them deliberately, after checking no role grants them, rather than letting a seeder do it. |
+| T44 | `certificates.download` is declared but no route uses it: §7.5 gates the PDF on `certificates.print`, and `CertificatePolicy::download()` resolves to `print()`. | low | Left declared so a role that already holds it keeps working, and so the finer distinction is available if an institute ever wants to separate printing from saving a PDF. |
 
 **Build-time items from the contract audit (BT-1 … BT-10)** — the documentation convergence is **closed** after
 three rounds ([`docs/design/consistency-audit-final.md`](docs/design/consistency-audit-final.md): all RD items

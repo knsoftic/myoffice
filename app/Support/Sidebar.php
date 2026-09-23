@@ -856,6 +856,17 @@ final class Sidebar
                                 'module' => 'certificates',
                                 'permission' => 'certificates.view_any',
                             ],
+                            [
+                                // phase-19-23 §4.1. Its own module because `body_html` is powerful:
+                                // a designer may hold the certificate layout with no sight of a
+                                // student record, and whoever issues certificates all day needs no
+                                // say in what HTML a PDF renderer is handed.
+                                'label' => 'Print Templates',
+                                'icon' => 'document-duplicate',
+                                'route' => 'admin.print-templates.index',
+                                'module' => 'print_templates',
+                                'permission' => 'print_templates.view_any',
+                            ],
                         ],
                     ],
                 ],
@@ -1303,6 +1314,13 @@ final class Sidebar
                         'route' => 'student.certificates.index',
                         'module' => 'student_portal',
                         'permission' => 'student_portal.certificates',
+                    ],
+                    [
+                        'label' => 'Student card',
+                        'icon' => 'identification',
+                        'route' => 'student.id-card.show',
+                        'module' => 'student_portal',
+                        'permission' => 'student_portal.id_card',
                     ],
                     [
                         'label' => 'Fees',

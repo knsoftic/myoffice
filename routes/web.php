@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Site\AdmissionController as SiteAdmissionController;
+use App\Http\Controllers\Site\VerificationController;
 use App\Http\Controllers\Site\BlogController;
 use App\Http\Controllers\Site\CareerController;
 use App\Http\Controllers\Site\ContactController;
@@ -228,6 +229,34 @@ Route::middleware(['signed', 'invoice_link'])->group(function (): void {
     Route::get('invoices/{token}/pdf', [PublicInvoiceController::class, 'pdf'])
         ->middleware('throttle:10,1')
         ->name('site.invoices.pdf');
+});
+
+
+/*
+|--------------------------------------------------------------------------
+| Public document verification - sec 84, phase-19-23 sec 6.14
+|--------------------------------------------------------------------------
+|
+| The only unauthenticated write path in the institute: every attempt writes a
+| certificate_verifications row, which is the rate limiter's evidence and sec 106's
+| log of a public endpoint.
+|
+| The rate limit is INSIDE the service, not on the route, and deliberately: it has
+| to log the throttled attempt, and a `throttle:` middleware rejects before any
+| controller runs. The route-level throttle below is a second, looser net against
+| something pathological - it is not the rate limit sec 84 asks for.
+|
+| One QR endpoint serves certificates and ID cards; the service tries the second
+| when the first misses, so a student scanning their own card is not told their
+| card does not exist because it is not a certificate.
+|
+*/
+Route::middleware('throttle:120,1')->group(static function (): void {
+    Route::get('verify', [VerificationController::class, 'index'])->name('site.verify.index');
+    Route::post('verify', [VerificationController::class, 'submit'])->name('site.verify.submit');
+    Route::get('verify/{code}', [VerificationController::class, 'show'])
+        ->where('code', '[A-Za-z0-9 _-]{1,64}')
+        ->name('site.verify.show');
 });
 
 require __DIR__.'/auth.php';

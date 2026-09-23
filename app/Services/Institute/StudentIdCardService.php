@@ -49,6 +49,8 @@ final class StudentIdCardService
     public function __construct(
         private readonly QrCodeService $qr,
         private readonly DocumentNumberService $numbers,
+        private readonly PrintTemplateService $templates,
+        private readonly DocumentPdfRenderer $renderer,
     ) {}
 
     /**
@@ -288,6 +290,187 @@ final class StudentIdCardService
         });
     }
 
+    /**
+     * The verification code, grouped for reading aloud. Same reasoning as the certificate's.
+     */
+    public function displayCodeFor(StudentIdCard $card): string
+    {
+        return $this->qr->forDisplay((string) $card->getAttribute('verification_code'));
+    }
+
+    /**
+     * The template this card prints with: its own, or the institute's default.
+     *
+     * A card issued before any template existed still has to be printable, which is why the fallback
+     * is here rather than the column being required. With neither, the refusal names what to do
+     * rather than throwing on a null — the same shape as `CertificateService::templateFor()`, and
+     * deliberately so: two documents that print through one engine should fail the same way.
+     */
+    public function templateFor(StudentIdCard $card): PrintTemplate
+    {
+        $template = $card->template ?? $this->defaultTemplate();
+
+        if ($template === null) {
+            throw CourseRuleException::refuse(
+                'print_template_id',
+                'There is no student card template to print with. Create one, or mark an existing '
+                .'one as the default.',
+            );
+        }
+
+        return $template;
+    }
+
+    /**
+     * The card as HTML, for the browser's print dialog.
+     *
+     * **Same template, same tokens as `renderPdf()`** — the two share every step but the last, so
+     * what the office sees on screen and what a card printer is handed cannot disagree.
+     */
+    public function renderHtml(StudentIdCard $card): string
+    {
+        $template = $this->templateFor($card);
+
+        return $this->templates->render($template, $this->tokensFor($card));
+    }
+
+    /** The same card, as PDF bytes at the template's paper size. */
+    public function renderPdf(StudentIdCard $card): string
+    {
+        $template = $this->templateFor($card);
+
+        return $this->renderer->render(
+            $template,
+            $this->templates->render($template, $this->tokensFor($card)),
+            (string) $card->getAttribute('card_number'),
+        );
+    }
+
+    /**
+     * The token map a card prints with.
+     *
+     * **The student's own details come off the snapshots, the institute's do not.** A card in a
+     * wallet must still say the name the student was enrolled under (INV-21-4), but the branch's
+     * phone number is a way to reach the institute *today* — printing a disconnected number from
+     * last year would make the card worse, not more faithful.
+     *
+     * `{photo}` and `{qr}` are `raw` tokens built here as `data:` URIs, so dompdf never makes a
+     * network request for either.
+     *
+     * @return array<string, string>
+     */
+    public function tokensFor(StudentIdCard $card): array
+    {
+        $branch = $card->branch;
+
+        return [
+            'card_number' => (string) $card->getAttribute('card_number'),
+            'verification_code' => $this->qr->forDisplay((string) $card->getAttribute('verification_code')),
+            'verification_url' => (string) $card->getAttribute('qr_payload'),
+            'qr' => $this->qrImageFor($card),
+            'issued_on' => app_date($card->getAttribute('issued_on')),
+            // A card with no expiry is a deliberate setting, not a missing value — so it says so
+            // rather than printing "Valid until" above a blank.
+            'valid_until' => $card->getAttribute('valid_until') === null
+                ? 'No expiry'
+                : app_date($card->getAttribute('valid_until')),
+
+            'student_name' => (string) $card->getAttribute('student_name_snapshot'),
+            'father_name' => (string) ($card->getAttribute('father_name_snapshot') ?? ''),
+            'student_code' => (string) $card->getAttribute('student_code_snapshot'),
+            'registration_number' => (string) ($card->getAttribute('registration_number_snapshot') ?? ''),
+            'guardian_phone' => (string) ($card->getAttribute('guardian_phone_snapshot') ?? ''),
+            'photo' => $this->photoImageFor($card),
+
+            'course_name' => (string) ($card->getAttribute('course_name_snapshot') ?? ''),
+            'batch_name' => (string) ($card->getAttribute('batch_name_snapshot') ?? ''),
+            'joining_date' => app_date($card->getAttribute('joining_date_snapshot')),
+
+            'company_name' => (string) setting('company.name', config('app.name')),
+            'company_logo' => '',
+            'branch_name' => (string) ($branch?->getAttribute('name') ?? ''),
+            'branch_phone' => (string) ($branch?->getAttribute('phone') ?? setting('contact.phone', '')),
+            'branch_address' => (string) ($branch?->getAttribute('address') ?? setting('contact.address', '')),
+        ];
+    }
+
+    /**
+     * The QR image, or an empty string when the template does not want one.
+     *
+     * Empty rather than a thrown exception: a template that omits `{qr}` is a legitimate design.
+     */
+    private function qrImageFor(StudentIdCard $card): string
+    {
+        $template = $card->template ?? $this->defaultTemplate();
+
+        if ($template !== null && ! (bool) $template->getAttribute('show_qr')) {
+            return '';
+        }
+
+        if (trim((string) $card->getAttribute('qr_payload')) === '') {
+            return '';
+        }
+
+        $size = (float) ($template?->getAttribute('qr_size_mm') ?? 14.0);
+
+        return sprintf(
+            '<img src="%s" alt="" style="width:%smm;height:%smm">',
+            $this->qr->forIdCard($card),
+            number_format($size, 2, '.', ''),
+            number_format($size, 2, '.', ''),
+        );
+    }
+
+    /**
+     * The student's photograph, inlined from the **private** disk as a `data:` URI.
+     *
+     * Read and inlined rather than linked, for two reasons that point the same way: dompdf cannot
+     * fetch a URL, and a student's photograph is a private artefact that never goes on the public
+     * disk (D21). A missing file prints nothing — a card with a broken-image icon on it is worse
+     * than a card with a gap where the photo should be, and the register already shows which cards
+     * have no photo.
+     */
+    private function photoImageFor(StudentIdCard $card): string
+    {
+        $path = trim((string) ($card->getAttribute('photo_path') ?? ''));
+
+        if ($path === '') {
+            return '';
+        }
+
+        $disk = Storage::disk('private');
+
+        if (! $disk->exists($path)) {
+            return '';
+        }
+
+        $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+
+        if (! in_array($extension, ['png', 'jpg', 'jpeg', 'gif', 'webp'], true)) {
+            return '';
+        }
+
+        $mime = $extension === 'jpg' ? 'jpeg' : $extension;
+
+        // No width is set here, deliberately: the card's layout is the template's business, and its
+        // stylesheet already reaches the image through `img { ... }`. A size baked in by the service
+        // would be one the designer cannot override.
+        return sprintf(
+            '<img src="data:image/%s;base64,%s" alt="">',
+            $mime,
+            base64_encode((string) $disk->get($path)),
+        );
+    }
+
+    private function defaultTemplate(): ?PrintTemplate
+    {
+        return PrintTemplate::query()
+            ->where('type', PrintTemplateType::StudentIdCard->value)
+            ->where('is_default', true)
+            ->where('is_active', true)
+            ->first();
+    }
+
     // ===========================================================================================
 
     /** Retire whatever card this student currently holds, so the new one can be the live row. */
@@ -411,13 +594,10 @@ final class StudentIdCardService
         throw new \RuntimeException('Could not generate an unused verification code after ten attempts.');
     }
 
+    /** The default template's id, for stamping onto a new card. One query, shared with the renderer. */
     private function defaultTemplateId(): ?int
     {
-        $template = PrintTemplate::query()
-            ->where('type', PrintTemplateType::StudentIdCard->value)
-            ->where('is_default', true)
-            ->where('is_active', true)
-            ->first(['id']);
+        $template = $this->defaultTemplate();
 
         return $template === null ? null : (int) $template->getKey();
     }
