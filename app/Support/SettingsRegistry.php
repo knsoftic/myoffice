@@ -4050,6 +4050,252 @@ final class SettingsRegistry
                 'span' => 6,
                 'sort' => 500,
             ],
+
+            // ---------------------------------------------------------------------------------
+            // phase-19-23 §5.1 — certificates and ID cards (Phase 21).
+            // ---------------------------------------------------------------------------------
+
+            'certificate_next_number' => [
+                'label' => 'Next certificate number',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1'],
+                'default' => 1,
+                // D62: a counter is never admin-editable. It is shown so somebody can see where the
+                // sequence has got to, and refused on post — only DocumentNumberService advances it,
+                // under a row lock, inside the issuing transaction.
+                'readonly' => true,
+                'help' => 'Advanced by the system when a certificate is issued. Shown, never edited.',
+                'span' => 3,
+                'sort' => 510,
+            ],
+            'certificate_number_format' => [
+                'label' => 'Certificate number format',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['required', 'string', 'max:64'],
+                'default' => '{PREFIX}{YY}{SEQ:5}',
+                'help' => 'Tokens: {PREFIX} {YY} {YYYY} {MM} {BRANCH} {SEQ:n}. The same convention '
+                    .'student numbers use, so one explanation covers both.',
+                'span' => 4,
+                'sort' => 520,
+            ],
+            'certificate_number_sequence_scope' => [
+                'label' => 'Restart the numbering',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string', 'in:global,yearly,branch_yearly'],
+                'default' => 'yearly',
+                'options' => [
+                    'global' => 'Never — one running sequence',
+                    'yearly' => 'Every year',
+                    'branch_yearly' => 'Every year, per branch',
+                ],
+                'span' => 4,
+                'sort' => 530,
+            ],
+            'certificate_number_period' => [
+                'label' => 'Current numbering period',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:32'],
+                'default' => null,
+                // Written by the service when the period rolls over. D62 again.
+                'readonly' => true,
+                'span' => 3,
+                'sort' => 540,
+            ],
+
+            // ------------------------------------------------------------------- eligibility (§84)
+
+            'certificate_require_pass' => [
+                'label' => 'They must have passed every major exam',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'A quiz is not a major exam — ExamType::isMajor() decides, so a weekly test '
+                    .'never blocks a certificate.',
+                'span' => 6,
+                'sort' => 550,
+            ],
+            'certificate_require_min_attendance' => [
+                'label' => 'They must have met the attendance minimum',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Checked against Attendance → minimum attendance, so the figure lives in '
+                    .'one place and this only says whether to apply it.',
+                'span' => 6,
+                'sort' => 560,
+            ],
+            'certificate_require_min_progress' => [
+                'label' => 'Minimum syllabus progress',
+                // TYPE_DECIMAL, not TYPE_NUMBER: STORAGE_TYPES maps NUMBER to `integer`, so a
+                // percentage declared as a number would be stored with its decimals shaved off and
+                // `100.0000` would round-trip as `100`. A percentage is decimal(8,4) everywhere else
+                // in this system and the setting has to agree with the column it is compared against.
+                'type' => self::TYPE_DECIMAL,
+                // `decimal:0,4` is what refuses exponent notation — `numeric` alone accepts `1E1`
+                // and stores a value no decimal(8,4) column can parse (D114).
+                'rules' => ['required', 'numeric', 'decimal:0,4', 'min:0', 'max:100'],
+                'default' => '100.0000',
+                'suffix' => '%',
+                'help' => 'How much of the syllabus must be marked covered. Zero turns the rule off.',
+                'span' => 3,
+                'sort' => 570,
+            ],
+            'certificate_require_fee_cleared' => [
+                'label' => 'Their fees must be cleared',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Asked of the fee ledger at the moment of issue, and the answer is '
+                    .'snapshotted onto the certificate as evidence.',
+                'span' => 6,
+                'sort' => 580,
+            ],
+            'certificate_require_enrollment_completed' => [
+                'label' => 'Their enrolment must be marked completed',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'span' => 6,
+                'sort' => 590,
+            ],
+            'certificate_grade_source' => [
+                'label' => 'Where the certificate’s grade comes from',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string', 'in:final_exam,best_exam,weighted_average,manual'],
+                'default' => 'weighted_average',
+                'options' => [
+                    'final_exam' => 'The final exam',
+                    'best_exam' => 'Their best exam',
+                    'weighted_average' => 'A weighted average of every exam',
+                    'manual' => 'Typed by whoever issues it',
+                ],
+                'help' => 'A weighted average reads each exam’s weight; an exam with none is weighted '
+                    .'equally with its peers.',
+                'span' => 6,
+                'sort' => 600,
+            ],
+            'certificate_issue_requires_approval' => [
+                'label' => 'A second person approves before a certificate is issued',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Adds the approve step to issuing, the same shape as checking a result '
+                    .'sheet — and for the same reason.',
+                'span' => 6,
+                'sort' => 610,
+            ],
+
+            // -------------------------------------------------- the public verification page (§84)
+
+            'certificate_verification_reveals' => [
+                'label' => 'What the public verification page shows',
+                'type' => self::TYPE_MULTISELECT,
+                'rules' => ['nullable', 'array'],
+                // INV-21-3 in one setting. Deliberately narrow by default: a verification page exists
+                // to confirm a document, not to publish a student record. A phone, email, CNIC,
+                // address, guardian, fee or collaborator field is NOT on the list at all and cannot
+                // be added by a query parameter or by widening this.
+                'default' => ['student_name', 'course_name', 'completion_date', 'grade'],
+                'options' => [
+                    'student_name' => 'Student name',
+                    'father_name' => 'Father’s name',
+                    'course_name' => 'Course',
+                    'batch_name' => 'Batch',
+                    'completion_date' => 'Completion date',
+                    'grade' => 'Grade',
+                    'percentage' => 'Percentage',
+                    'trainer_name' => 'Trainer',
+                    'attendance_percentage' => 'Attendance',
+                    'photo' => 'Photograph',
+                ],
+                'help' => 'Anyone with the code can see these. The status is always shown — a revoked '
+                    .'certificate says so, which is the point of the page.',
+                'span' => 6,
+                'sort' => 620,
+            ],
+            'certificate_verification_rate_limit_per_minute' => [
+                'label' => 'Verification attempts allowed per minute',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:1000'],
+                'default' => 20,
+                'help' => 'Per address. A visitor scanning their own certificate makes one attempt; '
+                    .'a stream of them is somebody walking the code space.',
+                'span' => 3,
+                'sort' => 630,
+            ],
+            'certificate_verification_log_retention_days' => [
+                'label' => 'Keep the verification log for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:3650'],
+                'default' => 365,
+                'suffix' => 'days',
+                'help' => 'Zero keeps it for ever. The log is the rate limiter’s evidence, so pruning '
+                    .'it short also shortens how far back an abuse pattern can be seen.',
+                'span' => 3,
+                'sort' => 640,
+            ],
+            'certificate_footer_note' => [
+                'label' => 'Certificate footer note',
+                'type' => self::TYPE_TEXTAREA,
+                'rules' => ['nullable', 'string', 'max:500'],
+                'default' => null,
+                'help' => 'Printed on every certificate through {footer_note}, unless a template '
+                    .'leaves that token out.',
+                'span' => 6,
+                'sort' => 650,
+            ],
+
+            // ------------------------------------------------------------------- ID cards (§85)
+
+            'id_card_prefix' => [
+                'label' => 'ID card number prefix',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:16', 'regex:/^[A-Za-z0-9\-\/]*$/'],
+                'default' => 'SIC-',
+                'span' => 3,
+                'sort' => 660,
+            ],
+            'id_card_next_number' => [
+                'label' => 'Next ID card number',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1'],
+                'default' => 1,
+                // D62.
+                'readonly' => true,
+                'span' => 3,
+                'sort' => 670,
+            ],
+            'id_card_validity_months' => [
+                'label' => 'A card is valid for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:120'],
+                'default' => 12,
+                'suffix' => 'months',
+                'help' => 'Zero issues cards with no expiry date. A dated card that has passed its '
+                    .'date is swept to “expired”; an undated one never is.',
+                'span' => 3,
+                'sort' => 680,
+            ],
+            'id_card_require_photo' => [
+                'label' => 'A card needs a photograph',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'The photograph is copied onto the card at issue time, so changing it later '
+                    .'never alters a card already in somebody’s wallet.',
+                'span' => 6,
+                'sort' => 690,
+            ],
+            'id_card_batch_print_max' => [
+                'label' => 'Most cards in one batch print',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:1000'],
+                'default' => 100,
+                'help' => 'A ceiling on one request, so a whole institute is never rendered into one '
+                    .'PDF by accident.',
+                'span' => 3,
+                'sort' => 700,
+            ],
         ];
     }
 

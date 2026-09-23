@@ -123,6 +123,22 @@ final class CertificateService
         $report = $this->eligibility->check($enrollment);
         $overrideReason = trim((string) $overrideReason);
 
+        // **`no_live_certificate` is not overridable, and every other rule is.**
+        //
+        // The difference is what kind of thing the rule is. Attendance, fees, progress and exam
+        // results are *judgements* — an institute may decide a student has earned a certificate
+        // despite one of them, and recording that decision with a reason is exactly what an override
+        // is for. "This enrolment already has an issued certificate" is not a judgement: it is what
+        // `uq_ce_live` enforces, so overriding it does not produce a second certificate, it produces
+        // a 1062 from the database with no explanation attached.
+        //
+        // Refusing it here means the person gets the sentence instead of the integrity error.
+        foreach ($report->failures() as $failure) {
+            if ($failure->key === 'no_live_certificate') {
+                throw CourseRuleException::refuse('eligibility', $failure->message);
+            }
+        }
+
         if (! $report->eligible()) {
             if ($overrideReason === '') {
                 throw CourseRuleException::refuse('eligibility', $report->summary());

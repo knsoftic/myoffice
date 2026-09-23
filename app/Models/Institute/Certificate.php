@@ -130,8 +130,14 @@ class Certificate extends Model
             // The *original* status decides, not the new one: a row moving from issued to revoked is
             // an issued row being changed, and reading the incoming value would let a revocation
             // smuggle a rewritten name through with it.
+            //
+            // **`getRawOriginal()`, not `getOriginal()`.** `getOriginal()` applies the model's casts,
+            // so it hands back a `CertificateStatus` and `(string)` on an enum is a fatal — which is
+            // what this line did for one commit. The hook then threw a TypeError on *every* update,
+            // including the print-count bump it is supposed to allow, so it failed in both directions
+            // at once: nothing could be edited, and the reason given was nonsense.
             $wasImmutable = CertificateStatus::tryFrom(
-                (string) $certificate->getOriginal('status')
+                (string) $certificate->getRawOriginal('status')
             )?->isImmutable() ?? false;
 
             if (! $wasImmutable) {

@@ -1040,13 +1040,55 @@ final class PermissionRegistry
                     self::LOGS,
                 ),
             ],
+            'print_templates' => [
+                'name' => 'Print Templates',
+                'group' => ModuleGroup::Institute,
+                'icon' => 'document-duplicate',
+                'is_core' => false,
+                'sort' => 695,
+                // §4.1. Separately grantable **because `body_html` is powerful**: a designer can be
+                // given the certificate layout with no sight of a student record at all, and
+                // conversely somebody who issues certificates all day has no reason to hold the
+                // ability that decides what HTML a PDF renderer is handed.
+                //
+                // `print` is the preview, which renders with PrintTokenRegistry's example values and
+                // never a real student's data — which is what makes the module safe to grant alone.
+                //
+                // No `restore`: a used template is retired rather than deleted (the model refuses the
+                // delete), so there is nothing to bring back.
+                'abilities' => self::merge(self::CRUD, self::STATUS, [Ability::Print]),
+            ],
             'certificates' => [
                 'name' => 'Certificates',
                 'group' => ModuleGroup::Institute,
                 'icon' => 'check-badge',
                 'is_core' => false,
                 'sort' => 700,
-                'abilities' => self::merge(self::CRUD, self::APPROVE, self::STATUS, self::FILES, [Ability::Export, Ability::Print], self::RESTORE),
+                // §4.2: READ + create + edit + APPROVE + STATUS + print + export + LOGS.
+                //
+                // **`view_logs` is the new one and it is load-bearing** — §4.4 puts
+                // `certificate_verifications` behind it, so without it the public-verification log has
+                // no gate and the abuse-detection screen has no permission to sit behind.
+                //
+                // **`delete` and `restore` stay**, unlike `results`. A *draft* certificate is a
+                // document nobody has been given, so deleting one is reasonable; the policy narrows
+                // the ability to drafts and the model refuses anything that gets past it (INV-21-1).
+                // An ability whose scope a policy narrows is a different thing from one no route can
+                // ever honour.
+                //
+                // **`upload` goes.** Nothing in this phase uploads to a certificate: the PDF is
+                // generated, the QR is generated, the signature images belong to the template. An
+                // ability nobody can use is an ability somebody grants by mistake — the same
+                // argument that removed `results.delete`.
+                'abilities' => self::merge(
+                    self::READ,
+                    [Ability::Create, Ability::Edit, Ability::Delete, Ability::Download, Ability::Print],
+                    self::APPROVE,
+                    self::STATUS,
+                    self::RESTORE,
+                    [Ability::Export],
+                    self::LOGS,
+                ),
             ],
             'student_id_cards' => [
                 'name' => 'Student ID Cards',
@@ -1054,7 +1096,23 @@ final class PermissionRegistry
                 'icon' => 'identification',
                 'is_core' => false,
                 'sort' => 710,
-                'abilities' => self::merge(self::CRUD, self::STATUS, [Ability::Export, Ability::Print], self::RESTORE),
+                // §4.2: READ + create + edit + STATUS + print + export + LOGS — **never `delete`**.
+                //
+                // Unlike a certificate there is no draft card: a card is numbered, snapshotted and
+                // printed in one step, so there is never a row nobody has been given. A card that was
+                // issued stays on the register — lost, damaged, replaced or revoked — and the model
+                // refuses the delete outright. Registering an ability the policy and the model both
+                // refuse would only let somebody grant it and wonder why it does nothing.
+                //
+                // `print` additionally gates **batch printing**, bounded by
+                // `institute.id_card_batch_print_max`.
+                'abilities' => self::merge(
+                    self::READ,
+                    [Ability::Create, Ability::Edit, Ability::Print],
+                    self::STATUS,
+                    [Ability::Export],
+                    self::LOGS,
+                ),
             ],
 
             /*
@@ -1606,6 +1664,10 @@ final class PermissionRegistry
         'grade_scales' => [],
         'exams' => ['batches'],
         'results' => ['exams'],
+        // A template depends on nothing: it holds no student data, and an institute may design one
+        // before it has a single student. An empty list is deliberate and is not the same as being
+        // absent — saying so stops somebody assuming it was forgotten.
+        'print_templates' => [],
         'certificates' => ['students', 'courses'],
         'student_id_cards' => ['students'],
 
