@@ -215,6 +215,8 @@ use App\Services\Cms\SitemapGenerator;
 use App\Services\Hr\EmployeeScopeResolver;
 use App\Services\Hr\WorkCalendarService;
 use App\Services\Institute\ScheduleClashDetector;
+use App\Services\Support\NotificationPreferenceService;
+use App\Services\Support\NotificationService;
 use App\Support\ClientPortalRegistry;
 use App\Support\Cms\PublicFormRateLimits;
 use App\Support\Cms\SectionRegistry;
@@ -243,6 +245,7 @@ use App\Support\Projects\NullProjectCreator;
 use App\Support\Referrals\NullReferralRecorder;
 use App\Support\SettingsRepository;
 use App\Support\SiteSettings;
+use App\Support\UnreadCounters;
 use Closure;
 use Illuminate\Auth\Access\Gate as AccessGate;
 use Illuminate\Contracts\Auth\Access\Gate as GateContract;
@@ -421,6 +424,15 @@ class AppServiceProvider extends ServiceProvider
         // against five profile tables three times over is fifteen queries to answer one question
         // that cannot have changed between them.
         $this->app->scoped(ParticipantResolver::class);
+
+        // phase-22 §6.19: the topbar of all five panels asks for the same three counts, and the bell
+        // for the same page of rows, several times per render. Both memoise per user; a fresh
+        // instance per resolve would give the layout, the drawer and the mobile header a cache each.
+        $this->app->scoped(UnreadCounters::class);
+        $this->app->scoped(NotificationService::class);
+        // The preference rows are a per-request cache with exactly one owner; a fresh instance per
+        // resolve would give the reader and the writer a copy each, and the reader's would be stale.
+        $this->app->scoped(NotificationPreferenceService::class);
 
         // phase-03 §5.3: the public views' only settings reader (stateless, so a singleton).
         $this->app->singleton(SiteSettings::class);

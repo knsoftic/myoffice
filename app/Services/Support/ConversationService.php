@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Services\Core\Concerns\WritesAuditTrail;
 use App\Services\Support\Exceptions\SupportRuleException;
 use App\Support\MessagingMatrix;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -292,7 +293,7 @@ final class ConversationService
      * **The one scope, stated once.** Every screen, every count and every export reads it — see the
      * class note for why it is the participant row and nothing else.
      */
-    public function threadsFor(User $user): \Illuminate\Database\Eloquent\Builder
+    public function threadsFor(User $user): Builder
     {
         return Conversation::query()->forUser($user)->recent();
     }

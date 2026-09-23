@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace App\Notifications\Cms;
 
 use App\Models\Cms\Page;
+use App\Notifications\Cms\Concerns\BuildsCmsNotification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Schema;
 use Throwable;
 
 /**
@@ -22,9 +22,8 @@ use Throwable;
  */
 final class ScheduledPagePublished extends Notification
 {
+    use BuildsCmsNotification;
     use Queueable;
-
-    private static ?bool $databaseChannelAvailable = null;
 
     public function __construct(
         public readonly int $pageId,
@@ -42,7 +41,12 @@ final class ScheduledPagePublished extends Notification
      */
     public function via(object $notifiable): array
     {
-        return self::databaseChannelAvailable() ? ['database'] : ['mail'];
+        // Through the trait, so this one reaches the same richer database channel as the rest — a
+        // hand-rolled `['database']` here would write a row with no `event_key`, which the column
+        // refuses.
+        $channels = $this->channelsFor($notifiable, ['database']);
+
+        return $channels === [] ? ['mail'] : $channels;
     }
 
     public function toMail(object $notifiable): MailMessage
@@ -78,18 +82,5 @@ final class ScheduledPagePublished extends Notification
         }
 
         return url('/'.$this->slug);
-    }
-
-    private static function databaseChannelAvailable(): bool
-    {
-        if (self::$databaseChannelAvailable === null) {
-            try {
-                self::$databaseChannelAvailable = Schema::hasTable('notifications');
-            } catch (Throwable) {
-                self::$databaseChannelAvailable = false;
-            }
-        }
-
-        return self::$databaseChannelAvailable;
     }
 }

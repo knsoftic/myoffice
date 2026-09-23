@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Notifications\Cms\Concerns;
 
+use App\Notifications\Channels\RichDatabaseChannel;
+use App\Support\NotificationRegistry;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
@@ -33,10 +35,51 @@ trait BuildsCmsNotification
             return in_array('mail', $channels, true) ? ['mail'] : [];
         }
 
-        return array_values(array_filter(
+        $kept = array_values(array_filter(
             $channels,
             static fn (string $channel): bool => $channel !== 'database' || self::databaseChannelAvailable(),
         ));
+
+        // Phase 22's `notifications` table is NOT NULL on `event_key`, `module` and `level`, which
+        // the stock database channel does not write — so every notification in this system goes
+        // through the richer one. Callers still say 'database'; only the delivery changes.
+        return array_map(
+            static fn (string $channel): string => $channel === 'database' ? RichDatabaseChannel::class : $channel,
+            $kept,
+        );
+    }
+
+    /**
+     * The bell columns for a notification written before the registry existed.
+     *
+     * **These classes predate Phase 22 and keep their own `toArray()`** (§10.3: "a phase that
+     * already ships a notification class keeps it"). Each one already returns a `kind`, a `module`
+     * and a `url`, which are exactly `event_key`, `module` and `url` under different names — so the
+     * mapping lives here once rather than being pasted into fourteen classes.
+     *
+     * `level` is looked up in the registry when the key is registered and falls back to `info`,
+     * because a row that claimed a level the registry disagreed with would colour the bell one way
+     * and the preference screen another.
+     *
+     * @param  mixed  $notifiable
+     * @return array<string, mixed>
+     */
+    public function databaseColumns($notifiable): array
+    {
+        $data = method_exists($this, 'toArray') ? (array) $this->toArray($notifiable) : [];
+
+        // `kind` is the convention; `type` is what one older class called it. Both are read here
+        // rather than renamed in the class, because `data` is already written that way in every row
+        // those classes have produced, and a rename would orphan them.
+        $key = trim((string) ($data['kind'] ?? $data['event_key'] ?? $data['type'] ?? ''));
+        $url = $data['url'] ?? null;
+
+        return [
+            'event_key' => mb_substr($key === '' ? 'system.notice' : $key, 0, 64),
+            'module' => isset($data['module']) ? mb_substr((string) $data['module'], 0, 64) : null,
+            'level' => NotificationRegistry::event($key)?->level->value ?? 'info',
+            'url' => is_string($url) && $url !== '' ? mb_substr($url, 0, 500) : null,
+        ];
     }
 
     /**

@@ -8,6 +8,10 @@ use App\Enums\PanelType;
 use App\Enums\Priority;
 use App\Enums\ReplyVisibility;
 use App\Enums\TicketStatus;
+use App\Models\Collaborator\Collaborator;
+use App\Models\Hr\Employee;
+use App\Models\Institute\Student;
+use App\Models\Institute\Teacher;
 use App\Models\Support\SupportTicket;
 use App\Models\Support\TicketDepartment;
 use App\Models\Support\TicketReply;
@@ -15,6 +19,7 @@ use App\Models\User;
 use App\Services\Core\Concerns\WritesAuditTrail;
 use App\Services\Finance\DocumentNumberService;
 use App\Services\Support\Exceptions\SupportRuleException;
+use App\Support\ClientContext;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -335,7 +340,7 @@ final class TicketService
             return $ticket;
         }
 
-        return DB::transaction(function () use ($ticket, $to, $reason, $actor): SupportTicket {
+        return DB::transaction(function () use ($ticket, $to, $reason): SupportTicket {
             $locked = SupportTicket::query()->whereKey($ticket->getKey())->lockForUpdate()->firstOrFail();
             $from = $locked->priority;
 
@@ -378,7 +383,7 @@ final class TicketService
             ));
         }
 
-        return DB::transaction(function () use ($ticket, $to, $reason, $actor): SupportTicket {
+        return DB::transaction(function () use ($ticket, $to, $reason): SupportTicket {
             $locked = SupportTicket::query()->whereKey($ticket->getKey())->lockForUpdate()->firstOrFail();
             $previous = $locked->department;
 
@@ -492,15 +497,15 @@ final class TicketService
      */
     private function subjectsFor(User $requester, array $data): array
     {
-        $context = app(\App\Support\ClientContext::class);
+        $context = app(ClientContext::class);
 
         return [
             'branch_id' => $requester->getAttribute('branch_id'),
             'client_id' => $context->inspect() === null ? $context->clientId() : null,
-            'student_id' => \App\Models\Institute\Student::query()->where('user_id', $requester->getKey())->value('id'),
-            'teacher_id' => \App\Models\Institute\Teacher::query()->where('user_id', $requester->getKey())->value('id'),
-            'collaborator_id' => \App\Models\Collaborator\Collaborator::query()->where('user_id', $requester->getKey())->value('id'),
-            'employee_id' => \App\Models\Hr\Employee::query()->where('user_id', $requester->getKey())->value('id'),
+            'student_id' => Student::query()->where('user_id', $requester->getKey())->value('id'),
+            'teacher_id' => Teacher::query()->where('user_id', $requester->getKey())->value('id'),
+            'collaborator_id' => Collaborator::query()->where('user_id', $requester->getKey())->value('id'),
+            'employee_id' => Employee::query()->where('user_id', $requester->getKey())->value('id'),
             'project_id' => $data['project_id'] ?? null,
             'course_id' => $data['course_id'] ?? null,
             'batch_id' => $data['batch_id'] ?? null,

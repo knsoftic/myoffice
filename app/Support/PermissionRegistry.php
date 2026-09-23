@@ -1362,7 +1362,11 @@ final class PermissionRegistry
                 'icon' => 'lifebuoy',
                 'is_core' => false,
                 'sort' => 1010,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::ASSIGN, self::FILES, self::RESTORE),
+                // `view_reports` is the SLA desk: §93's queue figures, first-response and resolution
+                // times, and the audience §10.3 names for `ticket.sla_breach` — a breach goes to the
+                // assignee and to whoever is accountable for the target, and that is this permission.
+                // `export` and `print` come with CRUD_FULL already, so only `view_reports` is new.
+                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::ASSIGN, self::FILES, self::RESTORE, self::REPORTS),
             ],
             'meetings' => [
                 'name' => 'Meetings',
