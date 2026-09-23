@@ -268,4 +268,30 @@ class Student extends Model
     {
         return $this->hasMany(DemoClass::class);
     }
+
+    /**
+     * Every certificate ever drafted, issued or revoked for this student (phase-19-23 §2.14).
+     *
+     * Not scoped to issued ones: the drafts and the revoked predecessors are part of the record, and
+     * a relation that hid them would make "has this student been certified?" and "what happened with
+     * this student's certificate?" two different questions with one accessor.
+     */
+    public function certificates(): HasMany
+    {
+        return $this->hasMany(Certificate::class, 'student_id');
+    }
+
+    /**
+     * Every ID card, live or retired (phase-19-23 §2.16).
+     *
+     * `uq_sic_live` permits one **active** card per student while every expired, lost, damaged and
+     * replaced predecessor coexists beside it — so this relation is a history, and a caller wanting
+     * the live one filters on `status`. The candidates screen relies on exactly that:
+     * `whereDoesntHave('student.idCards', status = active)` brings a student whose card was lost last
+     * term back into the list, which is the whole point of the screen.
+     */
+    public function idCards(): HasMany
+    {
+        return $this->hasMany(StudentIdCard::class, 'student_id');
+    }
 }
