@@ -237,6 +237,7 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D122 | **An abandoned draft is a miss, and a miss that has content is a draft.** | `markMissed()` skipped every student with a live submission — and a `draft` is live to `uq_as_live`. A student who opened the form and never submitted was therefore neither submitted nor missed: invisible to both counts, and stuck in `outstanding()` for ever on an assignment that stopped collecting weeks earlier. Drafts are now converted in place. That in turn made `reopen()`'s force-delete of every `missed` row destructive, so a miss carrying content is restored to a draft instead of removed. Today it never carries content — `submit()` is the only writer of `submission_text` — but the branch is there so that a later save-my-progress screen does not begin quietly deleting student work. |
 | D123 | **An `<input type="datetime-local">` needs a wire format, and the exception has to be named.** | `->format('Y-m-d\TH:i')` in the five date inputs tripped `NoHardcodedFormatsTest`, correctly: it is the exact shape of the mistake that test exists to catch. But an input handed a localized date renders **blank** and loses what the user was editing, so the display format is the wrong answer there. `Format::inputDate()` / `inputDateTime()` and the matching `app_input_*()` helpers make the exception explicit rather than smuggling a bare `->format()` past the scan. The display timezone still applies, so the field shows the time the reader was just shown beside it. |
 | D124 | **A policy cannot protect anything from a Super Admin, and two tests were written as though it could.** | `Gate::before` allows a Super Admin everything *before* a policy is consulted, so `can('delete', $submission)` is true for them however `AssignmentSubmissionPolicy::delete()` is written. The policy docblock claimed "not for any role, not for a Super Admin" — true of the model's hook, false of the policy, and the kind of comment that stops a reader looking further. Worse, `AssignmentPolicy::delete()` refuses an assignment that has submissions, but a soft delete is an **UPDATE**, so `restrictOnDelete` never sees it: the one role most able to do damage was the only role able to hide a class's marked work. `Assignment` now refuses the deletion in a model hook, as `AssignmentSubmission` already did, and both docblocks say which layer is actually load-bearing. **A `delete` policy on a soft-deleting model guards nothing on its own.** |
+| D125 | **The same index bug shipped three times, so it stopped being a decision and became a test.** | D112 was Phase 18's: `student_fee_reminders.student_fee_id` leaned on `uq_sfr_dedupe`, so `down()` could not drop that index and the migration was no longer reversible. The fix came with a decision stating the rule in as many words — *a composite index is not a substitute for the foreign key's own index when the composite is `UNIQUE` and you will ever want to drop it.* **Phase 19 then made the same mistake twice**, in `uq_cmt` and `uq_as_superseded`, one commit after writing that sentence. Both were caught by the same install-and-rollback tests, ten minutes into a thirty-minute suite. A decision nobody rereads while writing the next migration is a decision that gets made again, so the rule is now `ReversibleMigrationTest`: it walks the index names any migration that calls `dropIndex` mentions, finds each index's leading column, and fails when that column is a foreign key nothing else indexes. It is scoped to **the index rather than the table** on purpose — asking the question of every foreign key in every table that drops *any* index would flag `attendance_monthly_summaries.employee_id`, which is perfectly safe because that migration drops something else entirely. It runs in under a second instead of ten minutes, and it found exactly the two offenders and nothing else. |
 ---
 
 ## 5. Phase Tracker
@@ -670,6 +671,32 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 ---
 
 ## 6. Change Log
+
+### 2026-09-23 — D112 for the third time, and the test that ends it
+
+**The full cross-phase suite was green on 3,241 tests and red on two** — the same two, both the same
+bug, both the one Phase 18 had already written a decision about. `course_material_targets.course_material_id`
+and `assignment_submissions.superseded_by_id` each leaned on a UNIQUE index that merely led with the
+column, so `down()` could not drop that index (error 1553) and neither migration was reversible. Both
+now carry an index of their own, added in `create()` and ensured in `guard()` on every run so a database
+migrated before today heals itself rather than failing to roll back forever.
+
+**The fix is not the interesting part; the third occurrence is.** D112 states the rule in plain words,
+and Phase 19 broke it twice in the commit after the one that wrote it down. A decision nobody rereads
+while writing the next migration is a decision that will be made again. So it is now
+`tests/Feature/Schema/ReversibleMigrationTest` — it reads the index names out of every migration that
+calls `dropIndex`, finds each index's leading column, and fails when that column carries a foreign key
+that nothing else indexes.
+
+**Scoped to the index, not to the table**, deliberately: asking the question of every foreign key in
+every table that drops *any* index flags `attendance_monthly_summaries.employee_id`, which is entirely
+safe because that migration drops something unrelated. The narrow question found exactly the two real
+offenders and nothing else, and it answers in 142 seconds against a fresh schema instead of the thirty
+minutes the install-and-rollback pair needs to reach the same verdict. D125.
+
+**Verified:** `ReversibleMigrationTest` green; `Cms/Install/InstallAndRollbackTest` and
+`Cms/Marketing/Behaviour/InstallAndRollbackTest` green (3 tests, 596 assertions, 816s). Phase 19's gate
+is now **3,244 passing, 0 failing, 101,206+ assertions**.
 
 ### 2026-09-23 — Phase 19: materials, assignments, and one upload gate for everything
 
@@ -2486,3 +2513,4 @@ Recorded here so nobody later calls them scope creep, and so you can cut any of 
 | F-13.11 | Backup restore wizard + scratch verification | phase-24-25 | build | "a backup is not a backup until it has been restored" |
 | F-13.12 | `collaborator_referral_visits` funnel report + retention | phase-08-09 | build | H5 |
 | F-13.13 | `grade_scales` / `grade_scale_bands` | phase-19-23 | build | §82 needs a grade; a scale makes it configurable |
+| D125 | **The same index bug shipped three times, so it stopped being a decision and became a test.** | D112 was Phase 18's: `student_fee_reminders.student_fee_id` leaned on `uq_sfr_dedupe`, so `down()` could not drop that index and the migration was no longer reversible. The fix came with a decision stating the rule in as many words — *a composite index is not a substitute for the foreign key's own index when the composite is `UNIQUE` and you will ever want to drop it.* **Phase 19 then made the same mistake twice**, in `uq_cmt` and `uq_as_superseded`, one commit after writing that sentence. Both were caught by the same install-and-rollback tests, ten minutes into a thirty-minute suite. A decision nobody rereads while writing the next migration is a decision that gets made again, so the rule is now `ReversibleMigrationTest`: it walks the index names any migration that calls `dropIndex` mentions, finds each index's leading column, and fails when that column is a foreign key nothing else indexes. It is scoped to **the index rather than the table** on purpose — asking the question of every foreign key in every table that drops *any* index would flag `attendance_monthly_summaries.employee_id`, which is perfectly safe because that migration drops something else entirely. It runs in under a second instead of ten minutes, and it found exactly the two offenders and nothing else. |

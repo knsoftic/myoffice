@@ -133,6 +133,11 @@ return new class extends Migration
             $table->index(['status', 'is_late'], 'idx_asub_late');
             $table->index('student_batch_enrollment_id', 'idx_asub_enrollment');
             $table->index('amended_by', 'idx_asub_amender');
+            // `superseded_by_id` gets its own index even though `uq_as_superseded` covers it. InnoDB
+            // satisfies the foreign key with the unique one, and `down()` then cannot drop that index
+            // (error 1553) — so the migration stops being reversible. This is **D112** again, in the
+            // phase after the one that learned it.
+            $table->index('superseded_by_id', 'idx_asub_superseded');
 
             // restrictOnDelete on both parents: an assignment or a student with submitted work is
             // never removed out from under it. §2.7 states it for the assignment; the same reason
@@ -167,6 +172,12 @@ return new class extends Migration
      */
     private function guards(): void
     {
+        // Ensured on every run: a database migrated before this index existed still has its foreign
+        // key leaning on `uq_as_superseded`, and would fail to roll back.
+        if (! RawSchema::indexExists(self::TABLE, 'idx_asub_superseded')) {
+            RawSchema::index(self::TABLE, 'idx_asub_superseded', ['superseded_by_id']);
+        }
+
         // NULL for `superseded` is deliberate — see the class note. MariaDB's tolerance of NULLs in a
         // unique index is the mechanism, not an accident being worked around.
         if (! Schema::hasColumn(self::TABLE, 'current_guard')) {
@@ -226,7 +237,8 @@ return new class extends Migration
     public function down(): void
     {
         // Indexes before columns: dropping a column an index reads is error 1553, and the rollback
-        // test runs this over a table holding rows.
+        // test runs this over a table holding rows. `idx_asub_superseded` is what makes dropping
+        // `uq_as_superseded` legal — the foreign key on that column needs an index of its own (D112).
         if (Schema::hasTable(self::TABLE)) {
             foreach (['uq_as_live', 'uq_as_attempt', 'uq_as_superseded'] as $index) {
                 if (RawSchema::indexExists(self::TABLE, $index, true)) {

@@ -63,6 +63,12 @@ return new class extends Migration
 
             $table->timestamps();
 
+            // `course_material_id` gets its own index even though `uq_cmt` leads with it. InnoDB
+            // requires *an* index on a foreign key column and will happily use the unique one — which
+            // then cannot be dropped while the FK exists (error 1553), so `down()` fails and the
+            // migration stops being reversible. This is **D112**, and it is here because writing the
+            // index list from the contract is not the same as checking the rule.
+            $table->index('course_material_id', 'idx_cmt_material');
             // The (target_type, target_key) lookup index is added in guard(), once the generated
             // column it reads exists.
             $table->index('target_batch_id', 'idx_cmt_batch');
@@ -89,6 +95,12 @@ return new class extends Migration
      */
     private function guard(): void
     {
+        // Ensured on every run, not only on create: a database migrated before this index existed
+        // still has its foreign key leaning on `uq_cmt`, and would fail to roll back.
+        if (! RawSchema::indexExists(self::TABLE, 'idx_cmt_material')) {
+            RawSchema::index(self::TABLE, 'idx_cmt_material', ['course_material_id']);
+        }
+
         if (! Schema::hasColumn(self::TABLE, 'target_key')) {
             RawSchema::generatedColumn(
                 self::TABLE,
@@ -125,6 +137,8 @@ return new class extends Migration
     {
         // The indexes read the generated column, so they go first: dropping a column an index depends
         // on is error 1553, and the rollback test runs this over a table holding rows.
+        // `idx_cmt_material` is what makes dropping `uq_cmt` legal at all — without it the
+        // `course_material_id` foreign key would be left with no index (D112).
         if (Schema::hasTable(self::TABLE)) {
             if (RawSchema::indexExists(self::TABLE, 'uq_cmt', true)) {
                 RawSchema::dropIndex(self::TABLE, 'uq_cmt');
