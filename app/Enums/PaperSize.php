@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Enums;
 
+use App\Enums\Concerns\HasOptions;
+
 /**
  * What a printable document is printed on (phase-19-23 §3.3).
  *
@@ -18,6 +20,8 @@ namespace App\Enums;
  */
 enum PaperSize: string
 {
+    use HasOptions;
+
     case A4 = 'a4';
     case A5 = 'a5';
     case Letter = 'letter';

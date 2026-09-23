@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Enums;
 
+use App\Enums\Concerns\HasOptions;
+
 /**
  * Which way up a printable document is laid out (phase-19-23 §3.3).
  *
@@ -12,6 +14,8 @@ namespace App\Enums;
  */
 enum PageOrientation: string
 {
+    use HasOptions;
+
     case Portrait = 'portrait';
     case Landscape = 'landscape';
 

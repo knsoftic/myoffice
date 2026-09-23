@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Enums;
 
+use App\Enums\Concerns\HasOptions;
+
 /**
  * Where a certificate has got to (phase-19-23 §3.3, requirement §84).
  *
@@ -21,6 +23,8 @@ namespace App\Enums;
  */
 enum CertificateStatus: string
 {
+    use HasOptions;
+
     /** Being prepared. Editable, unnumbered, and nobody has it. */
     case Draft = 'draft';
 

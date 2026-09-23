@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Enums;
 
+use App\Enums\Concerns\HasOptions;
+
 /**
  * Which printable document a template designs (phase-19-23 §3.3, [D-21-1]).
  *
@@ -18,6 +20,8 @@ namespace App\Enums;
  */
 enum PrintTemplateType: string
 {
+    use HasOptions;
+
     case Certificate = 'certificate';
     case StudentIdCard = 'student_id_card';
     case ResultCard = 'result_card';

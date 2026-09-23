@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Enums;
 
+use App\Enums\Concerns\HasOptions;
+
 /**
  * The state of a student's ID card (phase-19-23 §3.3, requirement §85).
  *
@@ -20,6 +22,8 @@ namespace App\Enums;
  */
 enum IdCardStatus: string
 {
+    use HasOptions;
+
     /** In the student's hand and valid. */
     case Active = 'active';
 
