@@ -724,7 +724,9 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 | [x] | `NotificationRegistry` (53 events), `NotificationService`, `NotificationPreferenceService`, `UnreadCounters`, and `RichDatabaseChannel` — the columns the stock channel could not write (D146) |
 | [x] | Six listeners wiring tickets, meetings and messages to the bell, and `FeeReminderService` switched from a `class_exists()` guard that was never going to fire to a real dispatch |
 | [x] | Seven policies over §9.4's table, and a probe that found `messages.view_any` granted to two roles the contract grants it to nobody (D149) |
-| [ ] | Routes, controllers and the screens across all five panels |
+| [x] | 40 admin routes, five controllers, five Form Requests and 21 screens — every one rendered through the HTTP kernel, plus the shared bell across four panels |
+| [x] | The Workspace sidebar group, whose Phase 1 placeholder pointed at a route name that never existed and gated Messages on a permission nobody holds |
+| [ ] | The four portal panels' ticket, meeting and message screens, and the client panel's bell migration off Phase 5's controller |
 | [ ] | The scheduled commands: `meetings:send-reminders`, the SLA breach sweep, the daily digest, the retention prune |
 | [ ] | The trigger call sites Phases 19-21 own — the registry entries exist and are preference-able; each act needs one `dispatch()` in its own phase's service |
 
@@ -735,6 +737,55 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 ---
 
 ## 6. Change Log
+
+### 2026-09-23 — Phase 22 screens: 40 routes, five controllers, twenty-one screens
+
+**Every GET screen rendered through the HTTP kernel against real data — 21 of 21**, and the probe
+earned its place on the first run: the ticket queue and the SLA desk were both 500s, because I had
+written `sla_resolution_due_at` and `last_activity_at` and the columns are `resolution_due_at` and
+`last_reply_at`. Neither lint nor any unit test sees a column name inside an `ORDER BY` string; the
+only thing that finds it is rendering the page.
+
+**The sidebar's Workspace group had been a placeholder since Phase 1, and carried two bugs.** It
+pointed at `admin.support-tickets.index` — the module slug, not the route name §7.6 gives. And it
+gated Messages on `messages.view_any`, the compliance reader's permission that §9.4 grants to nobody
+and that the migration earlier today withdrew from Admin and Support Agent. Left alone, the
+messaging screen would have been invisible to everybody meant to use it. It is `messages.view` now,
+and Support Tickets and Meetings take either of their two permissions, because §9.4 narrows the
+*query* rather than the menu.
+
+**The bell is one routes file and one Blade partial.** §7.7 says it behaves identically on all five
+panels; the only honest way to guarantee that is not to write it five times.
+`routes/notifications.php` is included by each panel's own group so it inherits the prefix and the
+middleware, and `NotificationController::panel()` reads the current panel from the **route name**
+rather than the URL — which is what lets one controller and one partial serve them all.
+
+**The client panel still runs Phase 5's own bell**, whose view expects a different set of variables.
+Migrating it is listed below rather than done, so it cannot become the silent drift §7.7 warns
+about.
+
+**The recipient picker asks `MessagingMatrix`, not the user table** (§8.13). A picker built from the
+user table would offer a student every client in the installation, refuse each one on submit, and
+hand out a directory of everybody's name on the way.
+
+**A clash the institute allowed is shown rather than swallowed.** `MeetingService` refuses a room
+double-booking and returns the rest as warnings; the controller flashes them as a second message
+naming each conflict, because a booking that quietly overlapped somebody else's is one nobody
+discovers until they are both standing in the corridor.
+
+**Files.** `routes/{admin,student,teacher,collaborator}.php`, `routes/notifications.php`,
+`app/Http/Controllers/Admin/Support/` (four controllers), `app/Http/Controllers/Support/NotificationController.php`,
+`app/Http/Requests/Admin/Support/` (five requests), `app/Support/Sidebar.php`,
+`resources/views/admin/{tickets,meetings,messages,ticket-departments,notifications}/`,
+`resources/views/support/notifications/` (the two shared partials),
+`resources/views/{student,teacher,collaborator}/notifications/`,
+`tests/Feature/Modules/SidebarVisibilityTest.php`.
+
+**Still owed by Phase 22:** the four portal panels' ticket, meeting and message screens; the client
+panel's bell migration; and the scheduled commands — `meetings:send-reminders`, the SLA breach
+sweep, the daily digest and the retention prune. The trigger call sites in Phases 19-21 are still
+outstanding too: their registry entries exist and are preference-able, but the services that perform
+those acts do not yet dispatch them.
 
 ### 2026-09-23 — Phase 22 policies, and a permission three roles should never have held
 
@@ -2736,6 +2787,8 @@ The two HIGH findings are both real and are being fixed now:
 
 | Date | What was tested | Command / method | Result |
 |---|---|---|---|
+| 2026-09-23 | Every Phase 22 admin screen | 21 GET routes through the HTTP kernel against live data, rolled back | PASS — **21/21**, after finding two 500s on the first run: the queue and the SLA desk both ordered on column names I had guessed (`sla_resolution_due_at`, `last_activity_at`) rather than the ones the table has |
+| 2026-09-23 | Sidebar after the Workspace group | `DB_DATABASE=my_office_test php artisan test --filter=SidebarVisibility` | PASS — **9 tests / 226 assertions**; the five new entries appear for a Super Admin, and `Files` and `Reports` stay hidden until Phase 23 registers their routes |
 | 2026-09-23 | The Phase 22 policies | probe over §9.4's table, rolled back | PASS — **54/54**, and one real finding on the way: a client sees their firm's shared ticket and not its private one and not another firm's; a requester may reply and reopen and may never set a priority, assign, or write an internal note; an internal note is invisible to the requester; being in the room is what grants a meeting, and removing somebody revokes it at once; a student never writes minutes and reads them only once the meeting is completed; `messages.view_any` reads and never writes; somebody who left a thread loses it; a desk with tickets cannot be deleted but can be retired; and for every invariant the gate says yes to a Super Admin while the model still throws |
 | 2026-09-23 | The notification layer | behavioural probe over 12 sections, rolled back | PASS — **75/75**: the registry's 53 events and their groups, an unknown key throwing with a named near miss, the row's five columns, inactive / missing / unpermitted recipients each counted separately, preferences saved, cleared when they agree with the default and ignored when they try to mute a mandatory event, the master mail switch, a disabled module silencing its events and then the bell itself, the page-plus-one bell query, archive-is-not-delete, the memoised counters, and `dispatchToPermission` resolving to exactly the holders |
 | 2026-09-23 | The pre-Phase-22 notification classes | probe against the table that did not exist when they were written | PASS — **9/9**: a Crm and a Cms notification both land, carrying their own `kind` (and, for the one that called it `type`, that) promoted to `event_key`, with the module, a level and the deep link they already built, and `data` untouched so rows written before today still read |
