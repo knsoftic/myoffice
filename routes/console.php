@@ -296,3 +296,52 @@ Schedule::command('fees:generate-monthly')->dailyAt('00:20')->withoutOverlapping
 Schedule::command('fees:mark-overdue')->dailyAt('01:00')->withoutOverlapping(30);
 Schedule::command('fees:verify-plan-integrity')->dailyAt('02:10')->withoutOverlapping(30);
 Schedule::command('fees:installment-reminders')->dailyAt('09:00')->withoutOverlapping(30);
+
+/*
+|--------------------------------------------------------------------------
+| Phase 22 — tickets, meetings, notifications (phase-19-23 sec 10.5)
+|--------------------------------------------------------------------------
+|
+| Every one of these is idempotent at its source rather than at its schedule,
+| which is the only kind of idempotence `withoutOverlapping` cannot give you.
+|
+| `tickets:sla-sweep` runs every ten minutes and notifies at most twice in a
+| ticket's life - once per kind - because the breach booleans are stamped in the
+| same transaction that selects the row. A sweep that asked "is it past the
+| target" instead would page the assignee 144 times a day about one ticket.
+|
+| `meetings:send-reminders` is the `crm:follow-up-reminders` pattern exactly:
+| the stamp goes inside the transaction, the notification after it commits. A
+| crash between the two loses one reminder and never sends two, which is the
+| right way round.
+|
+| `meetings:close-past` waits two hours past the end. A meeting that overruns is
+| still a meeting, and marking it missed while people are in the room is how a
+| status column stops being believed.
+|
+| `notifications:prune` deletes only ARCHIVED rows past the retention window. An
+| unread notification is somebody's outstanding record of being told something,
+| and age is not consent - it is never pruned, however old.
+|
+| The two recount jobs repair caches rather than reporting on them, which is the
+| opposite of `fees:verify-plan-integrity` above and deliberately so: an
+| open-ticket count is a convenience with no money behind it, and the drift is
+| not evidence of anything worth preserving.
+|
+*/
+
+Schedule::command('tickets:sla-sweep')->everyTenMinutes()->withoutOverlapping(10);
+Schedule::command('tickets:auto-close')->dailyAt('01:10')->withoutOverlapping(30);
+Schedule::command('tickets:recount-departments')->dailyAt('01:15')->withoutOverlapping(30);
+
+Schedule::command('meetings:send-reminders')->everyFiveMinutes()->withoutOverlapping(10);
+Schedule::command('meetings:close-past')->hourly()->withoutOverlapping(30);
+
+// The digest hour is a setting, so the schedule reads it rather than hard-coding
+// 08:00 — an institute that moved it would otherwise have a screen that says one
+// time and a scheduler that keeps the other.
+Schedule::command('notifications:digest')
+    ->dailyAt((string) setting('support.notification_digest_hour', '08:00'))
+    ->withoutOverlapping(30);
+
+Schedule::command('notifications:prune')->weeklyOn(1, '03:30')->withoutOverlapping(60);

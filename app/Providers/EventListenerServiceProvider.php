@@ -26,6 +26,7 @@ use App\Events\Finance\PaymentReversalRejected;
 use App\Events\Finance\ProjectPaymentRecorded;
 use App\Events\Finance\StudentFeePaymentRecorded;
 use App\Events\Support\MeetingCancelled;
+use App\Events\Support\MeetingReminderDue;
 use App\Events\Support\MeetingRescheduled;
 use App\Events\Support\MeetingScheduled;
 use App\Events\Support\MeetingUpdated;
@@ -33,6 +34,7 @@ use App\Events\Support\MessageSent;
 use App\Events\Support\TicketAssigned;
 use App\Events\Support\TicketCreated;
 use App\Events\Support\TicketReplied;
+use App\Events\Support\TicketSlaBreached;
 use App\Events\Support\TicketStatusChanged;
 use App\Listeners\Cms\FlushPublicContentCache;
 use App\Listeners\Cms\LogApplicationStage;
@@ -59,8 +61,10 @@ use App\Listeners\RecordFailedLogin;
 use App\Listeners\RecordLogout;
 use App\Listeners\RecordSuccessfulLogin;
 use App\Listeners\Support\NotifyMeetingParticipants;
+use App\Listeners\Support\NotifyOfMeetingReminder;
 use App\Listeners\Support\NotifyOfNewMessage;
 use App\Listeners\Support\NotifyOfNewTicket;
+use App\Listeners\Support\NotifyOfSlaBreach;
 use App\Listeners\Support\NotifyOfTicketAssignment;
 use App\Listeners\Support\NotifyOfTicketReply;
 use App\Listeners\Support\NotifyOfTicketStatusChange;
@@ -161,6 +165,12 @@ final class EventListenerServiceProvider extends ServiceProvider
         MeetingUpdated::class => [[NotifyMeetingParticipants::class, 'updated']],
         MeetingRescheduled::class => [[NotifyMeetingParticipants::class, 'rescheduled']],
         MeetingCancelled::class => [[NotifyMeetingParticipants::class, 'cancelled']],
+
+        // The two the sweeps raise (§10.5). Both are already idempotent at their source — the
+        // breach booleans and `reminder_sent_at` are stamped inside the transaction that selects
+        // the row — so neither listener has to guard against a second send.
+        TicketSlaBreached::class => [NotifyOfSlaBreach::class],
+        MeetingReminderDue::class => [NotifyOfMeetingReminder::class],
     ];
 
     public function register(): void

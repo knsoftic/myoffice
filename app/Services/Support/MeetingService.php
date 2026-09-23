@@ -16,6 +16,7 @@ use App\Enums\MeetingStatus;
 use App\Enums\PanelType;
 use App\Enums\ParticipantType;
 use App\Events\Support\MeetingCancelled;
+use App\Events\Support\MeetingReminderDue;
 use App\Events\Support\MeetingRescheduled;
 use App\Events\Support\MeetingScheduled;
 use App\Events\Support\MeetingUpdated;
@@ -795,6 +796,135 @@ final class MeetingService
                     ->whereHas('participants', fn (Builder $p) => $p->where('user_id', $user->getKey())));
             }
         });
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | The sweeps (§10.5)
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * `meetings:send-reminders`, every five minutes.
+     *
+     * **The stamp goes inside the transaction and the notification after it**, which is the
+     * `crm:follow-up-reminders` pattern and the only arrangement a crash cannot turn into a double
+     * send. Stamping after dispatch would re-send everything the next run; dispatching inside the
+     * transaction would send a reminder for a row a rollback removed.
+     *
+     * **`skipLocked` rather than waiting.** Two workers reaching the same meeting is ordinary on a
+     * five-minute schedule; the second one skipping it and doing useful work beats it blocking.
+     *
+     * **A declined participant is not reminded.** They said they were not coming; reminding them is
+     * the system arguing.
+     *
+     * @return int how many meetings were reminded about
+     */
+    public function sendDueReminders(?CarbonImmutable $asOf = null, int $limit = 200): int
+    {
+        $asOf ??= CarbonImmutable::now();
+        $limit = max(1, min(1000, $limit));
+
+        $due = Meeting::query()
+            ->where('status', MeetingStatus::Scheduled->value)
+            ->whereNull('reminder_sent_at')
+            ->whereNotNull('reminder_minutes_before')
+            ->where('reminder_minutes_before', '>', 0)
+            ->where('scheduled_at', '>', $asOf)
+            ->whereRaw('`scheduled_at` <= ? + INTERVAL `reminder_minutes_before` MINUTE', [$asOf])
+            ->orderBy('scheduled_at')
+            ->limit($limit)
+            ->pluck('id')
+            ->all();
+
+        if ($due === []) {
+            return 0;
+        }
+
+        $reminded = [];
+
+        foreach ($due as $id) {
+            DB::transaction(function () use ($id, $asOf, &$reminded): void {
+                $meeting = Meeting::query()
+                    ->whereKey($id)
+                    ->whereNull('reminder_sent_at')
+                    ->lockForUpdate()
+                    ->first();
+
+                if (! $meeting instanceof Meeting) {
+                    return;
+                }
+
+                $meeting->forceFill(['reminder_sent_at' => $asOf])->save();
+                $reminded[] = $meeting;
+            });
+        }
+
+        foreach ($reminded as $meeting) {
+            MeetingReminderDue::dispatch($meeting);
+        }
+
+        return count($reminded);
+    }
+
+    /**
+     * `meetings:close-past`, hourly.
+     *
+     * A meeting whose time passed more than two hours ago is over, whatever the diary still says.
+     * **Attendance decides which ending it gets**: somebody marked the register, so it happened —
+     * `completed`. Nobody did, and nobody ever will now — `missed`.
+     *
+     * Two hours rather than zero because a meeting that overruns is still a meeting, and marking it
+     * missed while people are in the room is the kind of thing that teaches everybody to ignore the
+     * status column.
+     *
+     * @return array{completed: int, missed: int}
+     */
+    public function closePast(?CarbonImmutable $asOf = null, int $limit = 500): array
+    {
+        $asOf ??= CarbonImmutable::now();
+        $cutoff = $asOf->subHours(2);
+        $limit = max(1, min(5000, $limit));
+
+        $ids = Meeting::query()
+            ->where('status', MeetingStatus::Scheduled->value)
+            ->whereNotNull('ends_at')
+            ->where('ends_at', '<', $cutoff)
+            ->orderBy('scheduled_at')
+            ->limit($limit)
+            ->pluck('id')
+            ->all();
+
+        $completed = 0;
+        $missed = 0;
+
+        foreach (array_chunk($ids, 50) as $chunk) {
+            DB::transaction(function () use ($chunk, &$completed, &$missed): void {
+                $meetings = Meeting::query()
+                    ->whereIn('id', $chunk)
+                    ->where('status', MeetingStatus::Scheduled->value)
+                    ->lockForUpdate()
+                    ->get();
+
+                foreach ($meetings as $meeting) {
+                    $attended = DB::table('meeting_participants')
+                        ->where('meeting_id', $meeting->getKey())
+                        ->whereNotNull('attendance_marked_at')
+                        ->exists();
+
+                    $meeting->status = $attended ? MeetingStatus::Completed : MeetingStatus::Missed;
+                    $meeting->save();
+
+                    $attended ? $completed++ : $missed++;
+
+                    $this->audit($meeting, $attended ? 'Meeting closed as completed' : 'Meeting closed as missed', [
+                        'attributes' => ['status' => $meeting->getRawOriginal('status')],
+                    ], self::MODULE);
+                }
+            });
+        }
+
+        return ['completed' => $completed, 'missed' => $missed];
     }
 
     /** Re-derive the four cached counts from the participant rows. */

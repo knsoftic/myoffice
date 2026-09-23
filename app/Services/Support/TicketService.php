@@ -455,6 +455,126 @@ final class TicketService
      * COUNT, never `++`: two replies landing at once would each read the old value and write the
      * same new one, and the ticket would say four replies when it has five.
      */
+    /*
+    |--------------------------------------------------------------------------
+    | The sweeps (§10.5)
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * `tickets:auto-close`, daily.
+     *
+     * A resolved ticket closes itself after `support.ticket_auto_close_resolved_days`, because a
+     * queue full of resolved-but-open tickets is a queue nobody can read at a glance.
+     *
+     * **Never a ticket whose requester replied after it was resolved.** That reply is somebody
+     * saying "it is not fixed"; closing it would be the system answering them with silence. The
+     * check is `last_reply_panel !== admin` since the resolution, which is the same column
+     * `awaitingUs()` reads — one definition of "the ball is in our court".
+     *
+     * @return int how many were closed
+     */
+    public function autoCloseResolved(?Carbon $asOf = null, int $limit = 500): int
+    {
+        $days = (int) setting('support.ticket_auto_close_resolved_days', 7);
+
+        if ($days <= 0) {
+            return 0;
+        }
+
+        $asOf ??= Carbon::now();
+        $cutoff = $asOf->copy()->subDays($days);
+
+        $ids = SupportTicket::query()
+            ->whereNull('deleted_at')
+            ->where('status', TicketStatus::Resolved->value)
+            ->whereNotNull('resolved_at')
+            ->where('resolved_at', '<', $cutoff)
+            // The requester has not written since. `last_reply_panel` is null on a ticket with no
+            // replies at all, which is also not a requester reply.
+            ->where(fn ($q) => $q->whereNull('last_reply_panel')->orWhere('last_reply_panel', PanelType::Admin->value))
+            ->orderBy('id')
+            ->limit(max(1, min(5000, $limit)))
+            ->pluck('id')
+            ->all();
+
+        $closed = 0;
+
+        foreach ($ids as $id) {
+            $ticket = SupportTicket::query()->find($id);
+
+            if (! $ticket instanceof SupportTicket) {
+                continue;
+            }
+
+            try {
+                $this->changeStatus($ticket, TicketStatus::Closed, 'Closed automatically after '.$days.' days resolved.', $this->systemActor($ticket));
+                $closed++;
+            } catch (SupportRuleException) {
+                // Somebody moved it between the select and the write. The next run will find it if
+                // it is still eligible, and a sweep that threw would abandon the rest of the batch.
+                continue;
+            }
+        }
+
+        return $closed;
+    }
+
+    /**
+     * `tickets:recount-departments`, daily.
+     *
+     * `open_tickets_count` is a cache, and §5's rule for every cache in this system applies: it must
+     * be re-derivable by counting. This is that repair, run nightly rather than trusted — a count
+     * that only ever drifted upward would look plausible for months.
+     *
+     * @return array{departments: int, repaired: int}
+     */
+    public function recountAllDepartments(): array
+    {
+        $open = array_map(
+            static fn (TicketStatus $status): string => $status->value,
+            array_values(array_filter(TicketStatus::cases(), static fn (TicketStatus $s): bool => $s->isOpen())),
+        );
+
+        $actual = DB::table('support_tickets')
+            ->selectRaw('ticket_department_id, COUNT(*) AS total')
+            ->whereNull('deleted_at')
+            ->whereIn('status', $open)
+            ->groupBy('ticket_department_id')
+            ->pluck('total', 'ticket_department_id');
+
+        $departments = TicketDepartment::query()->withTrashed()->get();
+        $repaired = 0;
+
+        foreach ($departments as $department) {
+            $should = (int) ($actual[$department->getKey()] ?? 0);
+
+            if ((int) $department->getAttribute('open_tickets_count') === $should) {
+                continue;
+            }
+
+            $department->forceFill(['open_tickets_count' => $should])->save();
+            $repaired++;
+        }
+
+        return ['departments' => $departments->count(), 'repaired' => $repaired];
+    }
+
+    /**
+     * Who a sweep acts as.
+     *
+     * The assignee when there is one, else the person who raised it — never null, because
+     * `changeStatus()` writes `closed_by` and an audit row, and "nobody did this" is not a thing
+     * that can be true of a status change. The system reply the transition writes says plainly that
+     * it was automatic, so the name on the row never claims somebody pressed a button.
+     */
+    private function systemActor(SupportTicket $ticket): User
+    {
+        $id = $ticket->getAttribute('assigned_to') ?? $ticket->getAttribute('user_id');
+
+        return User::query()->findOrFail($id);
+    }
+
     public function recountCaches(SupportTicket $ticket): void
     {
         $replies = TicketReply::query()->where('support_ticket_id', $ticket->getKey());

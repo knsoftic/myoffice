@@ -7,10 +7,13 @@ namespace App\Services\Support;
 use App\DataObjects\Support\SlaMinutes;
 use App\Enums\Priority;
 use App\Enums\TicketStatus;
+use App\Events\Support\TicketSlaBreached;
 use App\Models\Support\SupportTicket;
 use App\Services\Support\Exceptions\SupportRuleException;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * The response clock (phase-19-23 §6.16, INV-22-2, requirement §93).
@@ -190,6 +193,101 @@ final class TicketSlaService
     public function enabled(): bool
     {
         return (bool) setting('support.sla_enabled', true);
+    }
+
+    /**
+     * The ten-minute sweep: stamp what has breached, and tell somebody once (§10.5, F-13.5).
+     *
+     * **The booleans are the idempotency key, and that is the whole design.** A sweep that ran every
+     * ten minutes and notified on "is it past the target" would page the assignee 144 times a day
+     * about the same ticket. `first_response_breached` and `resolution_breached` start false, the
+     * `where` clause below selects only tickets where they are still false, and the update sets them
+     * inside the same transaction as the dispatch — so the second run selects nothing and sends
+     * nothing. A ticket can breach twice in its life, once per kind, and no more.
+     *
+     * **Bounded at 500 rows** (§10.5). A desk that has been down for a week has a week of breaches
+     * waiting; sweeping all of them in one run would hold the lock long enough for the next run to
+     * overlap it. Five hundred clears in seconds and the rest are picked up ten minutes later.
+     *
+     * **`skipLocked` rather than a queue.** Two workers reaching the same row is ordinary on a
+     * ten-minute schedule with `withoutOverlapping` only advisory; skipping a locked row lets the
+     * second worker do useful work instead of waiting for the first.
+     *
+     * @return array{first_response: int, resolution: int}
+     */
+    public function sweep(?CarbonImmutable $asOf = null, int $limit = 500): array
+    {
+        if (! $this->enabled()) {
+            Log::info('Ticket SLA sweep skipped: support.sla_enabled is off.');
+
+            return ['first_response' => 0, 'resolution' => 0];
+        }
+
+        $asOf ??= CarbonImmutable::now();
+        $limit = max(1, min(5000, $limit));
+
+        return [
+            'first_response' => $this->sweepKind('first_response', $asOf, $limit),
+            'resolution' => $this->sweepKind('resolution', $asOf, $limit),
+        ];
+    }
+
+    /**
+     * One kind of breach.
+     *
+     * The two differ in exactly three column names and one extra condition, so they share a method
+     * rather than being written twice — the alternative is two nearly identical blocks that drift
+     * the first time somebody fixes a bug in one of them.
+     */
+    private function sweepKind(string $kind, CarbonImmutable $asOf, int $limit): int
+    {
+        $dueColumn = $kind.'_due_at';
+        $breachedColumn = $kind.'_breached';
+        $metColumn = $kind === 'first_response' ? 'first_response_at' : 'resolved_at';
+
+        $ids = SupportTicket::query()
+            ->whereNull('deleted_at')
+            ->whereNotNull($dueColumn)
+            ->where($dueColumn, '<', $asOf)
+            ->where($breachedColumn, false)
+            ->whereNull($metColumn)
+            // A ticket parked on the customer is not late: `pause()` has already pushed the due
+            // dates forward, but a ticket that entered `waiting` between two sweeps may still be
+            // selected here on a stale date, and telling the desk it is late would be wrong.
+            ->where('status', '!=', TicketStatus::Waiting->value)
+            ->orderBy('id')
+            ->limit($limit)
+            ->pluck('id')
+            ->all();
+
+        if ($ids === []) {
+            return 0;
+        }
+
+        $stamped = [];
+
+        foreach (array_chunk($ids, 50) as $chunk) {
+            DB::transaction(function () use ($chunk, $breachedColumn, &$stamped): void {
+                $locked = SupportTicket::query()
+                    ->whereIn('id', $chunk)
+                    ->where($breachedColumn, false)
+                    ->lockForUpdate()
+                    ->get();
+
+                foreach ($locked as $ticket) {
+                    // Stamped inside the transaction, dispatched after it: a crash between the two
+                    // loses the notification and never the record, which is the right way round.
+                    $ticket->forceFill([$breachedColumn => true])->save();
+                    $stamped[] = $ticket;
+                }
+            });
+        }
+
+        foreach ($stamped as $ticket) {
+            TicketSlaBreached::dispatch($ticket, $kind);
+        }
+
+        return count($stamped);
     }
 
     // ===============================================================================================

@@ -276,6 +276,147 @@ final class NotificationService
             ->count();
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | Maintenance (§10.5)
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * `notifications:prune`, weekly.
+     *
+     * **Only archived rows, and only past the retention window.** An unread notification is never
+     * pruned however old it is: it is somebody's outstanding record of being told something, and
+     * age is not consent. `support.notification_retention_days = 0` means "keep everything", which
+     * is the honest reading of zero here — a zero-day retention that deleted everything nightly
+     * would be a footgun with a number on it.
+     *
+     * Chunked, because this table grows without bound by design (§2.25 archives, never deletes) and
+     * a single `DELETE` over a year of rows locks it for as long as it takes.
+     *
+     * @return int rows removed
+     */
+    public function pruneArchived(?Carbon $asOf = null, int $chunk = 1000): int
+    {
+        $days = (int) setting('support.notification_retention_days', 180);
+
+        if ($days <= 0) {
+            Log::info('Notification prune skipped: support.notification_retention_days is 0 (keep for ever).');
+
+            return 0;
+        }
+
+        $cutoff = ($asOf ?? Carbon::now())->copy()->subDays($days);
+        $removed = 0;
+
+        do {
+            $deleted = DB::table('notifications')
+                ->whereNotNull('archived_at')
+                ->where('archived_at', '<', $cutoff)
+                ->limit(max(100, $chunk))
+                ->delete();
+
+            $removed += $deleted;
+        } while ($deleted > 0);
+
+        $this->forgetBell();
+
+        return $removed;
+    }
+
+    /**
+     * `notifications:digest`, daily at `support.notification_digest_hour`.
+     *
+     * **A digest is assembled from what is already in the bell**, never from a second send: every
+     * row here was written by `dispatch()` when the event happened, and the digest is one mail
+     * listing the ones the person chose to have batched rather than mailed one at a time.
+     *
+     * Returns the assembled payloads rather than sending them, because the sending belongs to a
+     * queued job and this way a command can print what it would send without sending it.
+     *
+     * @return array<int, array{user: User, rows: Collection<int, object>}>
+     */
+    public function pendingDigests(?Carbon $asOf = null): array
+    {
+        if (! (bool) setting('support.notifications_mail_enabled', false)) {
+            Log::info('Notification digest skipped: mail is switched off for this installation.');
+
+            return [];
+        }
+
+        $asOf ??= Carbon::now();
+
+        // The people who asked for a digest of *something*. A preference row exists only where
+        // somebody differs from the default, so this is a small table however many users there are.
+        $wanted = DB::table('notification_preferences')
+            ->where('mail_enabled', true)
+            ->where('mail_digest', NotificationDigest::Daily->value)
+            ->get()
+            ->groupBy(static fn (object $row): int => (int) $row->user_id);
+
+        if ($wanted->isEmpty()) {
+            return [];
+        }
+
+        $users = User::query()
+            ->whereIn('id', $wanted->keys()->all())
+            ->where('status', UserStatus::Active->value)
+            ->get()
+            ->keyBy(static fn (User $user): int => (int) $user->getKey());
+
+        $out = [];
+
+        foreach ($wanted as $userId => $preferences) {
+            $user = $users->get((int) $userId);
+
+            if (! $user instanceof User) {
+                continue;
+            }
+
+            $keys = $preferences->pluck('event_key')->map(static fn ($k): string => (string) $k)->all();
+
+            $rows = DB::table('notifications')
+                ->where('notifiable_type', User::class)
+                ->where('notifiable_id', $userId)
+                ->whereIn('event_key', $keys)
+                ->whereNull('read_at')
+                ->whereNull('archived_at')
+                ->whereNull('emailed_at')
+                ->where('created_at', '>=', $asOf->copy()->subDay())
+                ->orderByDesc('created_at')
+                ->get();
+
+            if ($rows->isEmpty()) {
+                continue;
+            }
+
+            $out[] = ['user' => $user, 'rows' => $rows];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Mark a digest's rows as emailed, so tomorrow's does not repeat them.
+     *
+     * **Stamped after the mail is queued, not before**, and on the ids the digest actually carried —
+     * a stamp on "everything unread" would silently swallow a row that arrived between assembling
+     * the digest and sending it.
+     *
+     * @param  list<string>  $ids
+     */
+    public function markEmailed(array $ids, ?Carbon $asOf = null): int
+    {
+        if ($ids === []) {
+            return 0;
+        }
+
+        return DB::table('notifications')
+            ->whereIn('id', $ids)
+            ->whereNull('emailed_at')
+            ->update(['emailed_at' => $asOf ?? Carbon::now()]);
+    }
+
     /** Between requests a queued job may have written rows; a long command calls this. */
     public function forgetBell(): void
     {
