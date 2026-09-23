@@ -3966,6 +3966,90 @@ final class SettingsRegistry
                 'span' => 4,
                 'sort' => 430,
             ],
+
+            // ---------------------------------------------------------------------------------
+            // phase-19-23 §5.1 — exams and results.
+            // ---------------------------------------------------------------------------------
+
+            'default_grade_scale_id' => [
+                'label' => 'Default grade scale',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['nullable', 'integer', 'exists:grade_scales,id'],
+                // Null rather than an id: the seeder creates the DEFAULT scale and marks it
+                // `is_default`, and `GradeScaleService::resolveFor()` falls through to that row. A
+                // hardcoded `1` here would be wrong on any install whose first scale was something
+                // else, and there is no way for a default to know its own id.
+                'default' => null,
+                'options' => [],
+                'help' => 'Used by an exam that names no scale of its own. An exam with neither is '
+                    .'refused rather than graded on an assumption.',
+                'span' => 6,
+                'sort' => 440,
+            ],
+            'exam_default_passing_percentage' => [
+                'label' => 'Default pass mark',
+                'type' => self::TYPE_DECIMAL,
+                // `decimal:0,4` is what refuses exponent notation — `numeric` alone accepts `1E1`
+                // and stores a value no decimal(8,4) column can parse (D114).
+                'rules' => ['required', 'numeric', 'decimal:0,4', 'min:0', 'max:100'],
+                'default' => '40.0000',
+                'help' => 'Prefills a new exam’s pass mark as a percentage of what it is out of. The '
+                    .'exam’s own figure always wins once it is set.',
+                'suffix' => '%',
+                'span' => 3,
+                'sort' => 450,
+            ],
+            'result_publish_requires_verification' => [
+                'label' => 'A second person checks results before they go out',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'The checker must not be somebody who entered any of the marks. A sheet '
+                    .'entered by two people therefore needs a third to sign it off.',
+                'span' => 6,
+                'sort' => 460,
+            ],
+            'result_card_show_position' => [
+                'label' => 'Print the student’s position',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Ties share a position and the next one skips — three students on 88% are '
+                    .'all 2nd and the next is 5th.',
+                'span' => 4,
+                'sort' => 470,
+            ],
+            'result_card_show_attendance' => [
+                'label' => 'Print attendance on the result card',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'span' => 4,
+                'sort' => 480,
+            ],
+            'result_card_show_all_exams' => [
+                'label' => 'One card for the whole course',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Off prints one exam per card. On consolidates every published result for '
+                    .'the enrolment, which is what a parent usually wants to see.',
+                'span' => 4,
+                'sort' => 490,
+            ],
+            'progress_from_assessment' => [
+                'label' => 'Passing a topic’s exam marks the topic covered',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                // Default off. It writes to the syllabus register on somebody else's behalf, and a
+                // system that silently ticks off topics is one nobody trusts the register of.
+                'default' => false,
+                'help' => 'When an exam names a topic, publishing its results marks that topic covered '
+                    .'for every student who passed. Recorded as assessment-sourced progress, so it is '
+                    .'always distinguishable from a teacher’s own mark.',
+                'span' => 6,
+                'sort' => 500,
+            ],
         ];
     }
 

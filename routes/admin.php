@@ -96,12 +96,16 @@ use App\Http\Controllers\Admin\Institute\CourseMaterialController;
 use App\Http\Controllers\Admin\Institute\CourseOutlineController;
 use App\Http\Controllers\Admin\Institute\DemoClassController;
 use App\Http\Controllers\Admin\Institute\EnrollmentController;
+use App\Http\Controllers\Admin\Institute\ExamController;
+use App\Http\Controllers\Admin\Institute\ExamResultController;
 use App\Http\Controllers\Admin\Institute\FeeCollectionController;
 use App\Http\Controllers\Admin\Institute\FeeDiscountController;
 use App\Http\Controllers\Admin\Institute\FeeReminderController;
 use App\Http\Controllers\Admin\Institute\FeeStructureController;
+use App\Http\Controllers\Admin\Institute\GradeScaleController;
 use App\Http\Controllers\Admin\Institute\InstallmentPlanController;
 use App\Http\Controllers\Admin\Institute\ProgressController as StudentProgressController;
+use App\Http\Controllers\Admin\Institute\ResultCardController;
 use App\Http\Controllers\Admin\Institute\StudentApplicationController;
 use App\Http\Controllers\Admin\Institute\StudentController;
 use App\Http\Controllers\Admin\Institute\StudentFeeController;
@@ -2348,5 +2352,94 @@ Route::prefix('admin')
             Route::post('assignment-submissions/{submission}/amend', [AssignmentSubmissionController::class, 'amend'])->whereNumber('submission')->middleware('can:assignment_submissions.edit')->name('assignment-submissions.amend');
             Route::get('assignment-submissions/{submission}/files/{file}', [AssignmentSubmissionController::class, 'downloadFile'])->whereNumber('submission')->whereNumber('file')->middleware('can:assignment_submissions.download')->name('assignment-submissions.file.download');
             Route::get('assignment-submissions/{submission}/feedback-file', [AssignmentSubmissionController::class, 'downloadFeedback'])->whereNumber('submission')->middleware('can:assignment_submissions.download')->name('assignment-submissions.feedback.download');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Grade scales - phase-19-23 sec 7.3, sec 4.1
+        |----------------------------------------------------------------------
+        |
+        | Its own module, granted separately from `results`: somebody maintains
+        | the ladder that turns 87% into an A, and that is not the same right as
+        | publishing a class's marks.
+        |
+        | `deactivate` is a change_status route, not a delete one. A scale that
+        | has graded anybody is retired, never removed - a printed result card
+        | names a grade, and the band it came from has to still exist to explain
+        | it (INV-20-4). The destroy route below is for a scale nobody used.
+        |
+        */
+        Route::middleware('module:grade_scales')->group(static function (): void {
+            Route::get('grade-scales', [GradeScaleController::class, 'index'])->middleware('can:grade_scales.view_any')->name('grade-scales.index');
+            Route::get('grade-scales/create', [GradeScaleController::class, 'create'])->middleware('can:grade_scales.create')->name('grade-scales.create');
+            Route::post('grade-scales', [GradeScaleController::class, 'store'])->middleware(['can:grade_scales.create', 'throttle:30,1'])->name('grade-scales.store');
+            Route::get('grade-scales/{grade_scale}', [GradeScaleController::class, 'show'])->whereNumber('grade_scale')->withTrashed()->middleware('can:grade_scales.view')->name('grade-scales.show');
+            Route::get('grade-scales/{grade_scale}/edit', [GradeScaleController::class, 'edit'])->whereNumber('grade_scale')->middleware('can:grade_scales.edit')->name('grade-scales.edit');
+            Route::put('grade-scales/{grade_scale}', [GradeScaleController::class, 'update'])->whereNumber('grade_scale')->middleware('can:grade_scales.edit')->name('grade-scales.update');
+            Route::post('grade-scales/{grade_scale}/default', [GradeScaleController::class, 'setDefault'])->whereNumber('grade_scale')->middleware('can:grade_scales.change_status')->name('grade-scales.default');
+            Route::post('grade-scales/{grade_scale}/deactivate', [GradeScaleController::class, 'deactivate'])->whereNumber('grade_scale')->middleware('can:grade_scales.change_status')->name('grade-scales.deactivate');
+            Route::delete('grade-scales/{grade_scale}', [GradeScaleController::class, 'destroy'])->whereNumber('grade_scale')->middleware('can:grade_scales.delete')->name('grade-scales.destroy');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Exams - phase-19-23 sec 7.3, sec 4.2
+        |----------------------------------------------------------------------
+        |
+        | `status` and `reschedule` are separate routes although both sit behind
+        | change_status: rescheduling takes a date, a room and a reason and
+        | re-runs the clash check, and folding it into the status endpoint would
+        | mean one handler doing two jobs badly.
+        |
+        | There is no `restore` route even though the ability exists: an exam is
+        | cancelled rather than deleted, so the trashed filter on the index is
+        | the only place a deleted one appears at all.
+        |
+        */
+        Route::middleware('module:exams')->group(static function (): void {
+            Route::get('exams', [ExamController::class, 'index'])->middleware('can:exams.view_any')->name('exams.index');
+            Route::get('exams/create', [ExamController::class, 'create'])->middleware('can:exams.create')->name('exams.create');
+            Route::post('exams', [ExamController::class, 'store'])->middleware(['can:exams.create', 'throttle:30,1'])->name('exams.store');
+            Route::get('exams/export/{format}', [ExamController::class, 'export'])->middleware('can:exams.export')->name('exams.export');
+            Route::get('exams/{exam}', [ExamController::class, 'show'])->whereNumber('exam')->withTrashed()->middleware('can:exams.view')->name('exams.show');
+            Route::get('exams/{exam}/edit', [ExamController::class, 'edit'])->whereNumber('exam')->middleware('can:exams.edit')->name('exams.edit');
+            Route::put('exams/{exam}', [ExamController::class, 'update'])->whereNumber('exam')->middleware('can:exams.edit')->name('exams.update');
+            Route::post('exams/{exam}/status', [ExamController::class, 'status'])->whereNumber('exam')->middleware('can:exams.change_status')->name('exams.status');
+            Route::post('exams/{exam}/reschedule', [ExamController::class, 'reschedule'])->whereNumber('exam')->middleware('can:exams.change_status')->name('exams.reschedule');
+            Route::delete('exams/{exam}', [ExamController::class, 'destroy'])->whereNumber('exam')->middleware('can:exams.delete')->name('exams.destroy');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Exam results - phase-19-23 sec 7.3, sec 4.2
+        |----------------------------------------------------------------------
+        |
+        | One GET for the sheet and one POST for the whole of it. There is no
+        | per-row save endpoint, deliberately: INV-20-6 says a sheet is all-or-
+        | nothing, and an endpoint that writes one row invites a half-entered
+        | class that nobody notices until the averages look wrong.
+        |
+        | `verify` and `publish` are separate routes behind separate abilities
+        | because sec 2.28.4 says they are separate people. The service refuses a
+        | verifier who entered any mark on the sheet; the routes only have to not
+        | pretend the two decisions are one.
+        |
+        | There is NO destroy route, and there never will be. `results.delete` is
+        | not a registered ability, the policy returns false for every role, and
+        | the model refuses the act - including for a Super Admin, who skips
+        | policies entirely.
+        |
+        */
+        Route::middleware('module:results')->group(static function (): void {
+            Route::get('results', [ExamResultController::class, 'index'])->middleware('can:results.view_any')->name('results.index');
+            Route::get('exams/{exam}/results', [ExamResultController::class, 'sheet'])->whereNumber('exam')->middleware('can:results.create')->name('exam-results.sheet');
+            Route::post('exams/{exam}/results', [ExamResultController::class, 'save'])->whereNumber('exam')->middleware(['can:results.create', 'throttle:30,1'])->name('exam-results.save');
+            Route::post('exams/{exam}/results/verify', [ExamResultController::class, 'verify'])->whereNumber('exam')->middleware('can:results.approve')->name('exam-results.verify');
+            Route::post('exams/{exam}/results/publish', [ExamResultController::class, 'publish'])->whereNumber('exam')->middleware('can:results.change_status')->name('exam-results.publish');
+            Route::post('exams/{exam}/results/unpublish', [ExamResultController::class, 'unpublish'])->whereNumber('exam')->middleware('can:results.change_status')->name('exam-results.unpublish');
+            Route::get('exams/{exam}/results/export/{format}', [ExamResultController::class, 'export'])->whereNumber('exam')->middleware('can:results.export')->name('exam-results.export');
+            Route::get('exams/{exam}/result-cards', [ResultCardController::class, 'index'])->whereNumber('exam')->middleware('can:results.view_reports')->name('result-cards.index');
+            Route::put('exam-results/{result}', [ExamResultController::class, 'amend'])->whereNumber('result')->middleware('can:results.edit')->name('exam-results.amend');
+            Route::get('enrollments/{enrollment}/result-card', [ResultCardController::class, 'show'])->whereNumber('enrollment')->middleware('can:results.print')->name('result-cards.show');
         });
     });

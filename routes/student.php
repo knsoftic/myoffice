@@ -6,9 +6,11 @@ use App\Http\Controllers\Student\AssignmentController as StudentAssignmentContro
 use App\Http\Controllers\Student\AttendanceController;
 use App\Http\Controllers\Student\BatchController;
 use App\Http\Controllers\Student\DashboardController;
+use App\Http\Controllers\Student\ExamController;
 use App\Http\Controllers\Student\FeeController;
 use App\Http\Controllers\Student\MaterialController;
 use App\Http\Controllers\Student\ProgressController;
+use App\Http\Controllers\Student\ResultController;
 use App\Http\Controllers\Student\TimetableController;
 use Illuminate\Support\Facades\Route;
 
@@ -169,4 +171,61 @@ Route::prefix('student')
             Route::get('submissions/{submission}/files/{file}', [StudentAssignmentController::class, 'file'])->whereNumber('submission')->whereNumber('file')->middleware('can:student_portal.assignment_submit')->name('submissions.file');
             Route::get('submissions/{submission}/feedback-file', [StudentAssignmentController::class, 'feedback'])->whereNumber('submission')->middleware('can:student_portal.assignments')->name('submissions.feedback');
         });
+
+        /*
+        |----------------------------------------------------------------------
+        | Exams - phase-19-23 sec 7.4
+        |----------------------------------------------------------------------
+        |
+        | Scoped to the batches this student is enrolled in, past ones included:
+        | somebody who finished a course in March still has the right to look at
+        | the paper they sat in February.
+        |
+        | A draft exam is a 404 here even for a student whose batch it belongs
+        | to. A draft has not been announced, and a student learning about an
+        | exam from one would be learning about an exam that may never happen.
+        |
+        */
+        Route::middleware('module:exams')->group(static function (): void {
+            Route::get('exams', [ExamController::class, 'index'])
+                ->middleware('can:student_portal.exams')
+                ->name('exams.index');
+
+            Route::get('exams/{exam}', [ExamController::class, 'show'])
+                ->whereNumber('exam')
+                ->middleware('can:student_portal.exams')
+                ->name('exams.show');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Results - phase-19-23 sec 7.4, sec 3.2
+        |----------------------------------------------------------------------
+        |
+        | Every query on this panel is `published()`, with no filter, flag or
+        | parameter that widens it. sec 3.2 names exactly one status in which a
+        | student may see a mark; a withdrawn sheet disappears again, which is
+        | the entire point of being able to withdraw one.
+        |
+        | The card route takes an ENROLMENT, not a student: the id in the URL is
+        | checked against the signed-in student's own rows and is a 404 when it
+        | is not theirs. Nothing here reads a student id from the request.
+        |
+        */
+        Route::middleware('module:results')->group(static function (): void {
+            Route::get('results', [ResultController::class, 'index'])
+                ->middleware('can:student_portal.results')
+                ->name('results.index');
+
+            Route::get('results/{result}', [ResultController::class, 'show'])
+                ->whereNumber('result')
+                ->middleware('can:student_portal.results')
+                ->name('results.show');
+
+            Route::get('enrollments/{enrollment}/result-card', [ResultController::class, 'card'])
+                ->whereNumber('enrollment')
+                ->middleware('can:student_portal.results')
+                ->name('results.card');
+        });
+
     });

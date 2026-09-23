@@ -16,6 +16,7 @@ use App\Dashboard\Cms\TopViewedPostsWidget;
 use App\Dashboard\Institute\FeeCollectedTodayWidget;
 use App\Dashboard\Institute\OverdueFeesWidget;
 use App\Dashboard\Institute\PendingFeesWidget;
+use App\Enums\ExamStatus;
 use App\Enums\InquiryType;
 use App\Events\ModuleStateChanged;
 use App\Events\SettingsChanged;
@@ -212,6 +213,7 @@ use App\Services\Cms\PublicCache;
 use App\Services\Cms\SitemapGenerator;
 use App\Services\Hr\EmployeeScopeResolver;
 use App\Services\Hr\WorkCalendarService;
+use App\Services\Institute\ScheduleClashDetector;
 use App\Support\ClientPortalRegistry;
 use App\Support\Cms\PublicFormRateLimits;
 use App\Support\Cms\SectionRegistry;
@@ -450,6 +452,7 @@ class AppServiceProvider extends ServiceProvider
         $this->registerPublicCacheInvalidation();
         $this->registerPhase04();
         $this->registerPhase05();
+        $this->registerPhase20();
         $this->configureFromSettings();
     }
 
@@ -538,6 +541,47 @@ class AppServiceProvider extends ServiceProvider
         ] as $provider) {
             SitemapGenerator::extend($provider->key(), $provider);
         }
+    }
+
+    /**
+     * phase-19-23 §2.11 — an exam is a thing that books a teacher, a room and a batch's hour, so it
+     * has to be one of the rows `ScheduleClashDetector` scans.
+     *
+     * **It is registered here rather than added to `OCCUPANTS`**, which is what the detector's
+     * `register()` hook exists for: Phase 16 owns that constant, and a later phase editing it is how
+     * two phases come to share one list and disagree about it (D47).
+     *
+     * **Without this the check ran, found no exam source and reported clean** — `ExamService` was
+     * already calling `check()` with `ignoreType: 'exam'`, so every exam was clash-checked against
+     * classes and demos and against no other exam at all. Two papers could be booked on one batch at
+     * overlapping times, and only an *exactly* equal start time was caught, by `uq_ex_batch_slot`.
+     *
+     * **`live` is every status except cancelled, derived from the enum.** That is deliberately the
+     * same rule `active_guard` encodes, so the index and the detector cannot come to different views
+     * of which exams hold a slot — and a status added later joins both without being listed twice. A
+     * draft occupies its hour: the unique index already says so, and a coordinator sketching three
+     * options for one slot is a coordinator who needs telling.
+     */
+    private function registerPhase20(): void
+    {
+        ScheduleClashDetector::register('exam', [
+            'table' => 'exams',
+            'recurring' => false,
+            'teacher' => 'teacher_id',
+            'classroom' => 'classroom_id',
+            'batch' => 'batch_id',
+            'date' => 'scheduled_date',
+            'start' => 'start_time',
+            'end' => 'end_time',
+            'live' => [['status', 'in', array_map(
+                static fn (ExamStatus $status): string => $status->value,
+                array_values(array_filter(
+                    ExamStatus::cases(),
+                    static fn (ExamStatus $status): bool => $status->holdsTheSlot(),
+                )),
+            )]],
+            'soft_deletes' => true,
+        ]);
     }
 
     /**

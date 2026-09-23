@@ -7,8 +7,10 @@ use App\Http\Controllers\Teacher\AttendanceController;
 use App\Http\Controllers\Teacher\BatchController;
 use App\Http\Controllers\Teacher\DashboardController;
 use App\Http\Controllers\Teacher\DemoClassController;
+use App\Http\Controllers\Teacher\ExamController as TeacherExamController;
 use App\Http\Controllers\Teacher\MaterialController as TeacherMaterialController;
 use App\Http\Controllers\Teacher\ProgressController;
+use App\Http\Controllers\Teacher\ResultController as TeacherResultController;
 use App\Http\Controllers\Teacher\SubmissionController;
 use App\Http\Controllers\Teacher\TimetableController;
 use Illuminate\Support\Facades\Route;
@@ -147,4 +149,38 @@ Route::prefix('teacher')
             Route::post('submissions/{submission}/grade', [SubmissionController::class, 'grade'])->whereNumber('submission')->middleware(['can:teacher_portal.assignment_grade', 'throttle:60,1'])->name('submissions.grade');
             Route::get('submissions/{submission}/files/{file}', [SubmissionController::class, 'file'])->whereNumber('submission')->whereNumber('file')->middleware('can:teacher_portal.assignments')->name('submissions.file');
         });
+
+        /*
+        |----------------------------------------------------------------------
+        | Exams and marking - phase-19-23 sec 7.5
+        |----------------------------------------------------------------------
+        |
+        | `results_entry` is separate from `results` for the same reason
+        | phase-14-17 split `attendance_mark`: reading a class's marks and
+        | writing them are different rights, and a visiting trainer commonly
+        | holds only the first.
+        |
+        | There is no verify route and no publish route on this panel, and that
+        | is sec 2.28.4 rather than an omission. The person who marked a sheet is
+        | not the person who signs it off; ExamResultService::verify() refuses a
+        | verifier who entered any row, so a button here would be one that always
+        | failed. Leaving it out says the true thing instead.
+        |
+        | Scoping goes through TeacherScope, never through `exams.teacher_id` - a
+        | teacher reaches a batch four ways (D107), and filtering on the exam's
+        | own teacher would hide a paper their own students are sitting because a
+        | colleague was named examiner.
+        |
+        */
+        Route::middleware('module:exams')->group(static function (): void {
+            Route::get('exams', [TeacherExamController::class, 'index'])->middleware('can:teacher_portal.exams')->name('exams.index');
+            Route::get('exams/{exam}', [TeacherExamController::class, 'show'])->whereNumber('exam')->middleware('can:teacher_portal.exams')->name('exams.show');
+        });
+
+        Route::middleware('module:results')->group(static function (): void {
+            Route::get('results', [TeacherResultController::class, 'index'])->middleware('can:teacher_portal.results')->name('results.index');
+            Route::get('exams/{exam}/results', [TeacherResultController::class, 'sheet'])->whereNumber('exam')->middleware('can:teacher_portal.results_entry')->name('results.sheet');
+            Route::post('exams/{exam}/results', [TeacherResultController::class, 'save'])->whereNumber('exam')->middleware(['can:teacher_portal.results_entry', 'throttle:30,1'])->name('results.save');
+        });
+
     });

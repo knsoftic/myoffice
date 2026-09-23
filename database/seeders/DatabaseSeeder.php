@@ -47,6 +47,11 @@ class DatabaseSeeder extends Seeder
             // phase-13 §2.2. §32's four methods plus the inactive gateway placeholder, so no finance
             // form ever renders an empty method dropdown on a fresh install.
             PaymentMethodSeeder::class,
+            // phase-19-23 §6.8. The DEFAULT scale, marked `is_default`, so the very first exam an
+            // institute creates has something to grade against. Without it `resolveFor()` throws
+            // `NoGradeScale` on a fresh install — correctly, but the first thing a new user does
+            // should not be to discover a missing configuration row.
+            GradeScaleSeeder::class,
         ]);
     }
 }

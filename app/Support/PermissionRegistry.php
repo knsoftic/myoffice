@@ -985,13 +985,37 @@ final class PermissionRegistry
                     self::LOGS,
                 ),
             ],
+            'grade_scales' => [
+                'name' => 'Grade Scales',
+                'group' => ModuleGroup::Institute,
+                'icon' => 'academic-cap',
+                'is_core' => false,
+                'sort' => 678,
+                // §4.1: §82's grade comes from a scale an exam officer maintains, and giving somebody
+                // that right does not imply the right to publish results. Separately grantable is the
+                // whole reason this is not folded into `results`.
+                //
+                // No `restore`: a scale is deactivated rather than deleted (INV-20-4), so there is
+                // nothing to bring back.
+                'abilities' => self::merge(self::CRUD, self::STATUS),
+            ],
             'exams' => [
                 'name' => 'Exams',
                 'group' => ModuleGroup::Institute,
                 'icon' => 'document-chart-bar',
                 'is_core' => false,
                 'sort' => 680,
-                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::ASSIGN, self::RESTORE),
+                // §4.2. `assign` sets the examiner or the marker; `change_status` covers scheduling,
+                // conducting and cancelling — §2.28.4 puts all three behind one ability because they
+                // are the same person's job on the same screen.
+                'abilities' => self::merge(
+                    self::CRUD_FULL,
+                    self::STATUS,
+                    self::ASSIGN,
+                    self::RESTORE,
+                    self::REPORTS,
+                    self::LOGS,
+                ),
             ],
             'results' => [
                 'name' => 'Results',
@@ -999,7 +1023,22 @@ final class PermissionRegistry
                 'icon' => 'trophy',
                 'is_core' => false,
                 'sort' => 690,
-                'abilities' => self::merge(self::CRUD, self::APPROVE, self::STATUS, self::REPORTS, self::RESTORE),
+                // §4.2, and the ability list is deliberately assembled by hand rather than from CRUD:
+                // **`delete` and `restore` are absent.** A result is amended with a reason, never
+                // removed (INV-20-5), and an ability nobody can be granted is an ability nobody can
+                // be granted by mistake. `self::CRUD` would have quietly included both.
+                //
+                // `create` enters a sheet · `edit` amends one · `approve`/`reject` are the §2.28.4
+                // second pair of eyes · `change_status` publishes and withdraws · `print` is the
+                // result card · `import` is the CSV sheet.
+                'abilities' => self::merge(
+                    self::READ,
+                    [Ability::Create, Ability::Edit, Ability::Print, Ability::Import],
+                    self::APPROVE,
+                    self::STATUS,
+                    self::REPORTS,
+                    self::LOGS,
+                ),
             ],
             'certificates' => [
                 'name' => 'Certificates',
@@ -1562,6 +1601,9 @@ final class PermissionRegistry
         'fee_discounts' => ['student_fees'],
         'assignments' => ['batches'],
         'assignment_submissions' => ['assignments'],
+        // An empty list is deliberate and is not the same as being absent: a scale depends on
+        // nothing, and saying so stops somebody assuming it was forgotten.
+        'grade_scales' => [],
         'exams' => ['batches'],
         'results' => ['exams'],
         'certificates' => ['students', 'courses'],

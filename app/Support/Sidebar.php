@@ -843,6 +843,13 @@ final class Sidebar
                                 'permission' => 'results.view_any',
                             ],
                             [
+                                'label' => 'Grade Scales',
+                                'icon' => 'academic-cap',
+                                'route' => 'admin.grade-scales.index',
+                                'module' => 'grade_scales',
+                                'permission' => 'grade_scales.view_any',
+                            ],
+                            [
                                 'label' => 'Certificates',
                                 'icon' => 'check-badge',
                                 'route' => 'admin.certificates.index',
