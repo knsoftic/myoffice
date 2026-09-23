@@ -18,6 +18,7 @@ use App\Dashboard\Institute\OverdueFeesWidget;
 use App\Dashboard\Institute\PendingFeesWidget;
 use App\Enums\ExamStatus;
 use App\Enums\InquiryType;
+use App\Enums\MeetingStatus;
 use App\Events\ModuleStateChanged;
 use App\Events\SettingsChanged;
 use App\Models\Cms\BlogCategory;
@@ -453,6 +454,7 @@ class AppServiceProvider extends ServiceProvider
         $this->registerPhase04();
         $this->registerPhase05();
         $this->registerPhase20();
+        $this->registerPhase22();
         $this->configureFromSettings();
     }
 
@@ -578,6 +580,49 @@ class AppServiceProvider extends ServiceProvider
                 array_values(array_filter(
                     ExamStatus::cases(),
                     static fn (ExamStatus $status): bool => $status->holdsTheSlot(),
+                )),
+            )]],
+            'soft_deletes' => true,
+        ]);
+    }
+
+    /**
+     * phase-22 §6.17: a meeting holds the room it books, so the timetable can see it.
+     *
+     * **Without this, `MeetingService` would check meetings against classes and never against other
+     * meetings** — the same hole Phase 20 found in exams and fixed with `registerPhase20()`. Two
+     * meetings could book the one boardroom for the same hour and nothing would say so.
+     *
+     * **The columns are the generated ones**, not `scheduled_at`: the detector compares a date column
+     * and two TIME columns, and `2026_09_19_100012_add_clash_columns_to_meetings_table` adds exactly
+     * that shape so the detector needs no new branch (D47).
+     *
+     * **A meeting declares no teacher, and that is a real limitation, stated rather than hidden.** A
+     * teacher attends a meeting as a row in `meeting_participants`, not as a column here, and the
+     * detector scans one table. So a meeting blocks a *room* and a *batch*, and a teacher double-booked
+     * between their class and a meeting is caught by neither. Expressing it would mean teaching the
+     * detector to join — a change to Phase 16's class, which D47 puts out of this phase's reach.
+     * `MeetingService` therefore warns on the participant clash itself.
+     *
+     * **`live` is `scheduled` alone.** Completed, cancelled, postponed and missed are all over; a
+     * cancelled meeting that kept holding its room would make cancelling pointless.
+     */
+    private function registerPhase22(): void
+    {
+        ScheduleClashDetector::register('meeting', [
+            'table' => 'meetings',
+            'recurring' => false,
+            'teacher' => null,
+            'classroom' => 'classroom_id',
+            'batch' => 'batch_id',
+            'date' => 'meeting_date',
+            'start' => 'meeting_start_time',
+            'end' => 'meeting_end_time',
+            'live' => [['status', 'in', array_map(
+                static fn (MeetingStatus $status): string => $status->value,
+                array_values(array_filter(
+                    MeetingStatus::cases(),
+                    static fn (MeetingStatus $status): bool => $status->isLive(),
                 )),
             )]],
             'soft_deletes' => true,
