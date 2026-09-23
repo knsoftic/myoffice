@@ -17,6 +17,7 @@ use App\Support\Money;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Drafting, issuing, revoking and reissuing a certificate
@@ -53,6 +54,8 @@ final class CertificateService
         private readonly ExamStatisticsService $exams,
         private readonly QrCodeService $qr,
         private readonly DocumentNumberService $numbers,
+        private readonly PrintTemplateService $templates,
+        private readonly DocumentPdfRenderer $renderer,
     ) {}
 
     /**
@@ -381,6 +384,173 @@ final class CertificateService
             ->first(['id']);
 
         return $template === null ? null : (int) $template->getKey();
+    }
+
+    /**
+     * Render this certificate to PDF bytes, from its **stored snapshots and its stored template**.
+     *
+     * **A template edit therefore changes the layout and never the content.** Every value comes off
+     * the certificate row — the name it was issued under, the course it named, the grade it carried,
+     * the QR payload it was printed with — so a reprint a year later says exactly what the original
+     * said, however the template has moved on since (INV-21-4). The activity row for a template edit
+     * says so explicitly, because "this reprint looks different" is a question somebody will ask.
+     */
+    public function renderPdf(Certificate $certificate): string
+    {
+        $template = $certificate->template ?? $this->defaultTemplate();
+
+        if ($template === null) {
+            throw CourseRuleException::refuse(
+                'print_template_id',
+                'There is no certificate template to print with. Create one, or mark an existing one '
+                .'as the default.',
+            );
+        }
+
+        return $this->renderer->render(
+            $template,
+            $this->templates->render($template, $this->tokensFor($certificate)),
+            (string) ($certificate->getAttribute('certificate_number') ?? 'Certificate'),
+        );
+    }
+
+    /**
+     * Generate the PDF and store it on the **private** disk, returning the path.
+     *
+     * Private, never public: a certificate names a student, and D21 says no private artefact is ever
+     * written where a web server will serve it directly. It is read back through a controller that
+     * re-runs the permission chain.
+     */
+    public function generatePdf(Certificate $certificate): string
+    {
+        $bytes = $this->renderPdf($certificate);
+
+        $path = sprintf(
+            'certificates/%s.pdf',
+            (string) ($certificate->getAttribute('certificate_number') ?? $certificate->getAttribute('verification_code')),
+        );
+
+        Storage::disk('private')->put($path, $bytes);
+
+        $certificate->forceFill([
+            'pdf_path' => $path,
+            'pdf_generated_at' => Carbon::now(),
+        ])->saveQuietly();
+
+        return $path;
+    }
+
+    /**
+     * Re-render from the stored snapshots.
+     *
+     * Exists as its own method rather than as "delete the file and call generatePdf" because the
+     * distinction is worth logging: a regeneration is somebody saying "the file is wrong or missing",
+     * which is different from the first render and different again from an amendment.
+     */
+    public function regeneratePdf(Certificate $certificate, ?User $actor = null): string
+    {
+        $path = $this->generatePdf($certificate);
+
+        $this->audit($certificate, 'Certificate PDF regenerated', [
+            'attributes' => ['pdf_path' => $path],
+        ], self::MODULE);
+
+        return $path;
+    }
+
+    /**
+     * The token map a certificate prints with.
+     *
+     * **Every value comes off the row**, and every one goes through `Format` — so a date-format
+     * change restyles every future print and alters no past one. `{qr}` is built from the row's
+     * stored `qr_payload` and arrives as a `data:` URI, so dompdf never makes a network request.
+     *
+     * @return array<string, string>
+     */
+    private function tokensFor(Certificate $certificate): array
+    {
+        $signatories = (array) ($certificate->template?->getAttribute('signatories') ?? []);
+
+        $tokens = [
+            'certificate_number' => (string) ($certificate->getAttribute('certificate_number') ?? ''),
+            'verification_code' => $this->qr->forDisplay((string) $certificate->getAttribute('verification_code')),
+            'verification_url' => (string) ($certificate->getAttribute('qr_payload') ?? ''),
+            'qr' => $this->qrImageFor($certificate),
+            'issued_on' => app_date($certificate->getAttribute('issued_on')),
+
+            'student_name' => (string) $certificate->getAttribute('student_name_snapshot'),
+            'father_name' => (string) ($certificate->getAttribute('father_name_snapshot') ?? ''),
+            'student_code' => (string) $certificate->getAttribute('student_code_snapshot'),
+            'registration_number' => (string) ($certificate->getAttribute('registration_number_snapshot') ?? ''),
+
+            'course_name' => (string) $certificate->getAttribute('course_name_snapshot'),
+            'batch_name' => (string) ($certificate->getAttribute('batch_name_snapshot') ?? ''),
+            'trainer_name' => (string) ($certificate->getAttribute('teacher_name_snapshot') ?? ''),
+            'branch_name' => (string) ($certificate->getAttribute('branch_name_snapshot') ?? ''),
+            'course_start_date' => app_date($certificate->getAttribute('course_start_date')),
+            'completion_date' => app_date($certificate->getAttribute('completion_date')),
+
+            'grade' => (string) ($certificate->getAttribute('grade') ?? ''),
+            'grade_point' => $certificate->getAttribute('grade_point') === null
+                ? '' : app_number($certificate->getAttribute('grade_point'), 2),
+            'percentage' => $certificate->getAttribute('percentage') === null
+                ? '' : app_number($certificate->getAttribute('percentage'), 2).'%',
+            'attendance_percentage' => $certificate->getAttribute('attendance_percentage') === null
+                ? '' : app_number($certificate->getAttribute('attendance_percentage'), 2).'%',
+
+            'company_name' => (string) setting('company.name', config('app.name')),
+            'company_logo' => '',
+            'footer_note' => (string) (setting('institute.certificate_footer_note', '') ?? ''),
+        ];
+
+        // Three signatory slots, filled from the template's own list. A slot with nobody in it
+        // prints empty rather than leaving `{signatory_2_name}` across the page.
+        foreach ([1, 2, 3] as $slot) {
+            $person = (array) ($signatories[$slot - 1] ?? []);
+
+            $tokens['signatory_'.$slot.'_name'] = (string) ($person['name'] ?? '');
+            $tokens['signatory_'.$slot.'_title'] = (string) ($person['title'] ?? '');
+            $tokens['signatory_'.$slot.'_image'] = '';
+        }
+
+        return $tokens;
+    }
+
+    /**
+     * The QR image, or an empty string when the template does not want one.
+     *
+     * Empty rather than a thrown exception: a template that omits `{qr}` is a legitimate design, and
+     * a certificate whose `show_qr` is off should print without one rather than refusing.
+     */
+    private function qrImageFor(Certificate $certificate): string
+    {
+        $template = $certificate->template;
+
+        if ($template !== null && ! (bool) $template->getAttribute('show_qr')) {
+            return '';
+        }
+
+        if (trim((string) $certificate->getAttribute('qr_payload')) === '') {
+            return '';
+        }
+
+        $size = (float) ($template?->getAttribute('qr_size_mm') ?? 25.0);
+
+        return sprintf(
+            '<img src="%s" alt="" style="width:%smm;height:%smm">',
+            $this->qr->forCertificate($certificate),
+            number_format($size, 2, '.', ''),
+            number_format($size, 2, '.', ''),
+        );
+    }
+
+    private function defaultTemplate(): ?PrintTemplate
+    {
+        return PrintTemplate::query()
+            ->ofType(PrintTemplateType::Certificate)
+            ->where('is_default', true)
+            ->active()
+            ->first();
     }
 
     private function cleanText(mixed $value): ?string

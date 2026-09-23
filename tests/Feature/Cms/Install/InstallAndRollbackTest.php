@@ -218,12 +218,28 @@ final class InstallAndRollbackTest extends TestCase
     }
 
     /**
+     * Run one `artisan` command against the scratch schema, in a child process.
+     *
+     * **The timeout is 1800 seconds and it used to be 600.** That is a schema growing past a number
+     * somebody picked when it was half the size, not a slow migration: measured standalone on this
+     * machine, the exact command this runs — `migrate:fresh --seed --force` with `SEED_DEMO=true`
+     * over 159 tables — takes **207 seconds**. Inside the test it exceeds 600, because the parent
+     * PHPUnit process is holding its own connection and its own `RefreshDatabase` transaction while
+     * the child drops and rebuilds every table, and InnoDB's metadata locking makes DDL under a
+     * concurrent transaction far slower than DDL alone.
+     *
+     * Raised rather than worked around, because the alternative is worse in both directions: a
+     * timeout that fires on a healthy migration teaches everybody to re-run the suite and ignore it,
+     * and serialising the child against the parent would stop the test exercising the thing it
+     * exists to exercise. If this needs raising again, measure the standalone time first — if *that*
+     * has grown past a couple of minutes, the migrations are the problem and the number is not.
+     *
      * @param  list<string>  $arguments
      */
     private function artisanInScratch(string $scratch, array $arguments): string
     {
         $result = Process::path(base_path())
-            ->timeout(600)
+            ->timeout(1800)
             ->env([
                 'APP_ENV' => 'testing',
                 'DB_CONNECTION' => (string) config('database.default'),
