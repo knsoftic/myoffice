@@ -232,6 +232,7 @@ use App\Support\Inquiry\CrmLeadInquiryTarget;
 use App\Support\Institute\Sitemap\CourseCategorySitemapProvider;
 use App\Support\Institute\Sitemap\CourseSitemapProvider;
 use App\Support\Modules;
+use App\Support\ParticipantResolver;
 use App\Support\Portal\Sections\DocumentsSection;
 use App\Support\Portal\Sections\InvoicesSection;
 use App\Support\Portal\Sections\MilestonesSection;
@@ -414,6 +415,12 @@ class AppServiceProvider extends ServiceProvider
         // service its own cache, and a holiday edited mid-request would be stale in one of them.
         $this->app->scoped(WorkCalendarService::class);
         $this->app->scoped(EmployeeScopeResolver::class);
+
+        // phase-22 §6.17: one identity cache per request. A meeting screen renders the same twenty
+        // participants in the list, the guest list and the attendance form; resolving each of them
+        // against five profile tables three times over is fifteen queries to answer one question
+        // that cannot have changed between them.
+        $this->app->scoped(ParticipantResolver::class);
 
         // phase-03 §5.3: the public views' only settings reader (stateless, so a singleton).
         $this->app->singleton(SiteSettings::class);

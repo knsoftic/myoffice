@@ -256,6 +256,8 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D141 | **A per-phase manifest asserts what its author knew about. A discovery-based test asserts what exists.** | Phase 21's five enums shipped without `App\Enums\Concerns\HasOptions`, the trait 157 of the other enums use — so `CertificateStatus::options()` and `::values()` did not exist, and any select or filter handed one would have been a runtime error in a Blade template. `DocumentManifestTest` asserted every case had a `label()` and a `color()`, which is what I knew to check, and said nothing about the two static helpers I did not know were part of the shape. What caught it was `EnumContractTest`, which **globs `app/Enums/*.php`** rather than listing classes — its own docblock records why: "a hand-maintained list is a gate that quietly stops covering the thing it was written for". The twelve Phase 22 enums written the same afternoon had the identical gap, so one cross-phase run found seventeen. **The rule: when a phase adds an artefact of a kind the system already has many of, the test that protects it should enumerate the directory, not the phase.** A manifest still earns its place for routes and screens, which are per-phase by nature — but for enums, policies, migrations and notification classes, discovery is the only gate that stays honest. |
 | D142 | **The suite could not report its own failures, and a green tick was never the point of running it.** | The first full cross-phase run after Phase 21 exhausted PHP's 512 MB while *rendering* the failure output and died without printing a summary — no test count, no duration, nothing. The cause is that an `assertSee` failure on a rendered screen dumps the **entire HTML page** into the diff, and Phase 21 added a screen test class; several failures at once is several megabytes of Blade output held in memory at the same time. The failures themselves were real and were fixed, but they had to be dug out of 2,057 repetitions of the memory error and re-run one class at a time to be read at all. **A suite that cannot tell you what broke is a suite you will stop running**, and this one takes fifty minutes, so the temptation to skip it is real. Noted rather than fixed in the same breath because the fix is a choice — a bigger `memory_limit` for the runner, a bounded diff, or screen assertions that match a fragment instead of a page — and picking one belongs with Phase 24's performance work rather than inside a phase it would silently change the behaviour of. |
 | D143 | **A per-row cache has to be refreshed on every row it is a cache of, and "the latest one" is not that set.** | `messages.reads_count` is defined as the number of participants whose `last_read_message_id >= id` — a figure that belongs to **each message**. `markRead()` refreshed only the message the reader had just reached, so every message before it kept saying nobody had read it: a thread of forty messages, fully read by three people, showed a read count on the fortieth and zero on the other thirty-nine. Nothing failed; the number was simply wrong everywhere except the one place the probe would have looked if it had checked the newest message instead of the first. **The set that changed is the window between where the reader was and where they are now** — normally the handful they had unread — so that is what is refreshed, capped at two hundred so somebody returning after a thousand messages does not pay for all of them in one request. The general shape: when a cache is per-row, the question is never "which row did the user touch" but "which rows' answers changed", and those are rarely the same row. |
+| D144 | **A later phase joins a shared abstraction by fitting its shape, not by widening it — and the fitting has to fail loudly at the edge.** | `ScheduleClashDetector` scans a **date** column and two **TIME** columns, because that is what a timetable entry, a class session, a demo and an exam all have. A meeting has `scheduled_at` as a datetime, so `where('scheduled_at', '<', '13:00:00')` compares a datetime with a time string and **matches nothing, silently** — the detector would have run, returned clean, and double-booked every boardroom in the building. The fix is three generated STORED columns on `meetings` that present the shape the detector already reads, not a new branch inside Phase 16's class: D47 exists because two phases sharing one piece of logic and disagreeing about it is how a rule stops being one rule. **The edge is midnight.** A 23:00 meeting lasting two hours has an end *time* of 01:00 — earlier than its start — and `start < end` then finds no overlap at all, missing every conflict including the obvious one. Clamping it to `23:59:59` makes the start day correct and leaves only the small hours of the next day unchecked, which is a bounded limitation written in the migration rather than an unbounded one nobody knows about. The general shape: **when you adapt A to B's interface, the conversion's failure mode is usually "returns nothing", and "returns nothing" reads exactly like "all clear".** |
+| D145 | **An after-commit event cannot be observed from inside a transaction that is never committed — and noticing that proved more than the assertion was going to.** | The `MeetingService` probe ran `Event::fake()` and asserted `MeetingScheduled` had been dispatched. It had not: `EventFake::fakeEvent()` checks `ShouldDispatchAfterCommit` and parks the recording as a deferred callback, exactly as the real dispatcher does, and the probe's outer `DB::beginTransaction()` is rolled back rather than committed. The naive reading is "the probe cannot test events"; the useful one is that **the emptiness is itself the assertion**. The section now checks that nothing has fired *yet* — proving the service dispatched in a way that cannot notify twelve people about a meeting a later failure rolled back — then drains `app('db.transactions')->getPendingTransactions()` and checks what arrives, which proves the dispatch happened at all. Two guarantees from the fact that the first attempt failed. The same run also caught a probe writing past a switch it had just flipped: a meeting booked with `meeting_room_clash_block` off went on holding that room for every later section, so an edit four sections down failed against a fixture rather than against the rule under test. **A probe that mutates a setting owns the rows it creates under it**, and they belong on their own day. |
 ---
 
 ## 5. Phase Tracker
@@ -710,9 +712,12 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 | [x] | Three generated STORED guards: `default_guard` on departments, `ends_at` on meetings, `active_guard` on conversation membership |
 | [x] | A 407-check schema probe over `information_schema`, including all twenty enum columns measured against their own cases and D125's every-foreign-key-leads-an-index sweep |
 | [x] | Nine models with their hooks, casts, relations and scopes, and a 63-check behavioural probe that names the layer and the constraint behind every refusal |
-| [ ] | `PermissionRegistry`'s `ticket_departments` module and the five Shared dependency edges — written and validated, held back while the install test's child process is reading those files |
-| [ ] | The `support` settings group, [D-22-4]'s thirty-seven keys — same |
-| [ ] | The services: `TicketService`, `TicketSlaService`, `TicketAssignmentService`, `MeetingService`, `MessagingMatrix`, `ConversationService`, `NotificationRegistry`, `NotificationService`, `NotificationPreferenceService`, `UnreadCounters` |
+| [x] | `PermissionRegistry`'s `ticket_departments` module and the five Shared dependency edges |
+| [x] | The `support` settings group, [D-22-4]'s thirty-seven keys |
+| [x] | `MessagingMatrix` and `ConversationService` — §94's six pairs, re-checked on every send |
+| [x] | `TicketSlaService`, `TicketAssignmentService`, `TicketService` — the clock, the four strategies and §2.28.7's transition table as data |
+| [x] | `MeetingService`, with `meetings` registered as a clash occupant (D144) and an 85-check behavioural probe |
+| [ ] | The services still owed: `NotificationRegistry`, `NotificationService`, `NotificationPreferenceService`, `UnreadCounters` |
 | [ ] | Policies, routes, controllers, the screens across all five panels, and the notification classes three earlier phases are waiting on |
 
 ### [ ] PHASE 23 — Reports, analytics, activity log, audit trail, global search, exports
@@ -722,6 +727,75 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 ---
 
 ## 6. Change Log
+
+### 2026-09-23 — Phase 22 services: the matrix, the threads, the queue, the diary
+
+**Six services, each probed before the next was written**, in the order their dependencies run:
+`MessagingMatrix` → `ConversationService` → `TicketSlaService` → `TicketAssignmentService` →
+`TicketService` → `MeetingService`. 263 probe checks across the six, all green, every one inside a
+rolled-back transaction.
+
+**`MeetingService` needed the clash detector to be able to see a meeting at all.** It could not.
+`ScheduleClashDetector` scans a date column and two TIME columns, and a meeting has a datetime —
+so the comparison it would have run is `where('scheduled_at', '<', '13:00:00')`, which matches
+nothing and returns clean. Every boardroom in the building was one release away from being
+double-bookable by a check that ran and said yes. Three generated STORED columns on `meetings` now
+present the shape the detector already reads, `registerPhase22()` declares the occupant, and D144
+records both halves: fit the shared abstraction rather than widen it, and watch the edge, because
+the conversion's failure mode is "returns nothing" and that reads exactly like "all clear".
+
+**Midnight is that edge.** A 23:00 meeting running two hours ends at 01:00 — a *time* earlier than
+its start — so `start < end` finds no overlap and misses every conflict. `meeting_end_time` is
+clamped to `23:59:59`, which keeps the start day correct and leaves only the small hours of the next
+day unchecked. Written into the migration, not discovered later.
+
+**A room clash is refused and a person clash is a warning.** `support.meeting_room_clash_block` is
+the switch (PH22-35). Two meetings in one room is a physical impossibility somebody discovers at the
+door; one person invited to two things is an ordinary Tuesday that the person is best placed to
+resolve. The non-blocking conflicts come back on the returned model through `withClashWarnings()` —
+deliberately **not** a column and not an attribute, because a remark shown once in a toast is not a
+record, and putting it in `$attributes` would send it to `fill()`, `toArray()` and every JSON
+response. A meeting loaded from the database reports no warnings, which is the honest answer: the
+row cannot say whether it clashed when it was booked.
+
+**Moving a meeting clears every acceptance but the organiser's.** An invitation accepted for Tuesday
+is not an acceptance for Thursday, and a quorum built from stale acceptances is a meeting nobody
+turns up to (PH22-34). `MATERIAL` is the list that counts — time, length, room, mode, joining link —
+so a corrected typo in the title does not reset twelve answers or post twelve notifications. The
+probe asserts `MeetingUpdated` fired **exactly once** across a retitle and a move, and that it named
+`scheduled_at`. The organiser keeps their own acceptance: they chose the new time, and asking them
+to accept their own meeting would leave every rescheduled meeting one answer short of quorum.
+
+**`participant_type` is derived, never posted.** `App\Support\ParticipantResolver` is the one place
+a user is filed under one of five headings, with a stated priority order rather than whichever query
+returned first — a person can hold several profiles, the row holds one type, and §9.4's scope reads
+that column to decide what they may see. It resolves `staff` with a null `employee_id` for an admin
+who predates the HR module, because refusing there would make the diary unbookable by the person
+most likely to be booking it.
+
+**The `.ics` lists the viewer and nobody else.** A calendar file carrying twenty colleagues' email
+addresses is an address book, and it would be handed to every outside guest who accepted. `SEQUENCE`
+counts the reschedules by walking `rescheduled_from_id`, because a file that always said `0` is
+ignored by a calendar as a duplicate of the original and the new time never appears. Folding is on
+octets and never inside a multi-byte character.
+
+**Nothing is deleted, in any of the six.** A ticket is closed, a reply is corrected by another
+reply, a meeting that will not happen is cancelled with a reason and one that moves is postponed
+with a successor pointing back at it. `chk_me_cancel` requires the reason at the database for both,
+and `uq_me_resched` makes a reschedule a chain rather than a fan — two coordinators moving the same
+meeting at once produce one successor and one refusal, not a fork.
+
+**Files.** `app/Services/Support/{MeetingService,TicketService,TicketSlaService,TicketAssignmentService,ConversationService}.php`,
+`app/Services/Support/Exceptions/SupportRuleException.php`, `app/Support/{MessagingMatrix,ParticipantResolver}.php`,
+`app/DataObjects/Support/{MeetingData,ParticipantInput,CalendarQuery,MessagingDecision,SlaMinutes}.php`,
+`app/Events/Support/{MeetingScheduled,MeetingUpdated,MeetingRescheduled,MeetingCancelled}.php`,
+`database/migrations/2026_09_19_100012_add_clash_columns_to_meetings_table.php`,
+`app/Providers/AppServiceProvider.php` (`registerPhase22()`, the scoped `ParticipantResolver`),
+`app/Models/Support/Meeting.php` (the transient clash warnings).
+
+**Still owed by Phase 22:** `NotificationRegistry`, `NotificationService`,
+`NotificationPreferenceService`, `UnreadCounters`, the policies, the routes, the controllers, the
+screens across five panels, and the notification classes Phases 18, 19 and 21 are waiting on.
 
 ### 2026-09-23 — Phase 22 begins: twelve enums, ten tables, nine models
 
@@ -2519,6 +2593,9 @@ The two HIGH findings are both real and are being fixed now:
 
 | Date | What was tested | Command / method | Result |
 |---|---|---|---|
+| 2026-09-23 | `meetings` as a clash occupant | probe over the generated columns and the detector, rolled back | PASS — **18/18**: `meeting_date` / `meeting_start_time` / `meeting_end_time`, the midnight clamp keeping end after start, overlap, back-to-back, another day, cancelled and soft-deleted releasing the room, the self-ignore doing real work, and a virtual room holding nothing. The cancellation leg found `chk_me_cancel` refusing a cancel with no reason — the constraint working |
+| 2026-09-23 | `MeetingService` | behavioural probe over 15 sections, rolled back | PASS — **85/85**: booking and counts, derived `participant_type`, the four form refusals, outside guests and the switch that forbids them, the room block on and off with warnings carried out, answering, the retitle that keeps acceptances against the move that clears them, the reschedule chain and its refusal to fork, cancellation, the guest list, attendance closing a past meeting, the minutes refusing a student, the `.ics` (UID, SEQUENCE 0 then 1, one ATTENDEE, VALARM, RFC 5545 escaping, no line over 75 octets), the scope, and every cached count re-derived from its rows |
+| 2026-09-23 | Scheduling regression after registering the new occupant | `DB_DATABASE=my_office_test php artisan test --filter="ExamLifecycle\|ScheduleClash\|Timetable\|ClassSession"` | PASS — **54 tests / 127 assertions**, 218 s. Adding `meeting` to the occupant list disturbed no existing clash behaviour |
 | 2026-09-23 | Phase 21 acceptance | `DB_DATABASE=my_office_test php artisan test tests/Feature/Institute/Documents/` | PASS — **121 tests / 1,029 assertions**, 181 s: the certificate lifecycle, the verification endpoint against a hostile caller, the template sanitiser, the card register, authorization across five roles, and the manifest |
 | 2026-09-23 | Phase 21 screens | the same suite's `DocumentScreenTest` — 31 cases over every route and **state** | PASS — a draft, an issued and a revoked certificate; a live, a replaced and a lost card; single and batch print; both PDFs; the student and teacher panels; the public page's three answers |
 | 2026-09-23 | The public verification page | browser, `php artisan serve` on 8123 | PASS — desktop, 375 px mobile and dark mode all render with the site chrome; an unknown code gives a genuine 404 with the neutral wording, and the typed code is kept in the field |

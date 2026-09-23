@@ -45,7 +45,7 @@ return new class extends Migration
         'meeting_end_time' => [
             'time',
             // See the class note on the clamp.
-            "CASE WHEN DATE(`scheduled_at` + INTERVAL `duration_minutes` MINUTE) > DATE(`scheduled_at`)"
+            'CASE WHEN DATE(`scheduled_at` + INTERVAL `duration_minutes` MINUTE) > DATE(`scheduled_at`)'
             ." THEN '23:59:59'"
             .' ELSE TIME(`scheduled_at` + INTERVAL `duration_minutes` MINUTE) END',
         ],

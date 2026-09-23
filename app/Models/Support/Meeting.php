@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Models\Support;
 
+use App\DataObjects\Institute\SlotConflict;
 use App\Enums\DeliveryMode;
 use App\Enums\MeetingParticipantRole;
 use App\Enums\MeetingResponse;
 use App\Enums\MeetingStatus;
 use App\Models\Branch;
+use App\Models\Collaborator\Collaborator;
 use App\Models\Concerns\Blameable;
 use App\Models\Concerns\LogsActivityWithContext;
 use App\Models\Crm\Client;
@@ -235,7 +237,7 @@ class Meeting extends Model
 
     public function collaborator(): BelongsTo
     {
-        return $this->belongsTo(\App\Models\Collaborator\Collaborator::class);
+        return $this->belongsTo(Collaborator::class);
     }
 
     public function ticket(): BelongsTo
@@ -290,5 +292,51 @@ class Meeting extends Model
                 ->where('organizer_id', $id)
                 ->orWhereHas('participants', fn (Builder $p) => $p->where('user_id', $id));
         });
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | The clashes this booking was allowed to keep
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * Conflicts the service found and did **not** refuse (§6.17, PH22-35).
+     *
+     * **This is deliberately not a column and not an attribute.** A non-blocking clash — the same
+     * person invited to two things at once, with no room involved — is something the person saving
+     * the meeting is told once, in the toast, and then resolves or lives with. Persisting it would
+     * turn a remark into a record that nothing ever clears; putting it in `$attributes` would send
+     * it to `fill()`, `toArray()` and every JSON response.
+     *
+     * It lives only on the object `create()` / `update()` / `reschedule()` returned, and it is empty
+     * on any meeting loaded from the database — which is the honest answer, because the question
+     * "did this clash when it was booked?" is not one the row can answer.
+     *
+     * @var list<SlotConflict>
+     */
+    private array $clashWarnings = [];
+
+    /**
+     * @param  list<SlotConflict>  $conflicts
+     */
+    public function withClashWarnings(array $conflicts): static
+    {
+        $this->clashWarnings = array_values($conflicts);
+
+        return $this;
+    }
+
+    /**
+     * @return list<SlotConflict>
+     */
+    public function clashWarnings(): array
+    {
+        return $this->clashWarnings;
+    }
+
+    public function hasClashWarnings(): bool
+    {
+        return $this->clashWarnings !== [];
     }
 }
