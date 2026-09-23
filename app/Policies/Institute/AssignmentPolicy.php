@@ -91,9 +91,9 @@ final class AssignmentPolicy
     }
 
     /**
-     * **Only an assignment nobody has submitted to.** The database refuses the rest through
-     * `restrictOnDelete`, and this is the version of that rule the screen can read before offering a
-     * button that would 500.
+     * **Only an assignment nobody has submitted to.** This is the version of the rule a screen can
+     * read before offering a button that would fail, and it is the one that stops every role except a
+     * Super Admin — whom `Gate::before` waves past. The model's `deleting` hook is what stops them.
      */
     public function delete(User $user, Assignment $assignment): bool
     {

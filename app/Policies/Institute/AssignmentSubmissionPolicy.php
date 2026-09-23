@@ -17,10 +17,12 @@ use App\Policies\Institute\Concerns\ChecksInstitutePermissions;
  * able to publish new assignments. Neither is expressible while both live under `assignments.edit`.
  * Here, `edit` **is** the mark-and-feedback ability.
  *
- * **`delete` and `forceDelete` return false for every role, including Super Admin.** The ability is not
- * registered, so nobody can be granted it by mistake, and the model's `deleting` hook refuses the act
- * even when `Gate::before` has already waved a Super Admin past this policy. Marked work is somebody's
- * record; the supported acts are superseding it and returning it, both of which keep the row.
+ * **`delete` and `forceDelete` return false — but that is not what protects marked work.**
+ * `Gate::before` allows a Super Admin everything *before* a policy is consulted, so `can('delete', …)`
+ * is true for them however this method is written. What actually holds the line is the model's
+ * `deleting` hook, which nobody's permissions reach. These return false so that every *other* role is
+ * refused at the cheapest layer, and because an ability that is never registered cannot be granted by
+ * mistake. The supported acts are superseding a submission and returning it; both keep the row.
  *
  * **A student's own submission is reached through the portal, not here**, and another student's id is a
  * **404** rather than a 403 — an id that answers differently depending on whether it exists is an id
@@ -84,8 +86,8 @@ final class AssignmentSubmissionPolicy
     }
 
     /**
-     * **Never.** Not for any role, not for a Super Admin, not with any ability — the ability is not
-     * registered and the model refuses the act regardless. See the class note.
+     * Never — for every role this policy is actually consulted for. A Super Admin skips it entirely
+     * (see the class note) and is stopped by the model instead.
      */
     public function delete(User $user, AssignmentSubmission $submission): bool
     {

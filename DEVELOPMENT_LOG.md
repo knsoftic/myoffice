@@ -11,7 +11,7 @@
 | **Database** | `my_office` (utf8mb4_unicode_ci) |
 | **Created** | 2026-09-12 |
 | **Last updated** | 2026-09-22 |
-| **Current phase** | PHASE 18 complete — next: PHASE 19, course material + assignments |
+| **Current phase** | PHASE 19 complete — next: PHASE 20, exams + results |
 
 ---
 
@@ -227,6 +227,16 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D112 | **A comment justifying a missing index is what broke the migration's rollback.** | `student_fee_reminders` had no plain index on `student_fee_id`, and the migration said why: `uq_sfr_dedupe` already leads with that column, so a second copy would only cost writes. That reasoning is correct about *query* performance and wrong about *constraints*. InnoDB requires an index on a foreign key column and will happily satisfy that requirement with the unique one — after which `DROP INDEX uq_sfr_dedupe` is error 1553, `down()` fails, and the migration is no longer reversible. Both install-and-rollback tests failed on it, 137s and 143s in, which is also why neither targeted run had caught it. `idx_sfr_fee` now exists, is ensured on every `up()` so an already-migrated database heals, and the comment says what it is actually for. **A composite index is not a substitute for the foreign key's own index when the composite is `UNIQUE` and you will ever want to drop it.** |
 | D113 | **A multiselect default written in a different order from its options makes an untouched save look like an edit.** | `institute.fee_structure_fee_types` defaulted to `[admission_fee, registration_fee, course_fee]`, but the checkboxes render in `StudentFeeType`'s case order and therefore post back `[course_fee, admission_fee, registration_fee]`. `SettingsFormRoundTripTest` asserts that saving a group exactly as rendered moves nothing, and it correctly refused. Nothing was broken in production terms — the set is the same set — but the round-trip property is worth more than the ordering preference: it is what catches a save that silently normalises a value. **A set has no order, so it is declared in the one order the system renders.** |
 | D114 | **`numeric` accepts exponent notation; `decimal:0,N` is what refuses it.** | `institute.discount_max_percentage` was declared `['required','numeric','between:0,100']` — the only decimal setting in the registry without a `decimal:` rule — so `1E1` and `2.5e1` validated, stored, and left a value no `decimal(8,4)` column can parse behind a field that looked checked. `SettingsInputHardeningTest` sweeps *every* decimal field, which is why a one-field omission surfaced as a failing test rather than as a support ticket a year later. Every decimal setting added from here carries `decimal:0,4`, and Phase 19's `assignment_late_penalty_default_percentage` was written with it from the start. |
+| D115 | **The `private` disk is declared rather than aliased away.** | §6.3 binds "disk `private` is `storage/app/private`" and every `storage_disk` column in phases 19–23 defaults to it — a column defaulting to a disk that does not exist is a contract nothing can satisfy. Laravel 12 already roots `local` there, so this is the same directory under the name five contracts use, not a second location. Declaring it separately is what lets it carry `serve => false`, so no framework route can hand out a private file (§6.2 [D-19-4] puts the authorisation decision at the moment the bytes are served, never at the moment a link was minted), and `throw => true`, so a failed write is a loud 500 rather than a silent `false` that surfaces to the user as a validation error. Phases 4, 5 and 14 keep writing `local`; both names resolve to the same bytes, and `storage_disk` records which one wrote each row. |
+| D116 | **Video and audio materials were impossible to upload, and the fix was the default rather than the rule.** | §5.1 defaults `institute.material_allowed_types` to all ten of §79's kinds, which is a statement that all ten work. With Phase 1's `security.allowed_file_types` they did not: video and audio offered **no extension at all**, and slides and notes collapsed to PDF — so the headline feature of `course_materials`, distributing a recorded lecture, could not be used at all. The rule "a field narrows, never widens" is what the whole gate rests on and was not touched; the Phase 1 *default* was widened to the union of what the existing upload maps already name. Every uploader passes its own map to `uploadExtensions()`, which intersects, so widening the global list **cannot widen any single field** — client documents gain nothing from `mp4` because `ClientDocumentService::TYPES` has never listed it. The size cap is deliberately left alone: `security.max_upload_mb` is 10, so a material caps at 10 MB whatever §5.1 says, which is correct per "the effective limit is `min(this, security.max_upload_mb)`" and is an administrator's decision to raise. |
+| D117 | **`TeacherScope` exists because three controllers already answered "which batches are this teacher's?" three different ways.** | `BatchController` counted three paths, `ProgressController` two, `AttendanceController` a fourth the others lacked — so a substitute who covered a class could see it on the attendance screen and not on progress. Phase 19 needed the same query for materials and assignments and would have become a fourth copy. The union of all four paths — named teacher, timetable entry, taught a session, or was the teacher a session was moved *off* — now lives in `App\Support\Institute\TeacherScope`, and this phase uses it exclusively. The three existing copies are flagged for a follow-up rather than converged mid-phase: doing so widens what `ProgressController` shows, which is a behaviour change that deserves its own commit and its own line here. |
+| D118 | **A 403 was confirming that files exist to people who were never their audience.** | `MaterialAccessService::resolveForStudent()` decided "was this ever theirs?" by asking whether the student had *any* enrollment at all — so every enrolled student in the institute received `enrollment_expired` for every material they could not see. That is false, and worse it is a 403 where a 404 belongs: it tells somebody a material exists and merely lapsed. The question is now asked about the material's **own course**: `enrollment_expired` (and a 403 they can act on) when they were once on it, `not_targeted` (and a 404 that says nothing) when they never were. Found by probing the grant, not by a failing test. |
+| D119 | **`StreamedResponse::setCallback()` replaces the body; it does not append to it.** | `MaterialAccessService::stream()` set a bare callback to stamp `bytes_sent` once the stream finished — which would have served a perfectly healthy-looking 200 containing **zero bytes**, on every private file in the phase. The existing callback is now fetched with `getCallback()` and wrapped: the file sends first, and the stamp happens only if it returned, which is exactly the semantics `bytes_sent IS NULL` is meant to carry. A method named `set` doing what it says is not a bug in Laravel; reaching for it without reading it was one here. |
+| D120 | **A path that needs an id cannot be built before the row exists.** | `AssignmentService::create()` stored the brief under `FileTarget::assignmentBrief(0)`, because §6.3 binds the path to `institute/assignments/{assignment_id}/brief/…` and the row had no id yet. `FileTarget` refused the zero rather than inventing a directory — which is precisely what it is for, and the reason it validates its segments instead of trusting callers. The row is now written first and the brief attached afterwards through `attachBrief()`, with the bytes removed if the attach fails: two short transactions rather than one long one holding a row lock across an upload. |
+| D121 | **A service's `update()` must not consult the settings, and an absent key must not mean "clear".** | `AssignmentService::update()` read `institute.assignment_max_files_default` as its fallback, so an edit that did not mention `max_files` silently reset a teacher's choice to the institute default. It also used `?? null` throughout, so every key the caller did not send became an instruction to wipe that column — which destroyed `passing_marks` on a partial update. Absent now means unchanged, present-and-null means cleared, and the settings are a prefill for a **new** row only. `CourseMaterialService::update()` carried the identical hazard and is fixed with it. This is **D113** in a second place: a save that moves a value nobody asked it to move. |
+| D122 | **An abandoned draft is a miss, and a miss that has content is a draft.** | `markMissed()` skipped every student with a live submission — and a `draft` is live to `uq_as_live`. A student who opened the form and never submitted was therefore neither submitted nor missed: invisible to both counts, and stuck in `outstanding()` for ever on an assignment that stopped collecting weeks earlier. Drafts are now converted in place. That in turn made `reopen()`'s force-delete of every `missed` row destructive, so a miss carrying content is restored to a draft instead of removed. Today it never carries content — `submit()` is the only writer of `submission_text` — but the branch is there so that a later save-my-progress screen does not begin quietly deleting student work. |
+| D123 | **An `<input type="datetime-local">` needs a wire format, and the exception has to be named.** | `->format('Y-m-d\TH:i')` in the five date inputs tripped `NoHardcodedFormatsTest`, correctly: it is the exact shape of the mistake that test exists to catch. But an input handed a localized date renders **blank** and loses what the user was editing, so the display format is the wrong answer there. `Format::inputDate()` / `inputDateTime()` and the matching `app_input_*()` helpers make the exception explicit rather than smuggling a bare `->format()` past the scan. The display timezone still applies, so the field shows the time the reader was just shown beside it. |
+| D124 | **A policy cannot protect anything from a Super Admin, and two tests were written as though it could.** | `Gate::before` allows a Super Admin everything *before* a policy is consulted, so `can('delete', $submission)` is true for them however `AssignmentSubmissionPolicy::delete()` is written. The policy docblock claimed "not for any role, not for a Super Admin" — true of the model's hook, false of the policy, and the kind of comment that stops a reader looking further. Worse, `AssignmentPolicy::delete()` refuses an assignment that has submissions, but a soft delete is an **UPDATE**, so `restrictOnDelete` never sees it: the one role most able to do damage was the only role able to hide a class's marked work. `Assignment` now refuses the deletion in a model hook, as `AssignmentSubmission` already did, and both docblocks say which layer is actually load-bearing. **A `delete` policy on a soft-deleting model guards nothing on its own.** |
 ---
 
 ## 5. Phase Tracker
@@ -649,7 +659,7 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 > **Release note** — note: consumes Phase 10's `PaymentService` and the four fee tables (`student_fees`, `student_fee_installments`, `student_fee_discounts`, `student_fee_payments`); Phase 18 creates no financial table. It ships `student_fee_reminders`, the fee services and all fee screens.
 
-### [ ] PHASE 19 — Course material + assignments
+### [x] PHASE 19 — Course material + assignments (2026-09-23)
 ### [ ] PHASE 20 — Exams + results
 ### [ ] PHASE 21 — Certificates (public QR verification) + student ID cards
 ### [ ] PHASE 22 — Tickets, meetings, internal messaging, notifications
@@ -660,6 +670,59 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 ---
 
 ## 6. Change Log
+
+### 2026-09-23 — Phase 19: materials, assignments, and one upload gate for everything
+
+**Shipped.** Six tables, six enums, six models, five file objects, one hardened uploader, six services,
+three policies, four Form Requests, seven controllers, 68 routes, 22 screens across three panels, 94
+acceptance tests — and a `private` disk that did not exist before.
+
+**The security centre is `SecureFileService`, and it is Phase 5's logic generalised rather than a second
+copy of it.** §6.1's ten-step gate, written once: the upload arrived intact, the client's name is reduced
+to a basename, an extension exists and is not hard-refused, no inner segment is an extension, the
+extension survives the intersection with `security.allowed_file_types`, the file is not empty, the size
+is under the smallest of three caps, the MIME is **sniffed from the bytes**, the sniffed MIME is one that
+extension permits, and only then is it written as `{ulid}.{extension}`. Proven by feeding it hostile
+input rather than by reading the whitelist back: a `.php` refused, `cv.pdf.php` and `scan.pdf.docx`
+refused, a real PDF named `.docx` refused *naming both* what it is and what it claimed, and an `.svg`
+refused even though `CourseResourceType::Image` lists `image/svg+xml` — correctly, because Phase 14 uses
+that enum for the public syllabus where an SVG diagram is harmless and here it would be stored XSS.
+
+**Three generated STORED columns, all for the same MariaDB reason.** A unique index tolerates unlimited
+NULLs. `course_material_targets.target_key` COALESCEs the three target foreign keys so `uq_cmt` bites at
+all. `assignment_submissions.current_guard` is NULL for `superseded` and 1 otherwise, so `uq_as_live`
+permits exactly one live submission per student **while the history stacks** — here the NULL tolerance
+is the mechanism rather than the hazard, which is why the expression produces one deliberately. And
+`final_marks` is `GREATEST(obtained − penalty, 0)`, asserted byte-identical to `AssignmentGradeCalculator`
+across five marks.
+
+**Ten defects, and not one of them was found by a test going red.** They are D115–D124. All ten were in
+code that compiled, linted and read correctly. Three came from writing against the contract from memory
+instead of re-reading it. Two were D113 in a second place — a save moving a value nobody asked it to
+move. Two were invariants that held in the database and not in the service. One was a Laravel method
+doing exactly what its name says while I assumed otherwise, which would have served every private file
+in the phase as an empty 200. One was a feature that could not be used out of the box. And one was a
+pair of tests written as though a policy could stop a Super Admin, which it cannot.
+
+**The last of those is worth restating.** `Gate::before` allows a Super Admin everything before a policy
+runs, and a soft delete is an UPDATE that `restrictOnDelete` never sees. So `AssignmentPolicy::delete()`
+refusing an assignment with submissions stopped every role *except* the one most able to do damage. The
+model hook is what holds it now, and the tests assert the policy against an ordinary role and the model
+against everyone — because a test that only checked the policy would have passed while a class's marked
+work was hidden.
+
+**Verified.** 23 upload-gate tests against eight hostile uploads · 17 access tests, each asserting that
+`grantFor()` and `visibleToStudent()` agree, so a file cannot leak past a list that hides it · 32
+lifecycle tests covering INV-19-5, INV-19-6 and INV-19-7 through the real service path · 16 authorization
+tests checking the *status code* of every refusal, because a 403 says the row exists and a 404 says
+nothing · 23 manifest tests · 22/22 screens rendered on all three panels · 373 across
+`tests/Feature/Institute` · `pint --test` clean across the whole repository for the first time.
+
+**Deferred on purpose.** `engagement()` returns the access log rather than a per-student
+opened/not-opened aggregate — §8.3's screen is built and the aggregate is Phase 23's. The four
+notification classes are Phase 22's; `notified_at` is written and the dedupe guard holds across the gap.
+`duplicateToBatches()` ships and is tested; the screen that calls it is a follow-up. The three
+teacher-scope copies of D117 are a separate change.
 
 ### 2026-09-22 — Phase 18: fees, and one definition of a fee's status
 

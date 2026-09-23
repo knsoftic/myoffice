@@ -149,15 +149,18 @@ class AssignmentSubmission extends Model
     }
 
     /**
-     * Whether the **student** may see their mark. Three separate gates, all of which must hold: the
-     * row is graded, the assignment is willing to show marks at all, and this row has been released.
-     * A teacher marking a batch privately and releasing it in one go depends on all three.
+     * Whether the **student** may see their mark: the row is graded, and it has been released.
+     *
+     * **`marks_released_at` is the authority, and the assignment's `marks_visible_to_students` is not
+     * a veto.** That flag decides whether grading *auto-releases* — `grade()` stamps the timestamp
+     * when it is on and leaves it null when it is off, which is the whole mechanism behind "mark the
+     * batch privately, then release it in one go". Reading the flag here as well would mean
+     * `releaseMarks()` stamped every row and the class still saw nothing, because the thing they were
+     * waiting on was never the timestamp.
      */
     public function marksVisibleToStudent(): bool
     {
-        return $this->status->visibleMarks()
-            && $this->getAttribute('marks_released_at') !== null
-            && (bool) $this->assignment?->getAttribute('marks_visible_to_students');
+        return $this->status->visibleMarks() && $this->getAttribute('marks_released_at') !== null;
     }
 
     /** A mark that was changed after the student had already seen it — always with a reason. */

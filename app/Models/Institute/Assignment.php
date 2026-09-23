@@ -35,9 +35,12 @@ use LogicException;
  * `AssignmentService::amend()`, which takes a reason, logs old and new, and recomputes the caches while
  * INV-19-7 keeps existing lateness decisions intact.
  *
- * **An assignment with a submission is closed or archived, never deleted** (§2.7): `restrictOnDelete`
- * backs it at the database, and `AssignmentStatus::Closed` exists precisely so that stopping collection
- * never means hiding what everybody was marked on.
+ * **An assignment with a submission is closed or archived, never deleted** (§2.7).
+ * `AssignmentStatus::Closed` exists precisely so that stopping collection never means hiding what
+ * everybody was marked on. The hook below is what actually holds the line: `restrictOnDelete` only
+ * catches a *hard* delete, and the policy only catches somebody who is not a Super Admin — because
+ * `Gate::before` allows one everything before a policy is consulted. A soft delete is an UPDATE, so
+ * without this hook the one role most able to do damage was the only role able to hide a class's work.
  *
  * @property AssignmentStatus $status
  * @property SubmissionType $submission_type
@@ -127,6 +130,18 @@ class Assignment extends Model
 
     protected static function booted(): void
     {
+        // Soft or hard, and whoever is asking. See the class note: the policy cannot hold this on its
+        // own, and `restrictOnDelete` never sees a soft delete at all.
+        static::deleting(static function (self $assignment): void {
+            if ($assignment->submissions()->exists()) {
+                throw new LogicException(sprintf(
+                    'Assignment #%s has work handed in against it. Close or archive it — removing it '
+                    .'would hide what a class was marked on.',
+                    (string) $assignment->getKey(),
+                ));
+            }
+        });
+
         // Gate::before lets a Super Admin past every policy, so a rule this consequential cannot live
         // in one — it lives here, where nobody's permissions reach it.
         static::updating(static function (self $assignment): void {
