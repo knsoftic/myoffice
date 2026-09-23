@@ -11,7 +11,7 @@
 | **Database** | `my_office` (utf8mb4_unicode_ci) |
 | **Created** | 2026-09-12 |
 | **Last updated** | 2026-09-23 |
-| **Current phase** | PHASE 21 complete — next: PHASE 22, tickets + meetings + messaging + notifications |
+| **Current phase** | PHASE 22 in progress — schema, enums and models in; registries, services and screens ahead |
 
 ---
 
@@ -254,6 +254,7 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D139 | **A column list is an optimisation on a read. A read that feeds a write must be whole.** | `StudentIdCardController::bulkIssue()` loaded its enrolments with `->with('student:id,name,photo_path')` — the three columns the screen needed — and handed the result to `StudentIdCardService::issue()`, which snapshots a name, a roll number, a registration number, a joining date and a guardian's phone off that same model. Everything it had not asked for came back null, and `student_code_snapshot` is `NOT NULL`, so the first bulk issue was a 1048 from the database rather than a sentence. The single-card path was fine, because it had never narrowed the select. **The tell is the direction the model is travelling**: a partial select is safe when the model is on its way to a screen and unsafe the moment it is on its way to a service, because the service knows columns the caller was not thinking about. Found the same run as a sibling: `printData()` typed its parameter as `Illuminate\Support\Collection` and `collect([$card])` satisfied it, so `->load()` — an Eloquent method — was a `BadMethodCallException` on the single-card print. Two shapes that look alike and are not the same type. |
 | D140 | **D124 for the third time: a hard rule under `Gate::before` is not a rule.** | `CertificatePolicy::print()` refuses a draft — "it has no number and no QR payload, so the document would be unverifiable the moment it left the building" — and `Gate::before` allows a Super Admin everything before a policy runs. So the one role most able to hand out an unverifiable certificate on institute letterhead was the only role nothing stopped, and the `print_count` it bumped would have been counting copies of a document that was never issued. The refusal now lives in `CertificateService::assertPrintable()`, called by `renderHtml()`, `renderPdf()` and `markPrinted()` — below the gate, on every route to a printed page. This is the same shape as D124's `Assignment` hook and Phase 19's `AssignmentSubmission` one, and three occurrences make it a rule rather than an anecdote: **when a policy sentence contains the word "never", the policy is the wrong layer.** A policy decides who may try; only the model or the service can decide what is possible. |
 | D141 | **A per-phase manifest asserts what its author knew about. A discovery-based test asserts what exists.** | Phase 21's five enums shipped without `App\Enums\Concerns\HasOptions`, the trait 157 of the other enums use — so `CertificateStatus::options()` and `::values()` did not exist, and any select or filter handed one would have been a runtime error in a Blade template. `DocumentManifestTest` asserted every case had a `label()` and a `color()`, which is what I knew to check, and said nothing about the two static helpers I did not know were part of the shape. What caught it was `EnumContractTest`, which **globs `app/Enums/*.php`** rather than listing classes — its own docblock records why: "a hand-maintained list is a gate that quietly stops covering the thing it was written for". The twelve Phase 22 enums written the same afternoon had the identical gap, so one cross-phase run found seventeen. **The rule: when a phase adds an artefact of a kind the system already has many of, the test that protects it should enumerate the directory, not the phase.** A manifest still earns its place for routes and screens, which are per-phase by nature — but for enums, policies, migrations and notification classes, discovery is the only gate that stays honest. |
+| D142 | **The suite could not report its own failures, and a green tick was never the point of running it.** | The first full cross-phase run after Phase 21 exhausted PHP's 512 MB while *rendering* the failure output and died without printing a summary — no test count, no duration, nothing. The cause is that an `assertSee` failure on a rendered screen dumps the **entire HTML page** into the diff, and Phase 21 added a screen test class; several failures at once is several megabytes of Blade output held in memory at the same time. The failures themselves were real and were fixed, but they had to be dug out of 2,057 repetitions of the memory error and re-run one class at a time to be read at all. **A suite that cannot tell you what broke is a suite you will stop running**, and this one takes fifty minutes, so the temptation to skip it is real. Noted rather than fixed in the same breath because the fix is a choice — a bigger `memory_limit` for the runner, a bounded diff, or screen assertions that match a fragment instead of a page — and picking one belongs with Phase 24's performance work rather than inside a phase it would silently change the behaviour of. |
 ---
 
 ## 5. Phase Tracker
@@ -699,7 +700,20 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 > The verification page at `/verify/{code}` needs no account and is the one public write path in the
 > institute.
 
-### [ ] PHASE 22 — Tickets, meetings, internal messaging, notifications
+### [~] PHASE 22 — Tickets, meetings, internal messaging, notifications (in progress)
+
+| Done | What |
+|---|---|
+| [x] | Twelve enums, every one through `EnumContractTest`'s 1,222 discovered cases — `ConversationScope`'s declaration order is load-bearing and `inMatchOrder()` says so |
+| [x] | Ten tables plus the one foreign key that cannot be declared with its table (`conversations` and `messages` point at each other), migrated forward, rolled back and migrated again |
+| [x] | Three generated STORED guards: `default_guard` on departments, `ends_at` on meetings, `active_guard` on conversation membership |
+| [x] | A 407-check schema probe over `information_schema`, including all twenty enum columns measured against their own cases and D125's every-foreign-key-leads-an-index sweep |
+| [x] | Nine models with their hooks, casts, relations and scopes, and a 63-check behavioural probe that names the layer and the constraint behind every refusal |
+| [ ] | `PermissionRegistry`'s `ticket_departments` module and the five Shared dependency edges — written and validated, held back while the install test's child process is reading those files |
+| [ ] | The `support` settings group, [D-22-4]'s thirty-seven keys — same |
+| [ ] | The services: `TicketService`, `TicketSlaService`, `TicketAssignmentService`, `MeetingService`, `MessagingMatrix`, `ConversationService`, `NotificationRegistry`, `NotificationService`, `NotificationPreferenceService`, `UnreadCounters` |
+| [ ] | Policies, routes, controllers, the screens across all five panels, and the notification classes three earlier phases are waiting on |
+
 ### [ ] PHASE 23 — Reports, analytics, activity log, audit trail, global search, exports
 ### [ ] PHASE 24 — Security, financial integrity, responsive and performance testing
 ### [ ] PHASE 25 — Deployment preparation (install guide, backups, queue/scheduler, production notes)
@@ -707,6 +721,52 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 ---
 
 ## 6. Change Log
+
+### 2026-09-23 — Phase 22 begins: twelve enums, ten tables, nine models
+
+**Nothing user-facing yet, and everything probed.** The schema, the enums and the models are in, each
+checked before the next was written — the order the pre-flight practice (D136) asks for, and the
+reason there is nothing to unpick.
+
+**Twelve enums, and one of them has load-bearing declaration order.** `ConversationScope` carries
+§94's six pairs verbatim, and a pair that resolves to several scopes takes the **first** match — the
+value that then lands in `conversations.pair_scope`. Reordering the cases would silently re-label
+existing threads, so `inMatchOrder()` exists to name the fact rather than leave it to a comment
+somebody edits around.
+
+**`ParticipantType::isInternal()` had to be decided rather than looked up.** The contract names the
+method and not its answer. Staff and teachers are internal; students, clients and collaborators are
+not; an external guest has no panel, no profile column and no account at all, and `chk_mp_external`
+refuses a row whose type contradicts the columns beside it — because that type feeds §9's isolation,
+so a label that could disagree with its own row would be a way to declare yourself into another
+scope.
+
+**Ten tables, run forward, rolled all the way back, and run forward again.** Two things only the
+rollback could find. A bare `NOT NULL` timestamp is the *second* timestamp column on its table, so
+MariaDB hands it an implicit zero-date default and `NO_ZERO_DATE` refuses it — 1067, at create time,
+on a column that looks entirely ordinary. And `meetings.rescheduled_from_id` is UNIQUE so a
+reschedule is a chain rather than a fan, which means the self-referencing foreign key **needs** that
+index: MariaDB refuses to drop the index while the constraint exists, so the constraint has to go
+first. That dependency runs the opposite way from the usual one, which is exactly why it is easy to
+miss and now carries a paragraph.
+
+**Every enum-backed column is `string(32)` where the contract says 16.** `TicketAssignStrategy`'s
+longest case is `default_assignee` — sixteen characters, which fits *exactly*, and an exact fit is
+the most dangerous width there is. D126 was the phase that learned it.
+
+**A 407-check schema probe and a 63-check behavioural probe, both clean on the first run**, which has
+not happened before in this project. The schema probe asks `information_schema` for every column,
+index, CHECK, generated column and foreign key the contract names, measures all twenty enum columns
+against their own cases, and re-runs D125's sweep that every foreign key leads an index of its own.
+The behavioural probe writes inside a rolled-back transaction and asserts the hooks refuse what they
+claim and permit what they claim.
+
+**The behavioural probe's refusal helper is worth copying.** Its first version was
+`try { … } catch (Throwable) { pass }`, which would have gone green on a typo in a column name, a
+missing method, or a *different* constraint firing on the same row — the "silence is not success"
+trap, in a probe whose whole job is to be the thing that notices. Each call now names the layer it
+expects to be stopped by (`model` or `database`) and, for a database refusal, the constraint by name.
+Sixty-three checks still pass, and now they mean something.
 
 ### 2026-09-23 — Phase 21: certificates, the public verification page, and student cards
 

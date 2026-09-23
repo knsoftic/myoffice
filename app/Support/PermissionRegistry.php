@@ -1337,6 +1337,25 @@ final class PermissionRegistry
             |------------------------------------------------------------------
             */
 
+            'ticket_departments' => [
+                'name' => 'Ticket Departments',
+                'group' => ModuleGroup::Shared,
+                'icon' => 'rectangle-stack',
+                'is_core' => false,
+                // 1005: the Shared band runs 1010 support_tickets, 1020 meetings, 1030 messages,
+                // 1040 files, 1050 notifications, 1060 reports — and a department belongs above the
+                // queue it organises. D111: two modules on one sort order is two sidebar items in an
+                // arbitrary order, and a manifest test asserts no collision.
+                'sort' => 1005,
+                // §4.1. Its own module so a support lead maintains the queues and their SLA targets
+                // **without holding `settings.edit`** — which would hand them the SMTP credentials
+                // and the security group along with it.
+                //
+                // No `print`, no `export`, no `view_logs`: a department is a short list of rows an
+                // administrator reads on one screen. An ability nobody can use is an ability somebody
+                // grants by mistake — the argument that removed `certificates.upload`.
+                'abilities' => self::merge(self::CRUD, self::STATUS),
+            ],
             'support_tickets' => [
                 'name' => 'Support Tickets',
                 'group' => ModuleGroup::Shared,
@@ -1686,6 +1705,20 @@ final class PermissionRegistry
         'print_templates' => [],
         'certificates' => ['students', 'courses'],
         'student_id_cards' => ['students'],
+
+        // Shared — phase-19-23 §4.1. Four of these five were registered by Phase 1 and have never
+        // appeared here, which the graph reads as "no dependencies" — true of all but one, and
+        // saying so is what stops the omission looking like an oversight.
+        //
+        // A ticket has to land somewhere, so `support_tickets` needs the departments. Nothing else
+        // does: a meeting, a thread and a notification each stand alone, and a notification in
+        // particular must keep working while every module it reports on is switched off — a bell
+        // that went silent because somebody disabled `projects` would hide the news that it had been.
+        'ticket_departments' => [],
+        'support_tickets' => ['ticket_departments'],
+        'meetings' => [],
+        'messages' => [],
+        'notifications' => [],
 
         // Website — phase-03, phase-04. Phase 3 adds no edge: faqs.faq_category_id is nullable (the
         // uncategorised bucket is supported), and a section's menu, CTA block and images are optional

@@ -415,6 +415,16 @@ final class SettingsRegistry
                 'description' => 'Admissions, numbering, attendance and class defaults.',
                 'sort' => 90,
             ],
+            // phase-19-23 §5.2, [D-22-4]. Sort 95: directly after `institute` (90) and before
+            // `finance` (100), because tickets, meetings and messaging are how the institute and the
+            // software house talk to the people they serve — not a financial concern, and not a
+            // security one.
+            'support' => [
+                'label' => 'Support, Meetings & Messaging',
+                'icon' => 'lifebuoy',
+                'description' => 'Ticket numbering, departments, SLA, meeting defaults, messaging rules and notification delivery.',
+                'sort' => 95,
+            ],
             'finance' => [
                 'label' => 'Finance',
                 'icon' => 'banknotes',
@@ -1420,6 +1430,7 @@ final class SettingsRegistry
             'website' => self::websiteFields(),
             'collaborator' => self::collaboratorFields(),
             'institute' => self::instituteFields(),
+            'support' => self::supportFields(),
             'finance' => self::financeFields(),
             'security' => self::securityFields(),
             'projects' => self::projectsFields(),
@@ -3099,6 +3110,418 @@ final class SettingsRegistry
     /**
      * @return array<string, array<string, mixed>>
      */
+    /**
+     * `support` — §5.2's thirty-seven keys ([D-22-4]).
+     *
+     * **`sla_enabled` is the one to read first.** With it false the whole SLA feature is inert: no
+     * clock is stamped, `tickets:sla-sweep` returns immediately, `TicketSlaService::multiplier()` is
+     * never called, and no breach badge, countdown or SLA card renders anywhere. Every SLA column on
+     * `support_tickets` is nullable or defaults to zero precisely so that dropping SLA later is this
+     * flip rather than a migration (audit F-13.5, needs-human H3).
+     *
+     * **`notifications_mail_enabled` defaults to false, deliberately** (Q7). §97's database channel
+     * works from the first row; the mail channel waits until an installation has real SMTP behind
+     * it. A system that starts by failing to send email teaches its users to ignore the mail queue.
+     *
+     * **`messaging_allowed_pairs` is the §94 matrix, admin-tunable** — and removing a pair silences
+     * the *existing* threads of that pair, not merely new ones (INV-22-4), because
+     * `MessagingMatrix::mayParticipate()` re-checks on every send.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private static function supportFields(): array
+    {
+        return [
+            // -------------------------------------------------------------- tickets
+            'ticket_prefix' => [
+                'label' => 'Ticket prefix',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:16', 'regex:/^[A-Za-z0-9\\-\\/]*$/'],
+                'default' => 'TKT-',
+                'span' => 3,
+                'sort' => 10,
+            ],
+            'ticket_next_number' => [
+                'label' => 'Next ticket number',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1'],
+                'default' => 1,
+                'help' => 'Locked inside the transaction that issues it, so two tickets raised at the '
+                    .'same moment can never take the same number.',
+                'span' => 3,
+                'sort' => 20,
+            ],
+            'ticket_default_department_id' => [
+                'label' => 'Default department',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['nullable', 'integer', 'exists:ticket_departments,id'],
+                // Null, not an id: the seeder marks one department `is_default` and the service falls
+                // through to that row. A hardcoded id would be wrong on any install whose first
+                // department was something else, and a default cannot know its own id.
+                'default' => null,
+                'options' => [],
+                'help' => 'Used when a portal form offers no choice of queue.',
+                'span' => 6,
+                'sort' => 30,
+            ],
+            'ticket_default_priority' => [
+                'label' => 'Default priority',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string', 'in:low,medium,high,urgent'],
+                'default' => 'medium',
+                'options' => [
+                    'low' => 'Low',
+                    'medium' => 'Medium',
+                    'high' => 'High',
+                    'urgent' => 'Urgent',
+                ],
+                // A portal user never picks their own priority (§12.2 Q6): a client who could
+                // declare "urgent" would, every time, and the word would stop meaning anything.
+                'help' => 'What a ticket raised from a portal starts at. Staff choose per ticket.',
+                'span' => 3,
+                'sort' => 40,
+            ],
+            'ticket_auto_assign' => [
+                'label' => 'When a department says nothing',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string', 'in:none,default_assignee,round_robin,least_open'],
+                'default' => 'least_open',
+                'options' => [
+                    'none' => 'Leave it unassigned',
+                    'default_assignee' => 'The department’s default person',
+                    'round_robin' => 'Take it in turns',
+                    'least_open' => 'Whoever has the fewest open',
+                ],
+                'span' => 3,
+                'sort' => 50,
+            ],
+
+            // -------------------------------------------------------------- the SLA
+            'sla_enabled' => [
+                'label' => 'Measure response times',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                'default' => true,
+                'help' => 'Off, no clock is stamped and no target is shown anywhere. Turning it back '
+                    .'on starts clocks from that moment and never back-dates a breach.',
+                'span' => 6,
+                'sort' => 100,
+            ],
+            'sla_first_response_minutes' => [
+                'label' => 'First reply within',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:100000'],
+                'default' => 240,
+                'suffix' => 'minutes',
+                'help' => 'Used when the department sets no target of its own.',
+                'span' => 3,
+                'sort' => 110,
+            ],
+            'sla_resolution_minutes' => [
+                'label' => 'Resolve within',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:100000'],
+                'default' => 2880,
+                'suffix' => 'minutes',
+                'span' => 3,
+                'sort' => 120,
+            ],
+            'sla_pause_on_waiting' => [
+                'label' => 'Pause while waiting on the requester',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                'default' => true,
+                // Without this an SLA report measures how quickly customers answer email.
+                'help' => 'Time spent waiting for an answer is not counted against the target.',
+                'span' => 6,
+                'sort' => 130,
+            ],
+            'sla_business_hours_only' => [
+                'label' => 'Count working hours only',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                'default' => false,
+                'help' => 'The clock advances only inside the opening hours set under Contact, and '
+                    .'skips closed days entirely.',
+                'span' => 6,
+                'sort' => 140,
+            ],
+
+            // -------------------------------------------------------------- closing and reopening
+            'ticket_auto_close_resolved_days' => [
+                'label' => 'Close a resolved ticket after',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:365'],
+                'default' => 7,
+                'suffix' => 'days',
+                'help' => '0 never closes one automatically.',
+                'span' => 3,
+                'sort' => 200,
+            ],
+            'ticket_reopen_window_days' => [
+                'label' => 'A reply reopens it for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:365'],
+                'default' => 14,
+                'suffix' => 'days',
+                'help' => 'After this only staff may reopen a ticket. A reply from the requester '
+                    .'raises a new one instead, so nothing is lost.',
+                'span' => 3,
+                'sort' => 210,
+            ],
+
+            // -------------------------------------------------------------- who may raise one
+            'ticket_allow_client_create' => [
+                'label' => 'Clients may raise tickets',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                'default' => true,
+                'span' => 3,
+                'sort' => 300,
+            ],
+            'ticket_allow_student_create' => [
+                'label' => 'Students may raise tickets',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                'default' => true,
+                'span' => 3,
+                'sort' => 310,
+            ],
+            'ticket_allow_teacher_create' => [
+                'label' => 'Teachers may raise tickets',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                'default' => true,
+                'span' => 3,
+                'sort' => 320,
+            ],
+            'ticket_allow_collaborator_create' => [
+                'label' => 'Collaborators may raise tickets',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                'default' => true,
+                'span' => 3,
+                'sort' => 330,
+            ],
+            'ticket_attachment_max_mb' => [
+                'label' => 'Largest ticket attachment',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:500'],
+                'default' => 10,
+                'suffix' => 'MB',
+                // The effective limit is min(this, security.max_upload_mb) — a field narrows, never
+                // widens, which is the rule the whole upload gate rests on.
+                'help' => 'The effective limit is this or the global upload cap under Security, '
+                    .'whichever is smaller.',
+                'span' => 3,
+                'sort' => 340,
+            ],
+            'ticket_max_attachments' => [
+                'label' => 'Most files on one ticket or reply',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:50'],
+                'default' => 5,
+                'span' => 3,
+                'sort' => 350,
+            ],
+
+            // -------------------------------------------------------------- meetings
+            'meeting_default_duration_minutes' => [
+                'label' => 'Meetings default to',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:5', 'max:1440'],
+                'default' => 30,
+                'suffix' => 'minutes',
+                'span' => 3,
+                'sort' => 400,
+            ],
+            'meeting_default_reminder_minutes' => [
+                'label' => 'Remind participants',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:10080'],
+                'default' => 30,
+                'suffix' => 'minutes before',
+                'span' => 3,
+                'sort' => 410,
+            ],
+            'meeting_second_reminder_minutes' => [
+                'label' => 'And again',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:10080'],
+                'default' => 0,
+                'suffix' => 'minutes before',
+                'help' => '0 sends one reminder only.',
+                'span' => 3,
+                'sort' => 420,
+            ],
+            'meeting_allow_external_participants' => [
+                'label' => 'Meetings may include outsiders',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                'default' => true,
+                'help' => 'Somebody with no account here, invited by name and email.',
+                'span' => 6,
+                'sort' => 430,
+            ],
+            'meeting_ics_enabled' => [
+                'label' => 'Offer a calendar download',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                'default' => true,
+                'span' => 3,
+                'sort' => 440,
+            ],
+            'meeting_room_clash_block' => [
+                'label' => 'Refuse a double-booked room',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                'default' => true,
+                // A meeting with no room cannot clash with anything physical, so it is only ever a
+                // warning there — this setting decides what happens when a room *is* booked.
+                'help' => 'Off, a clash is shown as a warning listing what it collides with, and the '
+                    .'meeting is saved anyway.',
+                'span' => 3,
+                'sort' => 450,
+            ],
+
+            // -------------------------------------------------------------- messaging
+            'messaging_enabled' => [
+                'label' => 'Internal messaging',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                'default' => true,
+                'span' => 6,
+                'sort' => 500,
+            ],
+            'messaging_allowed_pairs' => [
+                'label' => 'Who may message whom',
+                'type' => self::TYPE_MULTISELECT,
+                'rules' => ['nullable', 'array'],
+                'default' => [
+                    'admin_employee', 'employee_employee', 'client_manager',
+                    'collaborator_staff', 'student_staff', 'teacher_management',
+                ],
+                'options' => [
+                    'admin_employee' => 'Administrator and employee',
+                    'employee_employee' => 'Between employees',
+                    'client_manager' => 'Client and project manager',
+                    'collaborator_staff' => 'Collaborator and staff',
+                    'student_staff' => 'Student and institute staff',
+                    'teacher_management' => 'Teacher and management',
+                ],
+                // The pairs NOT on this list cannot be added to it: a student and a client have no
+                // case here at all, so widening the setting cannot reach them.
+                'help' => 'Removing a pair silences the threads that already exist between them, not '
+                    .'only new ones. No pairing outside this list can be enabled.',
+                'span' => 6,
+                'sort' => 510,
+            ],
+            'messaging_student_can_start' => [
+                'label' => 'Students may start a thread',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                'default' => true,
+                'help' => 'Off, they may still reply to one somebody else started.',
+                'span' => 3,
+                'sort' => 520,
+            ],
+            'messaging_client_can_start' => [
+                'label' => 'Clients may start a thread',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                'default' => true,
+                'span' => 3,
+                'sort' => 530,
+            ],
+            'messaging_collaborator_can_start' => [
+                'label' => 'Collaborators may start a thread',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                'default' => true,
+                'span' => 3,
+                'sort' => 540,
+            ],
+            'messaging_attachments_enabled' => [
+                'label' => 'Files may be sent in messages',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                'default' => true,
+                'span' => 3,
+                'sort' => 550,
+            ],
+            'messaging_attachment_max_mb' => [
+                'label' => 'Largest file in a message',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:500'],
+                'default' => 10,
+                'suffix' => 'MB',
+                'help' => 'The effective limit is this or the global upload cap under Security, '
+                    .'whichever is smaller.',
+                'span' => 3,
+                'sort' => 560,
+            ],
+            'messaging_rate_limit_per_minute' => [
+                'label' => 'Messages a person may send',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:600'],
+                'default' => 20,
+                'suffix' => 'per minute',
+                // Enforced in the service as well as in middleware: middleware counts requests, and
+                // the service counts sends, which are not the same number when one request retries.
+                'help' => 'Enforced both at the route and inside the service.',
+                'span' => 3,
+                'sort' => 570,
+            ],
+
+            // -------------------------------------------------------------- notifications
+            'notifications_mail_enabled' => [
+                'label' => 'Send notifications by email',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                // False until an installation has real SMTP behind it — see the class note.
+                'default' => false,
+                'help' => 'The bell always works. This is the master switch for the email copy, and '
+                    .'it stays off until the mail settings are real.',
+                'span' => 6,
+                'sort' => 600,
+            ],
+            'notification_digest_hour' => [
+                'label' => 'Daily summary goes out at',
+                'type' => self::TYPE_TIME,
+                'rules' => ['required', 'date_format:H:i'],
+                'default' => '08:00',
+                'span' => 3,
+                'sort' => 610,
+            ],
+            'notification_retention_days' => [
+                'label' => 'Keep archived notifications for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:3650'],
+                'default' => 180,
+                'suffix' => 'days',
+                'help' => '0 keeps them for ever. Only archived rows are ever pruned.',
+                'span' => 3,
+                'sort' => 620,
+            ],
+            'notification_bell_page_size' => [
+                'label' => 'Rows in the bell',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:50'],
+                'default' => 10,
+                'span' => 3,
+                'sort' => 630,
+            ],
+            'notification_mark_read_on_open' => [
+                'label' => 'Opening one marks it read',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                'default' => true,
+                'span' => 3,
+                'sort' => 640,
+            ],
+        ];
+    }
+
     private static function instituteFields(): array
     {
         return [
