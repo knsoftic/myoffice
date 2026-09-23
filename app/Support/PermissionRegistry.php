@@ -1382,7 +1382,16 @@ final class PermissionRegistry
                 'icon' => 'chat-bubble-left-ellipsis',
                 'is_core' => false,
                 'sort' => 1030,
-                'abilities' => self::merge(self::CRUD, self::FILES, self::RESTORE),
+                // `change_status` closes a thread (phase-19-23 §6.18): readable for ever afterwards,
+                // writable by nobody. It is the only status a conversation has, and it needed a name.
+                //
+                // **`view_any` is declared and granted to nobody** (§9.4). It exists for a future
+                // compliance reader, it is read-only even then, and every read it permits is logged.
+                // Granting it to a role would let that role read every private conversation in the
+                // system — a student's thread with their teacher included — and would make the §94
+                // matrix decorative. See `RoleSeeder`, which names the message abilities one by one
+                // for exactly this reason.
+                'abilities' => self::merge(self::CRUD, self::STATUS, self::FILES, self::RESTORE),
             ],
             'files' => [
                 'name' => 'Files',

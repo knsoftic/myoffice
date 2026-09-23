@@ -208,6 +208,14 @@ class RoleSeeder extends Seeder
                     // the SMTP credentials can receive every password-reset mail in the system, so
                     // Admin keeps `settings.edit` for the other twelve groups and is withheld this.
                     PermissionRegistry::permissionNamesFor('settings', ['edit_mail']),
+                    // phase-19-23 §9.4: `messages.view_any` is "granted to nobody by default". It is
+                    // the compliance reader's permission — read-only, every use logged — and an Admin
+                    // holding it would be able to read every private conversation in the system,
+                    // including a student's with their teacher and a collaborator's with staff. The
+                    // §94 matrix decides who may *talk* to whom; a blanket read would make that
+                    // decision cosmetic. Grant it deliberately, to a named person, when somebody
+                    // actually needs to audit a thread.
+                    PermissionRegistry::permissionNamesFor('messages', [Ability::ViewAny]),
                 ),
             ],
             [
@@ -499,7 +507,21 @@ class RoleSeeder extends Seeder
                 'is_default' => false,
                 'permissions' => $this->merge(
                     $staffBase,
-                    PermissionRegistry::permissionNamesFor(['support_tickets', 'messages', 'meetings']),
+                    PermissionRegistry::permissionNamesFor(['support_tickets', 'meetings']),
+                    // **`messages` is named ability by ability, and `view_any` is not among them**
+                    // (phase-19-23 §9.4: "granted to nobody by default"). A support agent messages
+                    // people; they do not read other people's threads. Handing the whole module over
+                    // would have given every agent every private conversation in the system,
+                    // including a student's with their teacher — and `messages.edit` / `.delete`
+                    // besides, which no role should hold at all: a sent message is corrected by
+                    // another message, never edited (INV-22-1's shape).
+                    PermissionRegistry::permissionNamesFor('messages', [
+                        Ability::View,
+                        Ability::Create,
+                        Ability::ChangeStatus,
+                        Ability::Upload,
+                        Ability::Download,
+                    ]),
                 ),
             ],
             [

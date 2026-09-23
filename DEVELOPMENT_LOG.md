@@ -261,6 +261,7 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D146 | **A row a queue will write cannot be patched after the fact, so the columns have to be part of the insert.** | `notifications` carries `event_key`, `module`, `level`, `url` and `actor_id` as columns, because the bell filters on every one of them and a filter on a JSON field can use no index — the table only grows (§2.25 archives, never deletes), so "unread, newest first, for this user" has to stay one indexed lookup. Laravel's `DatabaseChannel` writes four columns and none of those five, and `event_key` is `NOT NULL` with no default, so **every notification in the system was one dispatch away from a 1364** — including the fourteen Cms and Crm classes whose trait had said since Phase 4 "use the database channel once Phase 22 ships the table", and which switched themselves on the moment the migration ran. My first fix was an UPDATE straight after `dispatch()`, scoped to rows with an empty `event_key`. It cannot work, and the reason generalises: **these are `ShouldQueue`, so the row is written by a worker some time after the call returned.** The update matched nothing at all, and a later one could not have told this dispatch's rows from the next one's. `RichDatabaseChannel` merges the notification's own `databaseColumns()` into the payload the channel inserts — the channel's own keys win, so a notification cannot overwrite `id`, `type` or `data` by naming one. The rule: **when the write is deferred, every value it needs has to travel with it.** |
 | D147 | **A permission is not an audience, and using one as the other hides exactly the wrong rows.** | `NotificationRegistry::forUser()` is §6.19's "events whose module is enabled and whose audience can include this user", and I first implemented the second half as `requiredPermission`. The probe reported a student seeing *more* events than a project manager, which was true and was the bug: most events declare no `requiredPermission` at all, so almost everything passed for everyone, and a student's preference screen offered to mute "a wallet disagrees with its ledger". The obvious tightening — require a permission on the event's module — is worse. **A student holds no permission whatsoever on `meetings`, `messages` or `support_tickets`**; their access runs through `student_portal.*`, and yet they are invited to meetings and raise tickets daily. That rule would have hidden the rows they most need while still showing them the ones they cannot use. So the registry says it outright: each event declares the panels it reaches. The general shape is the one D141 found from the other side — **when a check needs a fact, declare the fact rather than inferring it from a neighbouring one that was never about it.** Permissions answer "may you act"; they were never asked "could this ever concern you". |
 | D148 | **A cache with two owners has one of them holding a stale answer from the moment the other writes.** | `NotificationService` kept its own copy of a user's `notification_preferences` rows, and `NotificationPreferenceService` wrote them. Within one request that is enough: the probe muted an event and the very next dispatch still delivered, because the save went to one cache and the read came from the other. Nothing failed, nothing logged, and the only visible symptom was a person receiving something they had just switched off — which reads as "preferences do not work" and is close to unreportable. The cache now lives with the writer and the reader asks for it, so `update()` and `resetToDefaults()` empty the only copy there is. The same run turned up the probe-craft version of it: `DatabaseTransactionRecord::executeCallbacks()` runs the whole array and **does not clear it**, so a probe draining after-commit callbacks by hand replays every earlier one — which had this probe reporting that a client was notified about their own reply, when what had happened was the previous reply's notification being delivered a second time. An offset per record fixes it. Both halves are the same sentence: **if something can be run or read twice, say which copy is authoritative and where the mark is.** |
+| D149 | **`permissionNamesFor('module')` grants every ability that module declares, which is how a privacy rule gets undone by a helper that was only being tidy.** | §9.4 says `messages.view_any` is "granted to nobody by default" — it is the compliance reader's permission, read-only even then, and every read it allows is logged. `RoleSeeder` gave the whole `messages` module to **Admin** and **Support Agent** in one line each, because that is what the helper returns. The effect was that every support agent in the installation could read every private conversation in it: a student's thread with their teacher, a collaborator's with staff, a client's with their project manager. **Nothing about the symptom would ever have announced itself** — the threads simply appeared, to people who had every reason to think they were meant to. The §94 matrix decides who may *talk* to whom, and a blanket read makes that decision cosmetic. Phase 22's policy probe found it by asking the question the contract asks rather than the question the code implies, which is the whole reason for asking it. Three things came out of the fix and each is a rule. **First: a module whose abilities are not uniformly safe must be granted ability by ability**, with the withheld ones named in a comment, or the next person to add a role will reach for the one-liner again. **Second: a seeder cannot correct an existing install** — D65 says converge additively and never revoke, which is right, so the correction is a dated, reversible migration where it can be seen. **Third: `Gate::before` means Super Admin keeps the row, and pretending otherwise in the permissions table would be worse than saying so.** |
 ---
 
 ## 5. Phase Tracker
@@ -722,7 +723,8 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 | [x] | `MeetingService`, with `meetings` registered as a clash occupant (D144) and an 85-check behavioural probe |
 | [x] | `NotificationRegistry` (53 events), `NotificationService`, `NotificationPreferenceService`, `UnreadCounters`, and `RichDatabaseChannel` — the columns the stock channel could not write (D146) |
 | [x] | Six listeners wiring tickets, meetings and messages to the bell, and `FeeReminderService` switched from a `class_exists()` guard that was never going to fire to a real dispatch |
-| [ ] | Policies, routes, controllers and the screens across all five panels |
+| [x] | Seven policies over §9.4's table, and a probe that found `messages.view_any` granted to two roles the contract grants it to nobody (D149) |
+| [ ] | Routes, controllers and the screens across all five panels |
 | [ ] | The scheduled commands: `meetings:send-reminders`, the SLA breach sweep, the daily digest, the retention prune |
 | [ ] | The trigger call sites Phases 19-21 own — the registry entries exist and are preference-able; each act needs one `dispatch()` in its own phase's service |
 
@@ -733,6 +735,63 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 ---
 
 ## 6. Change Log
+
+### 2026-09-23 — Phase 22 policies, and a permission three roles should never have held
+
+**Seven policies over §9.4's table**, and the probe over them found something the code would never
+have reported: **`messages.view_any` was granted to Admin and to Support Agent**, when §9.4 says it
+is granted to nobody. Every support agent in the installation could read every private conversation
+in it. The cause is one line per role — `permissionNamesFor(['support_tickets', 'messages',
+'meetings'])`, which returns every ability those modules declare — and the symptom is that the
+threads simply appear to somebody with every reason to think they are meant to. D149 has the three
+rules that came out of it; the correction is a dated, reversible migration, because D65 rightly
+forbids a seeder revoking what an administrator holds.
+
+**Being in the room is a right, and it is not a permission.** A client invited to a kick-off holds
+no `meetings.*` permission at all; a student holds none on `support_tickets` or `messages` either.
+Every check in `MeetingPolicy` and `ConversationPolicy` therefore starts with "are they on the guest
+list" and only then asks what a permission adds — a policy built the other way round locks the
+people the meeting is *for* out of it.
+
+**`SupportTicketPolicy::view()` has two completely different answers and both are written out.** A
+holder of `view_any` sees the queue, branch-scoped. Anybody else sees the tickets they are in, and
+for a client that means their company's — *except* one marked `is_private_to_creator`, which is
+phase-05 §12 Q3's shape: a company shares an account, not a diary. Folding those into one condition
+is how a policy ends up letting a colleague read a private ticket because the client clause happened
+to be evaluated first.
+
+**Replying is `view` plus being involved, never `edit`.** A client may never edit a ticket and must
+always be able to answer one; a reply composer gated on `edit` is how a portal goes read-only by
+accident.
+
+**A requester may reopen their own ticket and do nothing else.** That is the single status move
+§2.28.7 gives a portal, so `changeStatus()` is not a flat permission check. Priority is staff-only
+(§12.2 Q6): a requester who could declare "urgent" would, every time, and within a month the word
+would mean nothing.
+
+**`messages.view_any` reads and never writes**, and `ConversationPolicy::send()` refuses it
+explicitly. A reader who could also write would be a voice inside the §94 matrix that the matrix
+never saw.
+
+**`messages` gained `change_status`**, which §6.18's `close()` names and nothing had declared.
+
+**`MessagePolicy` and `TicketReplyPolicy` are almost entirely `false`, on purpose.** The models
+already refuse every edit and every delete below the gate, so these exist to keep the buttons off
+the screen — Support Agent still holds `messages.edit` and `.delete` from the earlier seeding, D65
+keeps them, and a view that asked the permission would offer an edit that throws. The policies make
+inert rows look inert from the outside too.
+
+**The probe asserts the gate as well as the policy.** For a Super Admin every one of these returns
+true, because `Gate::before` runs first — so each invariant is checked twice: the policy says no to
+everybody else, and the model throws on the Super Admin. That is D124 stated as a test rather than
+as a paragraph, and it is the check that would catch somebody moving a rule back into a policy.
+
+**Files.** `app/Policies/Support/` (`SupportTicketPolicy`, `TicketReplyPolicy`, `MeetingPolicy`,
+`ConversationPolicy`, `MessagePolicy`, `TicketDepartmentPolicy`, `Concerns/ChecksSupportPermissions`),
+`database/migrations/2026_09_23_100001_withdraw_messages_view_any_from_seeded_roles.php`,
+`database/seeders/RoleSeeder.php`, `app/Support/PermissionRegistry.php`. No policy registration was
+needed: `App\Models\Support\X` resolves to `App\Policies\Support\XPolicy` by Laravel's own
+guesser, which the probe confirmed rather than assumed.
 
 ### 2026-09-23 — Phase 22 notifications: a registry, a channel, and six listeners
 
@@ -2677,6 +2736,7 @@ The two HIGH findings are both real and are being fixed now:
 
 | Date | What was tested | Command / method | Result |
 |---|---|---|---|
+| 2026-09-23 | The Phase 22 policies | probe over §9.4's table, rolled back | PASS — **54/54**, and one real finding on the way: a client sees their firm's shared ticket and not its private one and not another firm's; a requester may reply and reopen and may never set a priority, assign, or write an internal note; an internal note is invisible to the requester; being in the room is what grants a meeting, and removing somebody revokes it at once; a student never writes minutes and reads them only once the meeting is completed; `messages.view_any` reads and never writes; somebody who left a thread loses it; a desk with tickets cannot be deleted but can be retired; and for every invariant the gate says yes to a Super Admin while the model still throws |
 | 2026-09-23 | The notification layer | behavioural probe over 12 sections, rolled back | PASS — **75/75**: the registry's 53 events and their groups, an unknown key throwing with a named near miss, the row's five columns, inactive / missing / unpermitted recipients each counted separately, preferences saved, cleared when they agree with the default and ignored when they try to mute a mandatory event, the master mail switch, a disabled module silencing its events and then the bell itself, the page-plus-one bell query, archive-is-not-delete, the memoised counters, and `dispatchToPermission` resolving to exactly the holders |
 | 2026-09-23 | The pre-Phase-22 notification classes | probe against the table that did not exist when they were written | PASS — **9/9**: a Crm and a Cms notification both land, carrying their own `kind` (and, for the one that called it `type`, that) promoted to `event_key`, with the module, a level and the deep link they already built, and `data` untouched so rows written before today still read |
 | 2026-09-23 | The six listeners | probe draining after-commit callbacks by hand, rolled back | PASS — **32/32**: nothing fires before the commit; an internal note never reaches the requester; a public reply does; a requester's reply reaches the assignee; nobody hears about their own reply, meeting, message or reopen; the desk's own queue moves tell the requester nothing while `resolved` does; `notified_at` is stamped; an external guest gets no row; a muted thread sends nothing but still moves the unread count; and every row written carries a registry key, a link and a level |
