@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Support;
 
 use App\Enums\ConversationType;
+use App\Events\Support\MessageSent;
 use App\Models\Support\Conversation;
 use App\Models\Support\ConversationParticipant;
 use App\Models\Support\Message;
@@ -220,7 +221,7 @@ final class ConversationService
 
         $this->assertWithinRateLimit($sender);
 
-        return DB::transaction(function () use ($conversation, $sender, $body, $attachments): Message {
+        $result = DB::transaction(function () use ($conversation, $sender, $body, $attachments): array {
             $locked = Conversation::query()->whereKey($conversation->getKey())->lockForUpdate()->firstOrFail();
 
             $message = new Message;
@@ -236,8 +237,16 @@ final class ConversationService
 
             $this->refreshThread($locked, $message);
 
-            return $message->refresh();
+            return [$locked->refresh(), $message->refresh()];
         });
+
+        [$thread, $message] = $result;
+
+        // After the commit: the unread counts moved inside the transaction, and telling somebody
+        // about a message a later failure rolled back would leave them opening an empty thread.
+        MessageSent::dispatch($thread, $message, (int) $sender->getKey());
+
+        return $message;
     }
 
     /**

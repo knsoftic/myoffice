@@ -8,6 +8,10 @@ use App\Enums\PanelType;
 use App\Enums\Priority;
 use App\Enums\ReplyVisibility;
 use App\Enums\TicketStatus;
+use App\Events\Support\TicketAssigned;
+use App\Events\Support\TicketCreated;
+use App\Events\Support\TicketReplied;
+use App\Events\Support\TicketStatusChanged;
 use App\Models\Collaborator\Collaborator;
 use App\Models\Hr\Employee;
 use App\Models\Institute\Student;
@@ -102,7 +106,7 @@ final class TicketService
 
         $subjects = $this->subjectsFor($requester, $data);
 
-        return $this->numbers->assign(
+        $ticket = $this->numbers->assign(
             'support.ticket_prefix',
             'support.ticket_next_number',
             '%05d',
@@ -134,6 +138,12 @@ final class TicketService
             },
             'uq_tk_number',
         );
+
+        // After the commit, always: a ticket that rolled back is not one anybody should be paged
+        // about, and `ShouldDispatchAfterCommit` on the event is what guarantees it.
+        TicketCreated::dispatch($ticket, (int) $actor->getKey());
+
+        return $ticket;
     }
 
     /**
@@ -168,7 +178,7 @@ final class TicketService
             ? (ReplyVisibility::tryFrom((string) ($data['visibility'] ?? '')) ?? ReplyVisibility::Public)
             : ReplyVisibility::Public;
 
-        return DB::transaction(function () use ($ticket, $body, $attachments, $author, $panel, $isStaff, $visibility): TicketReply {
+        $result = DB::transaction(function () use ($ticket, $body, $attachments, $author, $panel, $isStaff, $visibility): array {
             $locked = SupportTicket::query()->whereKey($ticket->getKey())->lockForUpdate()->firstOrFail();
 
             // The first public staff reply is the first response, once. See the class note.
@@ -198,8 +208,16 @@ final class TicketService
             $this->reactToReply($locked, $author, $isStaff, $visibility);
             $this->recountCaches($locked);
 
-            return $reply->refresh();
+            return [$locked->refresh(), $reply->refresh()];
         });
+
+        [$ticket, $saved] = $result;
+
+        // The reply travels with the ticket: who hears about it depends entirely on which reply it
+        // was, and a listener holding only the ticket would have to guess.
+        TicketReplied::dispatch($ticket, $saved, (int) $author->getKey());
+
+        return $saved;
     }
 
     /** Hand it to an agent, or take it off one. */
@@ -212,7 +230,9 @@ final class TicketService
             );
         }
 
-        return DB::transaction(function () use ($ticket, $agent, $actor): SupportTicket {
+        $previous = $ticket->getAttribute('assigned_to');
+
+        $assigned = DB::transaction(function () use ($ticket, $agent, $actor): SupportTicket {
             $locked = SupportTicket::query()->whereKey($ticket->getKey())->lockForUpdate()->firstOrFail();
 
             $locked->forceFill([
@@ -231,6 +251,19 @@ final class TicketService
 
             return $locked->refresh();
         });
+
+        // Taking a ticket *off* somebody notifies nobody: there is no new assignee to tell, and the
+        // person it left finds out from their own queue.
+        if ($agent !== null) {
+            TicketAssigned::dispatch(
+                $assigned,
+                $previous === null ? null : (int) $previous,
+                false,
+                (int) $actor->getKey(),
+            );
+        }
+
+        return $assigned;
     }
 
     /**
@@ -267,7 +300,7 @@ final class TicketService
             ));
         }
 
-        return DB::transaction(function () use ($ticket, $from, $to, $reason, $actor): SupportTicket {
+        $moved = DB::transaction(function () use ($ticket, $from, $to, $reason, $actor): SupportTicket {
             $locked = SupportTicket::query()->whereKey($ticket->getKey())->lockForUpdate()->firstOrFail();
 
             // Leaving `waiting`: give the paused time back before the status moves.
@@ -325,6 +358,10 @@ final class TicketService
 
             return $locked->refresh();
         });
+
+        TicketStatusChanged::dispatch($moved, $from, $to, $reason === '' ? null : $reason, (int) $actor->getKey());
+
+        return $moved;
     }
 
     /** Change the priority. Staff only, reason mandatory, targets recomputed. */

@@ -75,17 +75,21 @@ enum FeeReminderType: string
     }
 
     /**
-     * The notification Phase 22 sends for this type (§13.3 — Phase 22 ships the classes).
+     * The `NotificationRegistry` event this type sends under (§13.3, §10.3).
      *
-     * Returned as a string rather than a `::class` reference so this enum stays loadable before those
-     * classes exist; `FeeReminderService` checks the class before dispatching and records the row either
-     * way, because "we decided to tell them" is worth logging even on a night the mailer was missing.
+     * **A key, not a class.** Phase 22 was contracted to ship `FeeDueReminder` and `FeeOverdue`, and
+     * what it shipped instead was a registry: an event key carries the level, the default channels,
+     * the preference row and the module gate, and two bespoke classes would have carried none of
+     * them. A student who muted fee reminders would still have received them, because
+     * `$user->notify()` asks nobody's permission (INV-22-7).
+     *
+     * The keys are §10.3's own, so the preference screen and the bell agree with the table.
      */
-    public function notificationClass(): string
+    public function notificationEventKey(): string
     {
         return match ($this) {
-            self::UpcomingDue, self::DueToday => 'App\\Notifications\\Institute\\FeeDueReminder',
-            self::Overdue => 'App\\Notifications\\Institute\\FeeOverdue',
+            self::UpcomingDue, self::DueToday => 'fee.due',
+            self::Overdue => 'fee.overdue',
         };
     }
 

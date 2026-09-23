@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Institute;
 
 use App\DataObjects\Institute\ReminderRunResult;
+use App\DataObjects\Support\AudienceInput;
 use App\Enums\FeeReminderType;
 use App\Enums\InstallmentStatus;
 use App\Enums\StudentFeeStatus;
@@ -13,6 +14,7 @@ use App\Models\Institute\StudentFeeInstallment;
 use App\Models\Institute\StudentFeeReminder;
 use App\Models\User;
 use App\Services\Institute\Exceptions\FeeRuleException;
+use App\Services\Support\NotificationService;
 use App\Support\Format;
 use App\Support\Money;
 use Carbon\CarbonImmutable;
@@ -52,6 +54,7 @@ final class FeeReminderService
 
     public function __construct(
         private readonly DatabaseManager $db,
+        private readonly NotificationService $notifications,
     ) {}
 
     /**
@@ -320,16 +323,37 @@ final class FeeReminderService
                 'created_at' => Carbon::now(),
             ])->save();
 
-            // Phase 22 ships the notification classes (§13.3). Until they exist the row is still
-            // written, because "we decided to tell them" is worth recording on a night the mailer was
-            // missing — and the dedupe guard has to hold across that gap too.
-            $class = $type->notificationClass();
+            // Phase 22 shipped a registry rather than the two classes §13.3 named, so the reminder
+            // goes out through `NotificationService` — the only thing that reads the student's
+            // preferences, the module gate and the mail master switch (INV-22-7).
+            //
+            // The row is written first and unconditionally, because "we decided to chase them" is
+            // worth recording on a night nobody could be reached — and the dedupe guard has to hold
+            // across that gap, or the next run chases them twice.
+            $saved = $reminder->refresh();
 
-            if ($recipient !== null && class_exists($class)) {
-                $recipient->notify(new $class($reminder->refresh()));
+            if ($recipient !== null) {
+                $this->notifications->dispatch(
+                    $type->notificationEventKey(),
+                    AudienceInput::of($recipient),
+                    [
+                        'title' => $type->isLate() ? 'A fee payment is overdue' : 'A fee payment is due',
+                        'body' => sprintf(
+                            '%s is outstanding, due %s.',
+                            Format::money($outstanding),
+                            $dueDate->format('j M Y'),
+                        ),
+                        'student_fee_id' => (int) $fee->getKey(),
+                        'installment_id' => $line?->getKey(),
+                        'reminder_id' => (int) $saved->getKey(),
+                        'amount_due' => (string) $outstanding,
+                        'due_date' => $dueDate->toDateString(),
+                    ],
+                    $actor,
+                );
             }
 
-            return $reminder->refresh();
+            return $saved;
         });
     }
 }

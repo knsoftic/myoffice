@@ -132,7 +132,7 @@ final class CertificateService
             return $certificate;
         }
 
-        return DB::transaction(function () use ($certificate, $changes, $actor): Certificate {
+        return DB::transaction(function () use ($certificate, $changes): Certificate {
             $before = $certificate->only(array_keys($changes));
 
             $certificate->forceFill($changes)->save();

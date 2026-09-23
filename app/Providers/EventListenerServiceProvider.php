@@ -25,6 +25,15 @@ use App\Events\Finance\PaymentReversalRecorded;
 use App\Events\Finance\PaymentReversalRejected;
 use App\Events\Finance\ProjectPaymentRecorded;
 use App\Events\Finance\StudentFeePaymentRecorded;
+use App\Events\Support\MeetingCancelled;
+use App\Events\Support\MeetingRescheduled;
+use App\Events\Support\MeetingScheduled;
+use App\Events\Support\MeetingUpdated;
+use App\Events\Support\MessageSent;
+use App\Events\Support\TicketAssigned;
+use App\Events\Support\TicketCreated;
+use App\Events\Support\TicketReplied;
+use App\Events\Support\TicketStatusChanged;
 use App\Listeners\Cms\FlushPublicContentCache;
 use App\Listeners\Cms\LogApplicationStage;
 use App\Listeners\Cms\LogInquiryRouting;
@@ -49,6 +58,12 @@ use App\Listeners\Finance\RecomputeInvoiceOnPaymentChange;
 use App\Listeners\RecordFailedLogin;
 use App\Listeners\RecordLogout;
 use App\Listeners\RecordSuccessfulLogin;
+use App\Listeners\Support\NotifyMeetingParticipants;
+use App\Listeners\Support\NotifyOfNewMessage;
+use App\Listeners\Support\NotifyOfNewTicket;
+use App\Listeners\Support\NotifyOfTicketAssignment;
+use App\Listeners\Support\NotifyOfTicketReply;
+use App\Listeners\Support\NotifyOfTicketStatusChange;
 use App\Models\User;
 use App\Services\Auth\LoginHistoryRecorder;
 use App\Services\Auth\LoginRedirector;
@@ -82,7 +97,9 @@ final class EventListenerServiceProvider extends ServiceProvider
     /**
      * Event class => listener classes, in the order they run.
      *
-     * @var array<class-string, list<class-string>>
+     * A listener is a class name, or `[class, 'method']` when one class handles several events.
+     *
+     * @var array<class-string, list<class-string|array{class-string, string}>>
      */
     private const LISTENERS = [
         Login::class => [RecordSuccessfulLogin::class],
@@ -124,6 +141,26 @@ final class EventListenerServiceProvider extends ServiceProvider
         // because the right response to either outcome is the same — ask the database what is true now.
         ProjectPaymentRecorded::class => [QueueProjectPaymentCommission::class, RecomputeInvoiceOnPaymentChange::class],
         PaymentReversalRejected::class => [RecomputeInvoiceOnPaymentChange::class],
+
+        // phase-22 §10.2 / §10.3. Every one of these listeners does one thing: work out who should
+        // hear, and hand it to NotificationService (INV-22-7). None of them decides a channel, a
+        // level or a link — the registry owns those, so a change to how a meeting notification looks
+        // is one edit rather than four.
+        //
+        // The events are all `ShouldDispatchAfterCommit`, so a ticket, a message or a meeting that
+        // a later failure rolled back never notifies anybody about a row that does not exist.
+        TicketCreated::class => [NotifyOfNewTicket::class],
+        TicketReplied::class => [NotifyOfTicketReply::class],
+        TicketAssigned::class => [NotifyOfTicketAssignment::class],
+        TicketStatusChanged::class => [NotifyOfTicketStatusChange::class],
+        MessageSent::class => [NotifyOfNewMessage::class],
+
+        // One listener, four events: the audience question is identical every time — who is on the
+        // guest list — and only the wording changes.
+        MeetingScheduled::class => [[NotifyMeetingParticipants::class, 'invited']],
+        MeetingUpdated::class => [[NotifyMeetingParticipants::class, 'updated']],
+        MeetingRescheduled::class => [[NotifyMeetingParticipants::class, 'rescheduled']],
+        MeetingCancelled::class => [[NotifyMeetingParticipants::class, 'cancelled']],
     ];
 
     public function register(): void

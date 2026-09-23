@@ -258,6 +258,9 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D143 | **A per-row cache has to be refreshed on every row it is a cache of, and "the latest one" is not that set.** | `messages.reads_count` is defined as the number of participants whose `last_read_message_id >= id` — a figure that belongs to **each message**. `markRead()` refreshed only the message the reader had just reached, so every message before it kept saying nobody had read it: a thread of forty messages, fully read by three people, showed a read count on the fortieth and zero on the other thirty-nine. Nothing failed; the number was simply wrong everywhere except the one place the probe would have looked if it had checked the newest message instead of the first. **The set that changed is the window between where the reader was and where they are now** — normally the handful they had unread — so that is what is refreshed, capped at two hundred so somebody returning after a thousand messages does not pay for all of them in one request. The general shape: when a cache is per-row, the question is never "which row did the user touch" but "which rows' answers changed", and those are rarely the same row. |
 | D144 | **A later phase joins a shared abstraction by fitting its shape, not by widening it — and the fitting has to fail loudly at the edge.** | `ScheduleClashDetector` scans a **date** column and two **TIME** columns, because that is what a timetable entry, a class session, a demo and an exam all have. A meeting has `scheduled_at` as a datetime, so `where('scheduled_at', '<', '13:00:00')` compares a datetime with a time string and **matches nothing, silently** — the detector would have run, returned clean, and double-booked every boardroom in the building. The fix is three generated STORED columns on `meetings` that present the shape the detector already reads, not a new branch inside Phase 16's class: D47 exists because two phases sharing one piece of logic and disagreeing about it is how a rule stops being one rule. **The edge is midnight.** A 23:00 meeting lasting two hours has an end *time* of 01:00 — earlier than its start — and `start < end` then finds no overlap at all, missing every conflict including the obvious one. Clamping it to `23:59:59` makes the start day correct and leaves only the small hours of the next day unchecked, which is a bounded limitation written in the migration rather than an unbounded one nobody knows about. The general shape: **when you adapt A to B's interface, the conversion's failure mode is usually "returns nothing", and "returns nothing" reads exactly like "all clear".** |
 | D145 | **An after-commit event cannot be observed from inside a transaction that is never committed — and noticing that proved more than the assertion was going to.** | The `MeetingService` probe ran `Event::fake()` and asserted `MeetingScheduled` had been dispatched. It had not: `EventFake::fakeEvent()` checks `ShouldDispatchAfterCommit` and parks the recording as a deferred callback, exactly as the real dispatcher does, and the probe's outer `DB::beginTransaction()` is rolled back rather than committed. The naive reading is "the probe cannot test events"; the useful one is that **the emptiness is itself the assertion**. The section now checks that nothing has fired *yet* — proving the service dispatched in a way that cannot notify twelve people about a meeting a later failure rolled back — then drains `app('db.transactions')->getPendingTransactions()` and checks what arrives, which proves the dispatch happened at all. Two guarantees from the fact that the first attempt failed. The same run also caught a probe writing past a switch it had just flipped: a meeting booked with `meeting_room_clash_block` off went on holding that room for every later section, so an edit four sections down failed against a fixture rather than against the rule under test. **A probe that mutates a setting owns the rows it creates under it**, and they belong on their own day. |
+| D146 | **A row a queue will write cannot be patched after the fact, so the columns have to be part of the insert.** | `notifications` carries `event_key`, `module`, `level`, `url` and `actor_id` as columns, because the bell filters on every one of them and a filter on a JSON field can use no index — the table only grows (§2.25 archives, never deletes), so "unread, newest first, for this user" has to stay one indexed lookup. Laravel's `DatabaseChannel` writes four columns and none of those five, and `event_key` is `NOT NULL` with no default, so **every notification in the system was one dispatch away from a 1364** — including the fourteen Cms and Crm classes whose trait had said since Phase 4 "use the database channel once Phase 22 ships the table", and which switched themselves on the moment the migration ran. My first fix was an UPDATE straight after `dispatch()`, scoped to rows with an empty `event_key`. It cannot work, and the reason generalises: **these are `ShouldQueue`, so the row is written by a worker some time after the call returned.** The update matched nothing at all, and a later one could not have told this dispatch's rows from the next one's. `RichDatabaseChannel` merges the notification's own `databaseColumns()` into the payload the channel inserts — the channel's own keys win, so a notification cannot overwrite `id`, `type` or `data` by naming one. The rule: **when the write is deferred, every value it needs has to travel with it.** |
+| D147 | **A permission is not an audience, and using one as the other hides exactly the wrong rows.** | `NotificationRegistry::forUser()` is §6.19's "events whose module is enabled and whose audience can include this user", and I first implemented the second half as `requiredPermission`. The probe reported a student seeing *more* events than a project manager, which was true and was the bug: most events declare no `requiredPermission` at all, so almost everything passed for everyone, and a student's preference screen offered to mute "a wallet disagrees with its ledger". The obvious tightening — require a permission on the event's module — is worse. **A student holds no permission whatsoever on `meetings`, `messages` or `support_tickets`**; their access runs through `student_portal.*`, and yet they are invited to meetings and raise tickets daily. That rule would have hidden the rows they most need while still showing them the ones they cannot use. So the registry says it outright: each event declares the panels it reaches. The general shape is the one D141 found from the other side — **when a check needs a fact, declare the fact rather than inferring it from a neighbouring one that was never about it.** Permissions answer "may you act"; they were never asked "could this ever concern you". |
+| D148 | **A cache with two owners has one of them holding a stale answer from the moment the other writes.** | `NotificationService` kept its own copy of a user's `notification_preferences` rows, and `NotificationPreferenceService` wrote them. Within one request that is enough: the probe muted an event and the very next dispatch still delivered, because the save went to one cache and the read came from the other. Nothing failed, nothing logged, and the only visible symptom was a person receiving something they had just switched off — which reads as "preferences do not work" and is close to unreportable. The cache now lives with the writer and the reader asks for it, so `update()` and `resetToDefaults()` empty the only copy there is. The same run turned up the probe-craft version of it: `DatabaseTransactionRecord::executeCallbacks()` runs the whole array and **does not clear it**, so a probe draining after-commit callbacks by hand replays every earlier one — which had this probe reporting that a client was notified about their own reply, when what had happened was the previous reply's notification being delivered a second time. An offset per record fixes it. Both halves are the same sentence: **if something can be run or read twice, say which copy is authoritative and where the mark is.** |
 ---
 
 ## 5. Phase Tracker
@@ -717,8 +720,11 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 | [x] | `MessagingMatrix` and `ConversationService` — §94's six pairs, re-checked on every send |
 | [x] | `TicketSlaService`, `TicketAssignmentService`, `TicketService` — the clock, the four strategies and §2.28.7's transition table as data |
 | [x] | `MeetingService`, with `meetings` registered as a clash occupant (D144) and an 85-check behavioural probe |
-| [ ] | The services still owed: `NotificationRegistry`, `NotificationService`, `NotificationPreferenceService`, `UnreadCounters` |
-| [ ] | Policies, routes, controllers, the screens across all five panels, and the notification classes three earlier phases are waiting on |
+| [x] | `NotificationRegistry` (53 events), `NotificationService`, `NotificationPreferenceService`, `UnreadCounters`, and `RichDatabaseChannel` — the columns the stock channel could not write (D146) |
+| [x] | Six listeners wiring tickets, meetings and messages to the bell, and `FeeReminderService` switched from a `class_exists()` guard that was never going to fire to a real dispatch |
+| [ ] | Policies, routes, controllers and the screens across all five panels |
+| [ ] | The scheduled commands: `meetings:send-reminders`, the SLA breach sweep, the daily digest, the retention prune |
+| [ ] | The trigger call sites Phases 19-21 own — the registry entries exist and are preference-able; each act needs one `dispatch()` in its own phase's service |
 
 ### [ ] PHASE 23 — Reports, analytics, activity log, audit trail, global search, exports
 ### [ ] PHASE 24 — Security, financial integrity, responsive and performance testing
@@ -727,6 +733,84 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 ---
 
 ## 6. Change Log
+
+### 2026-09-23 — Phase 22 notifications: a registry, a channel, and six listeners
+
+**Fifty-three events declared in one place**, for the same reason the permissions and the settings
+are: a `notification_events` table can drift from the code that dispatches into it, and a typo'd key
+would create a row nobody ever sees a preference for. `NotificationRegistry` is the fourth registry
+and follows the shape of the first three exactly.
+
+**The insert turned out to be the hard part.** `notifications.event_key` is `NOT NULL` with no
+default and Laravel's `DatabaseChannel` writes four columns — `id`, `type`, `data`, `read_at` — so
+every notification in the system was one dispatch away from a 1364, including the fourteen Cms and
+Crm classes whose trait had said since Phase 4 "use the database channel once Phase 22 ships the
+table" and which switched themselves on the moment the migration ran. The obvious fix, an UPDATE
+after `dispatch()`, cannot work: these are `ShouldQueue`, so the row is written by a worker some
+time after the call returned, and the update matches nothing at all. `RichDatabaseChannel` builds
+the columns into the insert instead (D146).
+
+**`forUser()` needed a fact the contract had a field for and I had not used.** `requiredPermission`
+cannot answer "could this ever reach you": a student holds no permission whatsoever on `meetings`,
+`messages` or `support_tickets` — their access runs through `student_portal.*` — yet they are
+invited to meetings every day. Gating on module permissions would hide exactly the rows they need;
+gating on nothing offers them "a wallet disagrees with its ledger" to mute. Each event now declares
+which panels it reaches, which is the contract's own wording written down rather than inferred
+(D147).
+
+**The preference cache had two owners for about an hour**, and the probe caught it: an event muted
+and dispatched against in the same request still arrived, because the save went to one cache and the
+read came from the other. One owner now (D148).
+
+**`support_tickets.view_reports` is declared.** §10.3 names it as `ticket.sla_breach`'s audience and
+nothing had ever declared it, so the audience resolved to nobody and the most urgent notification in
+the support module was the one guaranteed to reach no one. `PermissionRegistry` gains `REPORTS` on
+that module; the seeders are idempotent and created exactly one row.
+
+**Six listeners, each doing one thing: work out who should hear.** None of them decides a channel, a
+level or a link — the registry owns those, so a change to how a meeting notification looks is one
+edit rather than four. The judgements they *do* make are the ones §10.3 spells out and a reasonable
+implementation would get wrong:
+
+- an **internal note** reaches staff and never the requester, because the whole point of the
+  distinction is that the requester does not know it exists;
+- **nobody is told about their own act** — their own reply, their own meeting, their own message,
+  their own reopen. A notification about something you just did reads as a bug;
+- **`open` to `in_progress` tells the requester nothing.** That is a desk managing its own queue;
+  resolved, closed and reopened are the three that change what the requester should do next;
+- a **muted thread still moves the unread count.** Muting asked to stop being interrupted, not to
+  lose messages;
+- an **external meeting guest gets no bell row**, because they have no account to put one on
+  (PH22-37) — they are reached by the invitation and the `.ics` with it.
+
+**The fee reminder now actually reminds somebody.** Phase 18 wrote the row and then checked
+`class_exists()` on two classes §13.3 assigned to Phase 22; Phase 22 shipped a registry instead, so
+that guard was never going to fire and a student was never going to hear anything. `FeeReminderType`
+now names an **event key** rather than a class, and `FeeReminderService` dispatches through
+`NotificationService` — which is the only thing that reads the student's preferences, the module
+gate and the mail master switch (INV-22-7). The reminder row is still written first and
+unconditionally, because "we decided to chase them" is worth recording on a night nobody could be
+reached, and the dedupe guard has to hold across that gap.
+
+**Files.** `app/Support/{NotificationRegistry,UnreadCounters}.php`,
+`app/Notifications/{NotificationEvent.php,Channels/RichDatabaseChannel.php,Support/RegistryNotification.php}`,
+`app/Services/Support/{NotificationService,NotificationPreferenceService}.php`,
+`app/Services/Support/Exceptions/InvalidNotificationEvent.php`,
+`app/DataObjects/Support/{ChannelSet,AudienceInput,DispatchResult,BellPayload,PreferenceMatrix}.php`,
+`app/Events/Support/{TicketCreated,TicketReplied,TicketAssigned,TicketStatusChanged,MessageSent}.php`,
+`app/Listeners/Support/` (six classes plus `BuildsTicketLinks`),
+`app/Providers/EventListenerServiceProvider.php`, `app/Support/PermissionRegistry.php`,
+`app/Enums/FeeReminderType.php`, `app/Services/Institute/FeeReminderService.php`,
+`app/Notifications/Cms/Concerns/BuildsCmsNotification.php`,
+`app/Notifications/Cms/ScheduledPagePublished.php`.
+
+**Still owed by Phase 22:** the policies, the routes, the controllers and the screens across five
+panels; the scheduled commands (`meetings:send-reminders`, the SLA breach sweep, the digest and the
+retention prune); and the *trigger* call sites in Phases 19, 20 and 21 — the registry entries for
+`material.published`, `assignment.*`, `exam.scheduled`, `result.published`, `certificate.*` and
+`idcard.issued` exist and are preference-able, but the services that perform those acts do not yet
+dispatch them. §10.3 assigns the trigger to the owning phase, so each is one `dispatch()` call in
+that phase's service.
 
 ### 2026-09-23 — Phase 22 services: the matrix, the threads, the queue, the diary
 
@@ -2593,6 +2677,10 @@ The two HIGH findings are both real and are being fixed now:
 
 | Date | What was tested | Command / method | Result |
 |---|---|---|---|
+| 2026-09-23 | The notification layer | behavioural probe over 12 sections, rolled back | PASS — **75/75**: the registry's 53 events and their groups, an unknown key throwing with a named near miss, the row's five columns, inactive / missing / unpermitted recipients each counted separately, preferences saved, cleared when they agree with the default and ignored when they try to mute a mandatory event, the master mail switch, a disabled module silencing its events and then the bell itself, the page-plus-one bell query, archive-is-not-delete, the memoised counters, and `dispatchToPermission` resolving to exactly the holders |
+| 2026-09-23 | The pre-Phase-22 notification classes | probe against the table that did not exist when they were written | PASS — **9/9**: a Crm and a Cms notification both land, carrying their own `kind` (and, for the one that called it `type`, that) promoted to `event_key`, with the module, a level and the deep link they already built, and `data` untouched so rows written before today still read |
+| 2026-09-23 | The six listeners | probe draining after-commit callbacks by hand, rolled back | PASS — **32/32**: nothing fires before the commit; an internal note never reaches the requester; a public reply does; a requester's reply reaches the assignee; nobody hears about their own reply, meeting, message or reopen; the desk's own queue moves tell the requester nothing while `resolved` does; `notified_at` is stamped; an external guest gets no row; a muted thread sends nothing but still moves the unread count; and every row written carries a registry key, a link and a level |
+| 2026-09-23 | The fee reminder, end to end | probe, rolled back | PASS — **9/9**: the reminder row is written first and unconditionally, a `fee.overdue` bell row lands with the amount and the fee it is about, and a student who muted it keeps the reminder row and loses only the bell row — which is the whole reason it dispatches through the service |
 | 2026-09-23 | `meetings` as a clash occupant | probe over the generated columns and the detector, rolled back | PASS — **18/18**: `meeting_date` / `meeting_start_time` / `meeting_end_time`, the midnight clamp keeping end after start, overlap, back-to-back, another day, cancelled and soft-deleted releasing the room, the self-ignore doing real work, and a virtual room holding nothing. The cancellation leg found `chk_me_cancel` refusing a cancel with no reason — the constraint working |
 | 2026-09-23 | `MeetingService` | behavioural probe over 15 sections, rolled back | PASS — **85/85**: booking and counts, derived `participant_type`, the four form refusals, outside guests and the switch that forbids them, the room block on and off with warnings carried out, answering, the retitle that keeps acceptances against the move that clears them, the reschedule chain and its refusal to fork, cancellation, the guest list, attendance closing a past meeting, the minutes refusing a student, the `.ics` (UID, SEQUENCE 0 then 1, one ATTENDEE, VALARM, RFC 5545 escaping, no line over 75 octets), the scope, and every cached count re-derived from its rows |
 | 2026-09-23 | Scheduling regression after registering the new occupant | `DB_DATABASE=my_office_test php artisan test --filter="ExamLifecycle\|ScheduleClash\|Timetable\|ClassSession"` | PASS — **54 tests / 127 assertions**, 218 s. Adding `meeting` to the occupant list disturbed no existing clash behaviour |
