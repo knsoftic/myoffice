@@ -109,7 +109,17 @@ class GradeScale extends Model
         return $this->hasMany(ExamResult::class, 'grade_scale_id');
     }
 
-    /** Has anything been graded with it? The deactivate-don't-delete rule turns on this. */
+    /**
+     * Has anything been graded with it? The deactivate-don't-delete rule turns on this.
+     *
+     * **Certificates are not asked yet, and the class docblock above already says they hold a scale
+     * alive.** That is deliberate rather than an oversight: `certificates` and its model arrive in
+     * Phase 21, and a `hasMany(Certificate::class)` here would fatal on every delete until they do.
+     * The `restrictOnDelete` on `certificates.grade_scale_id` is real, so **Phase 21 must add the
+     * relation and extend this method in the same commit that adds the table** — otherwise a scale
+     * used solely by a certificate passes this check, reaches the foreign key, and fails with a raw
+     * constraint violation instead of the sentence a coordinator can act on.
+     */
     public function hasBeenUsed(): bool
     {
         return $this->results()->exists() || $this->exams()->exists();

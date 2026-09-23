@@ -83,7 +83,7 @@ final class ResultSummary
             // Averaged over the results that actually carry a grade point, not over every result: a
             // scale without GPA would otherwise drag a mixed transcript's average towards zero.
             'gradePoints' => $pointed > 0
-                ? Money::round(Money::div($points, (string) $pointed, 4), 2)
+                ? Money::round(Money::div($points, (string) $pointed), 2)
                 : null,
         ];
     }
