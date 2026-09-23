@@ -88,7 +88,7 @@
                     </div>
                     <div>
                         <dt class="text-xs uppercase tracking-wide text-slate-400">Examiner</dt>
-                        <dd class="mt-1 text-sm text-slate-700 dark:text-slate-200">{{ $exam->teacher?->employee_id ?? '—' }}</dd>
+                        <dd class="mt-1 text-sm text-slate-700 dark:text-slate-200">{{ $exam->teacher?->name ?? '—' }}</dd>
                         @if ($exam->topic)
                             <p class="mt-1 text-xs text-slate-400">assesses “{{ $exam->topic->title }}”</p>
                         @endif

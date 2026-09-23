@@ -54,7 +54,7 @@
                 @foreach ($teachers as $teacher)
                     <option value="{{ $teacher->id }}"
                             @selected((int) old('teacher_id', $editing ? $exam->teacher_id : 0) === (int) $teacher->id)>
-                        {{ $teacher->employee_id }}
+                        {{ $teacher->name }}
                     </option>
                 @endforeach
             </x-ui.form.select>

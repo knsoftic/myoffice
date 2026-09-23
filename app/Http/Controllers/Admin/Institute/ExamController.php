@@ -45,7 +45,7 @@ final class ExamController extends Controller
     public function index(Request $request): View
     {
         $exams = $this->filtered($request)
-            ->with(['course:id,name', 'batch:id,code,name', 'teacher:id,employee_id', 'classroom:id,code'])
+            ->with(['course:id,name', 'batch:id,code,name', 'teacher:id,name', 'classroom:id,code'])
             ->orderByDesc('scheduled_date')
             ->paginate(20)
             ->withQueryString();
@@ -86,7 +86,7 @@ final class ExamController extends Controller
         Gate::authorize('view', $exam);
 
         return view('admin.exams.show', [
-            'exam' => $exam->load(['course:id,name', 'batch:id,code,name', 'teacher:id,employee_id', 'classroom:id,code,name', 'topic:id,title', 'scale:id,code,name', 'publisher:id,name', 'verifier:id,name']),
+            'exam' => $exam->load(['course:id,name', 'batch:id,code,name', 'teacher:id,name', 'classroom:id,code,name', 'topic:id,title', 'scale:id,code,name', 'publisher:id,name', 'verifier:id,name']),
             'scale' => $this->resolvedScale($exam),
             'canEdit' => (bool) $request->user()?->can('update', $exam),
             'canChangeStatus' => (bool) $request->user()?->can('changeStatus', $exam),
@@ -101,7 +101,7 @@ final class ExamController extends Controller
     {
         Gate::authorize('update', $exam);
 
-        return view('admin.exams.edit', array_merge($this->formData(), [
+        return view('admin.exams.edit', array_merge($this->formData($exam), [
             'exam' => $exam,
             // The screen greys these out rather than pretending they are editable and failing on save.
             'frozen' => $exam->isPublished()
@@ -251,14 +251,43 @@ final class ExamController extends Controller
         }
     }
 
-    /** @return array<string, mixed> */
-    private function formData(): array
+    /**
+     * The dropdowns a create or edit form needs.
+     *
+     * **The teacher and scale lists include whoever this exam already names, active or not.** A
+     * dropdown built only from `teaching()` would drop an examiner who has since left, and saving the
+     * form would post no `teacher_id` at all — silently unassigning them while reporting success.
+     * That is the D121/D131 shape: a save that quietly declines part of what it was given. The same
+     * applies to a retired grade scale, which INV-20-4 keeps alive precisely so an old exam stays
+     * explicable.
+     *
+     * @return array<string, mixed>
+     */
+    private function formData(?Exam $exam = null): array
     {
         return [
             'batches' => Batch::query()->with('course:id,name')->orderByDesc('id')->get(['id', 'code', 'name', 'course_id']),
-            'teachers' => Teacher::query()->orderBy('id')->get(['id', 'employee_id']),
+            'teachers' => Teacher::query()
+                ->where(function (Builder $query) use ($exam): void {
+                    $query->teaching();
+
+                    if ($exam?->getAttribute('teacher_id') !== null) {
+                        $query->orWhere('id', $exam->getAttribute('teacher_id'));
+                    }
+                })
+                ->orderBy('name')
+                ->get(['id', 'name']),
             'classrooms' => Classroom::query()->orderBy('code')->get(['id', 'code', 'name']),
-            'scales' => GradeScale::query()->active()->ordered()->get(['id', 'code', 'name']),
+            'scales' => GradeScale::query()
+                ->where(function (Builder $query) use ($exam): void {
+                    $query->active();
+
+                    if ($exam?->getAttribute('grade_scale_id') !== null) {
+                        $query->orWhere('id', $exam->getAttribute('grade_scale_id'));
+                    }
+                })
+                ->ordered()
+                ->get(['id', 'code', 'name']),
             'types' => ExamType::cases(),
         ];
     }
