@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Site\AdmissionController as SiteAdmissionController;
-use App\Http\Controllers\Site\VerificationController;
 use App\Http\Controllers\Site\BlogController;
 use App\Http\Controllers\Site\CareerController;
 use App\Http\Controllers\Site\ContactController;
@@ -17,6 +16,7 @@ use App\Http\Controllers\Site\RobotsController;
 use App\Http\Controllers\Site\ServiceController;
 use App\Http\Controllers\Site\SitemapController;
 use App\Http\Controllers\Site\TeamController;
+use App\Http\Controllers\Site\VerificationController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -230,7 +230,6 @@ Route::middleware(['signed', 'invoice_link'])->group(function (): void {
         ->middleware('throttle:10,1')
         ->name('site.invoices.pdf');
 });
-
 
 /*
 |--------------------------------------------------------------------------

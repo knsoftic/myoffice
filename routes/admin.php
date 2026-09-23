@@ -104,14 +104,14 @@ use App\Http\Controllers\Admin\Institute\FeeDiscountController;
 use App\Http\Controllers\Admin\Institute\FeeReminderController;
 use App\Http\Controllers\Admin\Institute\FeeStructureController;
 use App\Http\Controllers\Admin\Institute\GradeScaleController;
-use App\Http\Controllers\Admin\Institute\PrintTemplateController;
 use App\Http\Controllers\Admin\Institute\InstallmentPlanController;
+use App\Http\Controllers\Admin\Institute\PrintTemplateController;
 use App\Http\Controllers\Admin\Institute\ProgressController as StudentProgressController;
 use App\Http\Controllers\Admin\Institute\ResultCardController;
 use App\Http\Controllers\Admin\Institute\StudentApplicationController;
 use App\Http\Controllers\Admin\Institute\StudentController;
-use App\Http\Controllers\Admin\Institute\StudentIdCardController;
 use App\Http\Controllers\Admin\Institute\StudentFeeController;
+use App\Http\Controllers\Admin\Institute\StudentIdCardController;
 use App\Http\Controllers\Admin\Institute\TeacherController;
 use App\Http\Controllers\Admin\Institute\TimetableController;
 use App\Http\Controllers\Admin\LeadActivityController;
@@ -128,6 +128,10 @@ use App\Http\Controllers\Admin\ProjectController;
 use App\Http\Controllers\Admin\ProjectMemberController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\SettingsController;
+use App\Http\Controllers\Admin\Support\ConversationController;
+use App\Http\Controllers\Admin\Support\MeetingController;
+use App\Http\Controllers\Admin\Support\TicketController;
+use App\Http\Controllers\Admin\Support\TicketDepartmentController;
 use App\Http\Controllers\Admin\TaskBoardController;
 use App\Http\Controllers\Admin\TaskChecklistController;
 use App\Http\Controllers\Admin\TaskController;
@@ -2446,7 +2450,6 @@ Route::prefix('admin')
             Route::get('enrollments/{enrollment}/result-card', [ResultCardController::class, 'show'])->whereNumber('enrollment')->middleware('can:results.print')->name('result-cards.show');
         });
 
-
         /*
         |----------------------------------------------------------------------
         | Print templates - phase-19-23 sec 7.6, sec 4.1
@@ -2554,4 +2557,138 @@ Route::prefix('admin')
             Route::post('student-id-cards/bulk-issue', [StudentIdCardController::class, 'bulkIssue'])->middleware(['can:student_id_cards.create', 'throttle:5,1'])->name('student-id-cards.bulk-issue');
             Route::get('student-id-cards/{card}/pdf', [StudentIdCardController::class, 'pdf'])->whereNumber('card')->middleware('can:student_id_cards.print')->name('student-id-cards.pdf');
         });
+
+        /*
+        |----------------------------------------------------------------------
+        | Support desks - phase-19-23 sec 7.6
+        |----------------------------------------------------------------------
+        |
+        | One screen carries the list and the form. There is no create page and
+        | no edit page: a desk is five fields an administrator touches twice a
+        | year, and the row being edited comes back through ?edit=.
+        |
+        | `destroy` exists but the policy offers it only for a desk that has
+        | never held a ticket - retiring is what people mean, and it is the
+        | button beside it.
+        |
+        */
+        Route::middleware('module:ticket_departments')->group(static function (): void {
+            Route::get('ticket-departments', [TicketDepartmentController::class, 'index'])->middleware('can:ticket_departments.view_any')->name('ticket-departments.index');
+            Route::post('ticket-departments', [TicketDepartmentController::class, 'store'])->middleware('can:ticket_departments.create')->name('ticket-departments.store');
+            Route::put('ticket-departments/{department}', [TicketDepartmentController::class, 'update'])->whereNumber('department')->middleware('can:ticket_departments.edit')->name('ticket-departments.update');
+            Route::post('ticket-departments/{department}/status', [TicketDepartmentController::class, 'status'])->whereNumber('department')->middleware('can:ticket_departments.change_status')->name('ticket-departments.status');
+            Route::delete('ticket-departments/{department}', [TicketDepartmentController::class, 'destroy'])->whereNumber('department')->middleware('can:ticket_departments.delete')->name('ticket-departments.destroy');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Support tickets - phase-19-23 sec 7.6, sec 9.4
+        |----------------------------------------------------------------------
+        |
+        | There is NO destroy route, because nothing deletes a ticket
+        | (INV-22-1): a wrong one is closed, a wrong reply is corrected by
+        | another reply, and the model refuses both below the gate.
+        |
+        | `sla` is declared BEFORE `{ticket}` so the word is never read as an
+        | id - the numeric constraint would 404 it, which is a confusing way to
+        | discover the route order was wrong.
+        |
+        | The index takes either permission: sec 9.4 gives `view_any` the queue
+        | and `view` their own, and the controller applies the difference to the
+        | query rather than to the button.
+        |
+        */
+        Route::middleware('module:support_tickets')->group(static function (): void {
+            Route::get('tickets', [TicketController::class, 'index'])->middleware('can:support_tickets.view_any|support_tickets.view')->name('tickets.index');
+            Route::get('tickets/create', [TicketController::class, 'create'])->middleware('can:support_tickets.create')->name('tickets.create');
+            Route::post('tickets', [TicketController::class, 'store'])->middleware(['can:support_tickets.create', 'throttle:20,1'])->name('tickets.store');
+            Route::get('tickets/sla', [TicketController::class, 'sla'])->middleware('can:support_tickets.view_reports')->name('tickets.sla');
+            Route::get('tickets/{ticket}', [TicketController::class, 'show'])->whereNumber('ticket')->middleware('can:view,ticket')->name('tickets.show');
+            Route::post('tickets/{ticket}/replies', [TicketController::class, 'reply'])->whereNumber('ticket')->middleware(['can:reply,ticket', 'throttle:60,1'])->name('tickets.replies.store');
+            Route::post('tickets/{ticket}/assign', [TicketController::class, 'assign'])->whereNumber('ticket')->middleware('can:support_tickets.assign')->name('tickets.assign');
+            Route::post('tickets/{ticket}/status', [TicketController::class, 'status'])->whereNumber('ticket')->middleware('can:changeStatus,ticket')->name('tickets.status');
+            Route::post('tickets/{ticket}/priority', [TicketController::class, 'priority'])->whereNumber('ticket')->middleware('can:support_tickets.edit')->name('tickets.priority');
+            Route::post('tickets/{ticket}/department', [TicketController::class, 'department'])->whereNumber('ticket')->middleware('can:support_tickets.edit')->name('tickets.department');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Meetings - phase-19-23 sec 7.6, sec 6.17
+        |----------------------------------------------------------------------
+        |
+        | `calendar` and `create` come before `{meeting}` for the same reason as
+        | the ticket routes.
+        |
+        | `respond` is gated on the policy and not on a permission, because
+        | answering an invitation is what being in the room means: a client
+        | holds no `meetings.*` permission at all and must still be able to
+        | accept.
+        |
+        | `status` is cancelling, and nothing else. A meeting does not walk a
+        | status path from a screen; it is rescheduled, which writes a
+        | successor, or it is cancelled with a reason.
+        |
+        */
+        Route::middleware('module:meetings')->group(static function (): void {
+            Route::get('meetings', [MeetingController::class, 'index'])->middleware('can:meetings.view_any|meetings.view')->name('meetings.index');
+            Route::get('meetings/calendar', [MeetingController::class, 'calendar'])->middleware('can:meetings.view_any|meetings.view')->name('meetings.calendar');
+            Route::get('meetings/create', [MeetingController::class, 'create'])->middleware('can:meetings.create')->name('meetings.create');
+            Route::post('meetings', [MeetingController::class, 'store'])->middleware('can:meetings.create')->name('meetings.store');
+            Route::get('meetings/{meeting}', [MeetingController::class, 'show'])->whereNumber('meeting')->middleware('can:view,meeting')->name('meetings.show');
+            Route::put('meetings/{meeting}', [MeetingController::class, 'update'])->whereNumber('meeting')->middleware('can:update,meeting')->name('meetings.update');
+            Route::post('meetings/{meeting}/status', [MeetingController::class, 'status'])->whereNumber('meeting')->middleware('can:cancel,meeting')->name('meetings.status');
+            Route::post('meetings/{meeting}/reschedule', [MeetingController::class, 'reschedule'])->whereNumber('meeting')->middleware('can:reschedule,meeting')->name('meetings.reschedule');
+            Route::post('meetings/{meeting}/participants', [MeetingController::class, 'addParticipants'])->whereNumber('meeting')->middleware('can:assign,meeting')->name('meetings.participants.store');
+            Route::delete('meetings/{meeting}/participants/{participant}', [MeetingController::class, 'removeParticipant'])->whereNumber('meeting')->whereNumber('participant')->middleware('can:assign,meeting')->name('meetings.participants.destroy');
+            Route::post('meetings/{meeting}/respond', [MeetingController::class, 'respond'])->whereNumber('meeting')->middleware('can:respond,meeting')->name('meetings.respond');
+            Route::post('meetings/{meeting}/attendance', [MeetingController::class, 'attendance'])->whereNumber('meeting')->middleware('can:markAttendance,meeting')->name('meetings.attendance');
+            Route::put('meetings/{meeting}/notes', [MeetingController::class, 'notes'])->whereNumber('meeting')->middleware('can:saveNotes,meeting')->name('meetings.notes');
+            Route::get('meetings/{meeting}/ics', [MeetingController::class, 'ics'])->whereNumber('meeting')->middleware('can:downloadIcs,meeting')->name('meetings.ics');
+            Route::delete('meetings/{meeting}', [MeetingController::class, 'destroy'])->whereNumber('meeting')->middleware('can:delete,meeting')->name('meetings.destroy');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Messages - phase-19-23 sec 7.6, sec 6.18, sec 9.4
+        |----------------------------------------------------------------------
+        |
+        | `recipients` is the matrix-filtered picker (sec 8.13) and is declared
+        | before `{conversation}` so the word is never read as an id.
+        |
+        | `send` is gated on the policy, which re-asks MessagingMatrix on every
+        | request (INV-22-4) - removing a pair from the settings silences
+        | existing threads, and that only works if the answer is asked again.
+        | The service enforces the rate limit as well as this middleware,
+        | because a limit only one layer knows is a limit a queued job skips.
+        |
+        | There is NO destroy route: a message is the record of what was said,
+        | and a wrong one is corrected by another message.
+        |
+        */
+        Route::middleware('module:messages')->group(static function (): void {
+            Route::get('messages', [ConversationController::class, 'index'])->middleware('can:messages.view')->name('messages.index');
+            Route::get('messages/recipients', [ConversationController::class, 'recipients'])->middleware(['can:messages.create', 'throttle:60,1'])->name('messages.recipients');
+            Route::post('messages', [ConversationController::class, 'store'])->middleware(['can:messages.create', 'throttle:20,1'])->name('messages.store');
+            Route::get('messages/{conversation}', [ConversationController::class, 'show'])->whereNumber('conversation')->middleware('can:view,conversation')->name('messages.show');
+            Route::post('messages/{conversation}/send', [ConversationController::class, 'send'])->whereNumber('conversation')->middleware(['can:send,conversation', 'throttle:60,1'])->name('messages.send');
+            Route::post('messages/{conversation}/read', [ConversationController::class, 'read'])->whereNumber('conversation')->middleware('can:view,conversation')->name('messages.read');
+            Route::post('messages/{conversation}/participants', [ConversationController::class, 'addParticipant'])->whereNumber('conversation')->middleware('can:addParticipant,conversation')->name('messages.participants.store');
+            Route::post('messages/{conversation}/leave', [ConversationController::class, 'leave'])->whereNumber('conversation')->middleware('can:leave,conversation')->name('messages.leave');
+            Route::post('messages/{conversation}/close', [ConversationController::class, 'close'])->whereNumber('conversation')->middleware('can:close,conversation')->name('messages.close');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | The bell - phase-19-23 sec 7.7
+        |----------------------------------------------------------------------
+        |
+        | One file for all five panels, included inside this group so it picks
+        | up the prefix, the name prefix and the panel middleware. The contract
+        | says the bell behaves identically everywhere, and the only honest way
+        | to guarantee that is not to write it five times.
+        |
+        */
+        $ability = 'notifications.view_any';
+        require __DIR__.'/notifications.php';
+
     });

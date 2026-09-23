@@ -100,4 +100,19 @@ Route::prefix('collaborator')
         Route::get('projects', [ProjectController::class, 'index'])
             ->middleware('can:collaborator_portal.projects')
             ->name('projects.index');
+
+        /*
+        |----------------------------------------------------------------------
+        | The bell - phase-19-23 sec 7.7
+        |----------------------------------------------------------------------
+        |
+        | One file for all five panels, included inside this group so it picks
+        | up the prefix, the name prefix and the panel middleware. The contract
+        | says the bell behaves identically everywhere, and the only honest way
+        | to guarantee that is not to write it five times.
+        |
+        */
+        $ability = 'collaborator_portal.notifications';
+        require __DIR__.'/notifications.php';
+
     });

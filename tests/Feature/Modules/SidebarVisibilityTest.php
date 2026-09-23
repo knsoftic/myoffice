@@ -313,6 +313,14 @@ final class SidebarVisibilityTest extends TestCase
                 'Jobs',
                 'Job Applications',
                 'Contact Inquiries',
+                // phase-19-23 §7.6: the Workspace group, now that Phase 22 has registered its
+                // routes. `Files` and `Reports` are still absent — Phase 23 owns them, and gate 2
+                // keeps them hidden until it ships.
+                'Support Tickets',
+                'Support Desks',
+                'Meetings',
+                'Messages',
+                'Notifications',
             ],
             $labels,
             'Only the screens whose phase has actually shipped its routes may appear — Phase 1, Phase 2\'s Settings, Phase 3\'s Website CMS, Phase 4\'s marketing modules, Phase 5\'s CRM and Phase 6\'s delivery screens.'

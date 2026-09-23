@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-use App\Http\Controllers\Student\CertificateController as StudentCertificateController;
 use App\Http\Controllers\Student\AssignmentController as StudentAssignmentController;
 use App\Http\Controllers\Student\AttendanceController;
 use App\Http\Controllers\Student\BatchController;
+use App\Http\Controllers\Student\CertificateController as StudentCertificateController;
 use App\Http\Controllers\Student\DashboardController;
 use App\Http\Controllers\Student\ExamController;
 use App\Http\Controllers\Student\FeeController;
@@ -229,7 +229,6 @@ Route::prefix('student')
                 ->name('results.card');
         });
 
-
         /*
         |----------------------------------------------------------------------
         | Certificates and the ID card - phase-19-23 sec 7.9, sec 9.3
@@ -264,5 +263,19 @@ Route::prefix('student')
                 ->middleware('can:student_portal.id_card')
                 ->name('id-card.pdf');
         });
+
+        /*
+        |----------------------------------------------------------------------
+        | The bell - phase-19-23 sec 7.7
+        |----------------------------------------------------------------------
+        |
+        | One file for all five panels, included inside this group so it picks
+        | up the prefix, the name prefix and the panel middleware. The contract
+        | says the bell behaves identically everywhere, and the only honest way
+        | to guarantee that is not to write it five times.
+        |
+        */
+        $ability = 'student_portal.notifications';
+        require __DIR__.'/notifications.php';
 
     });

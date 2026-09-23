@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-use App\Http\Controllers\Teacher\CertificateController as TeacherCertificateController;
 use App\Http\Controllers\Teacher\AssignmentController as TeacherAssignmentController;
 use App\Http\Controllers\Teacher\AttendanceController;
 use App\Http\Controllers\Teacher\BatchController;
+use App\Http\Controllers\Teacher\CertificateController as TeacherCertificateController;
 use App\Http\Controllers\Teacher\DashboardController;
 use App\Http\Controllers\Teacher\DemoClassController;
 use App\Http\Controllers\Teacher\ExamController as TeacherExamController;
@@ -204,5 +204,19 @@ Route::prefix('teacher')
                 ->middleware('can:teacher_portal.certificates')
                 ->name('certificates.candidates');
         });
+
+        /*
+        |----------------------------------------------------------------------
+        | The bell - phase-19-23 sec 7.7
+        |----------------------------------------------------------------------
+        |
+        | One file for all five panels, included inside this group so it picks
+        | up the prefix, the name prefix and the panel middleware. The contract
+        | says the bell behaves identically everywhere, and the only honest way
+        | to guarantee that is not to write it five times.
+        |
+        */
+        $ability = 'teacher_portal.notifications';
+        require __DIR__.'/notifications.php';
 
     });

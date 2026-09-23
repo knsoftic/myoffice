@@ -19,6 +19,7 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 
@@ -221,7 +222,7 @@ final class TicketController extends Controller
             'breachingTickets' => (clone $base)
                 ->breaching()
                 ->with(['department:id,name', 'assignee:id,name'])
-                ->orderBy('sla_resolution_due_at')
+                ->orderBy('resolution_due_at')
                 ->limit(25)
                 ->get(),
         ]);
@@ -279,14 +280,16 @@ final class TicketController extends Controller
         return match ($request->string('sort')->toString()) {
             'oldest' => 'created_at ASC',
             'newest' => 'created_at DESC',
-            'due' => 'sla_resolution_due_at IS NULL, sla_resolution_due_at ASC',
+            'due' => 'resolution_due_at IS NULL, resolution_due_at ASC',
             'subject' => 'subject ASC',
-            default => "FIELD(priority, 'urgent', 'high', 'medium', 'low'), last_activity_at DESC",
+            // `last_reply_at` is null on a ticket nobody has answered, and those belong at the top:
+            // COALESCE falls back to when it was raised, so an unanswered ticket sorts by its own age.
+            default => "FIELD(priority, 'urgent', 'high', 'medium', 'low'), COALESCE(last_reply_at, created_at) DESC",
         };
     }
 
     /**
-     * @return \Illuminate\Support\Collection<int, User>
+     * @return Collection<int, User>
      */
     private function agents()
     {

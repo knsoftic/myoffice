@@ -1071,23 +1071,51 @@ final class Sidebar
                     [
                         'label' => 'Support Tickets',
                         'icon' => 'lifebuoy',
-                        'route' => 'admin.support-tickets.index',
+                        // phase-19-23 §7.6 names the route `admin.tickets.*`, not
+                        // `admin.support-tickets.*` — the module slug and the URL differ, and the
+                        // placeholder here had the slug.
+                        'route' => 'admin.tickets.index',
                         'module' => 'support_tickets',
-                        'permission' => 'support_tickets.view_any',
+                        // Either permission: §9.4 gives `view_any` the queue and `view` their own,
+                        // and the controller narrows the query rather than the menu. Gating on
+                        // `view_any` alone would hide the screen from the staff it was built for.
+                        'permission' => ['support_tickets.view_any', 'support_tickets.view'],
+                        'match' => 'admin.tickets.*',
+                    ],
+                    [
+                        'label' => 'Support Desks',
+                        'icon' => 'building-office',
+                        'route' => 'admin.ticket-departments.index',
+                        'module' => 'ticket_departments',
+                        'permission' => 'ticket_departments.view_any',
                     ],
                     [
                         'label' => 'Meetings',
                         'icon' => 'video-camera',
                         'route' => 'admin.meetings.index',
                         'module' => 'meetings',
-                        'permission' => 'meetings.view_any',
+                        'permission' => ['meetings.view_any', 'meetings.view'],
+                        'match' => 'admin.meetings.*',
                     ],
                     [
                         'label' => 'Messages',
                         'icon' => 'chat-bubble-left-ellipsis',
                         'route' => 'admin.messages.index',
                         'module' => 'messages',
-                        'permission' => 'messages.view_any',
+                        // **`messages.view`, not `view_any`.** `view_any` is the compliance reader's
+                        // permission and §9.4 grants it to nobody; gating the menu on it would hide
+                        // the messaging screen from everybody who is meant to use it. The screen
+                        // itself shows only threads the viewer is in, whichever they hold.
+                        'permission' => 'messages.view',
+                        'match' => 'admin.messages.*',
+                    ],
+                    [
+                        'label' => 'Notifications',
+                        'icon' => 'bell',
+                        'route' => 'admin.notifications.index',
+                        'module' => 'notifications',
+                        'permission' => 'notifications.view_any',
+                        'match' => 'admin.notifications.*',
                     ],
                     [
                         'label' => 'Files',

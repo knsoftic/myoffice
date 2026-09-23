@@ -15,6 +15,7 @@ use App\Models\User;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 
 /**
@@ -119,7 +120,7 @@ final class TicketDepartmentController extends Controller
      * active — because a default assignee the engine would never have chosen is a default assignee
      * whose tickets sit unread.
      *
-     * @return \Illuminate\Support\Collection<int, User>
+     * @return Collection<int, User>
      */
     private function agents()
     {
