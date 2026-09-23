@@ -92,6 +92,8 @@ final class ExamController extends Controller
             'canChangeStatus' => (bool) $request->user()?->can('changeStatus', $exam),
             'canDelete' => (bool) $request->user()?->can('delete', $exam),
             'canEnterResults' => (bool) $request->user()?->can('create', ExamResult::class),
+            // The reschedule panel needs somewhere to move it to.
+            'classrooms' => Classroom::query()->orderBy('code')->get(['id', 'code', 'name']),
         ]);
     }
 

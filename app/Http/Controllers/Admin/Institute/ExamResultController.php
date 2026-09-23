@@ -221,8 +221,15 @@ final class ExamResultController extends Controller
         return (new CsvWriter)->download(
             'results-'.$exam->getKey().'-'.app_date(now(), 'Y-m-d').'.csv',
             ['Roll', 'Student', 'Attendance', 'Marks', 'Out of', 'Percentage', 'Grade', 'Points', 'Passed', 'Position', 'Remarks'],
+            // `ExamResult::query()->where(...)`, not `$exam->results()` — `rowsFrom()` takes a
+            // *builder* and a `HasMany` is neither of its two accepted types, which is a TypeError
+            // and a 500 rather than a download. And no `orderBy`: `lazyById()` imposes its own id
+            // ordering to page safely, so a custom one is discarded anyway. The sheet is exported in
+            // entry order and the spreadsheet sorts it.
             CsvWriter::rowsFrom(
-                $exam->results()->with('student:id,student_code,name')->orderBy('position_in_batch'),
+                ExamResult::query()
+                    ->where('exam_id', $exam->getKey())
+                    ->with('student:id,student_code,name'),
                 static fn (ExamResult $r): array => [
                     (string) $r->student?->getAttribute('student_code'),
                     (string) $r->student?->getAttribute('name'),

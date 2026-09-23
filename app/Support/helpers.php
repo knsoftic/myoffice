@@ -136,6 +136,19 @@ if (! function_exists('app_input_datetime')) {
     }
 }
 
+if (! function_exists('app_ordinal')) {
+    /**
+     * A rank as it is read aloud: app_ordinal(2) // '2nd', app_ordinal(13) // '13th'.
+     *
+     * Null or anything below 1 gives an em dash — a student with no position has none, which is not
+     * the same as coming last.
+     */
+    function app_ordinal(?int $value): string
+    {
+        return Format::ordinal($value);
+    }
+}
+
 if (! function_exists('app_number')) {
     /**
      * A plain number with the configured separators: app_number(1248) // '1,248'.

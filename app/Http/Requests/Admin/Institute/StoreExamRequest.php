@@ -53,7 +53,12 @@ class StoreExamRequest extends FormRequest
             'grade_scale_id' => ['nullable', 'integer', Rule::exists('grade_scales', 'id')->withoutTrashed()],
 
             'exam_type' => [$editing ? 'nullable' : 'required', Rule::enum(ExamType::class)],
-            'name' => ['required', 'string', 'max:180'],
+            // `sometimes` rather than `required` when editing, for the same reason every other field
+            // here is conditional: this request also serves `reschedule`, which posts a date, a room
+            // and a reason and nothing else. A flatly required `name` would have made every
+            // reschedule a 422 — and the screen would have had to smuggle the current name through a
+            // hidden input to get past its own validation, which is a form lying to itself.
+            'name' => [$editing ? 'sometimes' : 'required', 'required', 'string', 'max:180'],
 
             'delivery_mode' => ['nullable', Rule::enum(DeliveryMode::class)],
             // `url` alone permits `javascript:` in some builds, so the scheme is pinned as well.

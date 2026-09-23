@@ -74,10 +74,20 @@ final class ResultController extends Controller
         ]);
     }
 
+    /**
+     * No `Gate::authorize('create', ExamResult::class)` here, and that is not an omission.
+     *
+     * `ExamResultPolicy::create()` asks for `results.create`, which is the **office's** ability. A
+     * teacher does not hold it and is not meant to: the whole point of `teacher_portal.*` is that
+     * somebody can be given their own screens without being given the admin panel's. Checking the
+     * admin ability on this panel produced a 403 for the very teacher whose batch it was.
+     *
+     * What governs this screen is the route's `can:teacher_portal.results_entry`, and `mustOwn()`
+     * below — the same shape every other teacher-panel controller uses (Phase 19's
+     * `SubmissionController`, phase-14-17's attendance).
+     */
     public function sheet(Request $request, Exam $exam): View
     {
-        Gate::authorize('create', ExamResult::class);
-
         $this->mustOwn($request, $exam);
 
         $sheet = $this->results->openSheet($exam);

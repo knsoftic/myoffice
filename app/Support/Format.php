@@ -325,6 +325,35 @@ final class Format
     }
 
     /**
+     * A rank as it is read aloud: 1 → '1st', 2 → '2nd', 13 → '13th', 22 → '22nd'.
+     *
+     * **The teens are the whole reason this exists.** 11, 12 and 13 take `th` while every other 1, 2
+     * and 3 take `st`, `nd`, `rd` — including 111, 112 and 113, which is why the test is on the last
+     * *two* digits and not the last one. A class of thirty has an 11th, a 12th and a 13th in it, so a
+     * naive version is wrong on the first result card anybody prints.
+     *
+     * English only, like every other label this application writes. `null` and anything below 1
+     * format as an em dash: a position of zero is not a position, and a student who was absent has
+     * none rather than coming last.
+     */
+    public static function ordinal(?int $value): string
+    {
+        if ($value === null || $value < 1) {
+            return '—';
+        }
+
+        $suffix = match (true) {
+            $value % 100 >= 11 && $value % 100 <= 13 => 'th',
+            $value % 10 === 1 => 'st',
+            $value % 10 === 2 => 'nd',
+            $value % 10 === 3 => 'rd',
+            default => 'th',
+        };
+
+        return self::number($value).$suffix;
+    }
+
+    /**
      * A money amount, currency and all: 'Rs 12,480.00'.
      *
      * Straight through to the canonical money surface. A null amount (an empty decimal column)

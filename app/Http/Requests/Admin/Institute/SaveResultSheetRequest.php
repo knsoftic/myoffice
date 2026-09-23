@@ -6,7 +6,6 @@ namespace App\Http\Requests\Admin\Institute;
 
 use App\Enums\ExamAttendanceStatus;
 use App\Models\Institute\Exam;
-use App\Models\Institute\ExamResult;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -30,12 +29,29 @@ use Illuminate\Validation\Validator;
  */
 class SaveResultSheetRequest extends FormRequest
 {
+    /**
+     * **Two panels, two vocabularies for one operation.** The admin screen is governed by
+     * `results.create`; the teacher panel by `teacher_portal.results_entry`. A teacher holds the
+     * second and not the first, deliberately — the portal abilities exist precisely so somebody can
+     * be given their own screens without being given the office's.
+     *
+     * Either is enough here, because the route that reached this request already required the right
+     * one for its panel. This is the second net, not the first. **Ownership is not checked here at
+     * all**: the teacher controller asks `TeacherScope` before the service is reached, which is what
+     * makes another teacher's exam a 404 rather than a 403.
+     */
     public function authorize(): bool
     {
         $exam = $this->route('exam');
 
-        return $exam instanceof Exam
-            && $this->user()?->can('create', ExamResult::class) === true;
+        if (! $exam instanceof Exam) {
+            return false;
+        }
+
+        $user = $this->user();
+
+        return $user?->can('results.create') === true
+            || $user?->can('teacher_portal.results_entry') === true;
     }
 
     /**

@@ -10,8 +10,8 @@
 | **Stack** | Laravel 12.69.2 · PHP 8.2.12 · MariaDB 10.4.32 · Tailwind 3.4 · Alpine 3 · Vite 7 |
 | **Database** | `my_office` (utf8mb4_unicode_ci) |
 | **Created** | 2026-09-12 |
-| **Last updated** | 2026-09-22 |
-| **Current phase** | PHASE 19 complete — next: PHASE 20, exams + results |
+| **Last updated** | 2026-09-23 |
+| **Current phase** | PHASE 20 complete — next: PHASE 21, certificates + ID cards |
 
 ---
 
@@ -238,6 +238,13 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D123 | **An `<input type="datetime-local">` needs a wire format, and the exception has to be named.** | `->format('Y-m-d\TH:i')` in the five date inputs tripped `NoHardcodedFormatsTest`, correctly: it is the exact shape of the mistake that test exists to catch. But an input handed a localized date renders **blank** and loses what the user was editing, so the display format is the wrong answer there. `Format::inputDate()` / `inputDateTime()` and the matching `app_input_*()` helpers make the exception explicit rather than smuggling a bare `->format()` past the scan. The display timezone still applies, so the field shows the time the reader was just shown beside it. |
 | D124 | **A policy cannot protect anything from a Super Admin, and two tests were written as though it could.** | `Gate::before` allows a Super Admin everything *before* a policy is consulted, so `can('delete', $submission)` is true for them however `AssignmentSubmissionPolicy::delete()` is written. The policy docblock claimed "not for any role, not for a Super Admin" — true of the model's hook, false of the policy, and the kind of comment that stops a reader looking further. Worse, `AssignmentPolicy::delete()` refuses an assignment that has submissions, but a soft delete is an **UPDATE**, so `restrictOnDelete` never sees it: the one role most able to do damage was the only role able to hide a class's marked work. `Assignment` now refuses the deletion in a model hook, as `AssignmentSubmission` already did, and both docblocks say which layer is actually load-bearing. **A `delete` policy on a soft-deleting model guards nothing on its own.** |
 | D125 | **The same index bug shipped three times, so it stopped being a decision and became a test.** | D112 was Phase 18's: `student_fee_reminders.student_fee_id` leaned on `uq_sfr_dedupe`, so `down()` could not drop that index and the migration was no longer reversible. The fix came with a decision stating the rule in as many words — *a composite index is not a substitute for the foreign key's own index when the composite is `UNIQUE` and you will ever want to drop it.* **Phase 19 then made the same mistake twice**, in `uq_cmt` and `uq_as_superseded`, one commit after writing that sentence. Both were caught by the same install-and-rollback tests, ten minutes into a thirty-minute suite. A decision nobody rereads while writing the next migration is a decision that gets made again, so the rule is now `ReversibleMigrationTest`: it walks the index names any migration that calls `dropIndex` mentions, finds each index's leading column, and fails when that column is a foreign key nothing else indexes. It is scoped to **the index rather than the table** on purpose — asking the question of every foreign key in every table that drops *any* index would flag `attendance_monthly_summaries.employee_id`, which is perfectly safe because that migration drops something else entirely. It runs in under a second instead of ten minutes, and it found exactly the two offenders and nothing else. |
+| D126 | **A status column has to be wider than its own longest case, and nobody ever measures.** | `exams.status` shipped as `varchar(16)`. Six of `ExamStatus`'s seven cases fitted; `results_published` is seventeen characters, so an institute could set an exam, sit it, mark it, have a second person check it — and then get `SQLSTATE[22001] Data too long` on the one write the whole phase exists for. Nothing caught it until a probe walked the ladder end to end, because every earlier step worked. CLAUDE.md §3 already said `string(32)`, and this is why it says it: the convention is a width nobody has to think about, and the moment somebody thinks about it instead they count the case they are looking at rather than the longest one. `ResultManifestTest` now asserts, for every enum-backed column in the phase, that every case fits — and separately that status columns are exactly 32, because "it fits today" is not the rule. |
+| D127 | **`SettingsRepository::asSystem()` is a write escape hatch taking a callback, not a read accessor.** | Seven reads across three controllers were written as `settings_repo()->asSystem()->get('institute.…')`. `asSystem()` takes a `callable`, throws outside the console, and returns whatever the callback returns — so every one of those calls was an `ArgumentCountError` and every result screen would have fataled on its first render. The read helper is `setting('group.key', $default)`; `asSystem(fn ($repo) => $repo->set(...))` is for a seeder or a test that needs to write. The shape is memorable precisely because it is asymmetric, and a fluent-looking `->asSystem()->get()` reads as though it were not. |
+| D128 | **A registry with a `register()` hook is not wired until something calls it, and a missing source reports "clean".** | `ScheduleClashDetector` was built in Phase 16 with an explicit extension point for "exams and meetings", and `ExamService` was written calling `check()` with `ignoreType: 'exam'` — both halves present, and nothing in between. The detector scanned its three built-in tables, found no exam source, and returned a clean report, so every exam was clash-checked against classes and demos and against **no other exam**. Only an exactly equal start time was caught, by `uq_ex_batch_slot`, which is why the hole looked closed. The registration now lives in `AppServiceProvider::registerPhase20()`, and its live-status list is **derived from `ExamStatus::holdsTheSlot()`** rather than written out — the same rule `active_guard` encodes, so the index and the detector cannot come to different views of which exams hold a slot. **A negative result from a registry-driven check is worth one assertion that the registry has the entry.** |
+| D129 | **`Money::compare()` rounds both sides to two decimals, so comparing a value with its own two-decimal rounding is a tautology.** | `GradeBandValidator` guarded against finer-than-2dp band edges with `Money::compare($raw, Money::round($raw, 2)) !== 0` — a condition that can never be true, because `compare()` is `bccomp(of($left), of($right), SCALE)` and `of()` rounds to `SCALE = 2`. `39.9950` passed the guard and was stored as `40.00`: an administrator had deliberately excluded 40.00 from the F band and F was given it, moving a pass boundary silently. The fix is `bccomp($raw, $rounded, 4)`. **`Money::compare` answers "are these the same amount of money", not "are these the same string"** — for a precision question it is the wrong instrument, and one that always agrees. |
+| D130 | **A Form Request that accepts what the service will refuse produces a worse error than refusing it.** | `StoreGradeScaleRequest` allowed `decimal:0,4` on band edges while `GradeBandValidator` reasons at two throughout — so `39.9950` and `40.0000` came back as *"F (up to 40.00) and C (from 40.00) overlap"*, a message about two numbers the administrator can see are different. The same request validated a band's colour as a hex code, but `x-ui.badge` resolves colours from a literal map so Tailwind's scanner sees every class: a hex value is not merely off-convention, it is unrenderable, and would have shown as the fallback slate while the stored row insisted it was green. Both are the same mistake — **the validation layer inventing its own idea of the domain instead of taking the one already in the codebase.** The vocabulary was already there: `GradeScaleSeeder` and every enum's `color()` speak it. |
+| D131 | **A form must not offer a field the service does not write.** | `ExamService::update()` deliberately never touches `scheduled_date`: moving an exam takes a reason and re-runs the clash check, so it has its own entry point. The shared exam form offered an editable date on the edit screen anyway — a coordinator who changed it would be told "Exam updated" and see the old date, with nothing anywhere saying why. This is D121 in a new place: **a save that quietly declines part of what it was given is worse than one that fails.** The field is now read-only on every edit, published or not, and points at the reschedule panel. A test asserts that `update()` ignores a submitted date, so the day somebody "fixes" the form by re-enabling the input, the test explains what they have actually built. |
+| D132 | **Do not tighten a contract rule because it looks like a misconfiguration.** | `GradeBandValidator` allows a scale whose bands all agree — every band passing, or every band failing. That reads like an obvious bug (nobody can ever fail!), and the one-line change to require exactly one pass/fail transition was already written before the contract was reread. §6.9 says **at most** one transition, and [D-20-2] is why: when an exam carries a `passing_marks` above zero it decides the outcome outright and the bands are only a naming ladder, so a participation scale with no fail band is a real thing. Two of my own assertions had by then contradicted each other, which is the useful signal — when a new test disagrees with an old one, one of them is wrong and **the contract decides which**, not whichever was written more recently. The permissive behaviour now carries a test *and* the reason, so the next person tempted by the same one-line change reads the argument instead of making it again. |
 ---
 
 ## 5. Phase Tracker
@@ -661,7 +668,7 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 > **Release note** — note: consumes Phase 10's `PaymentService` and the four fee tables (`student_fees`, `student_fee_installments`, `student_fee_discounts`, `student_fee_payments`); Phase 18 creates no financial table. It ships `student_fee_reminders`, the fee services and all fee screens.
 
 ### [x] PHASE 19 — Course material + assignments (2026-09-23)
-### [ ] PHASE 20 — Exams + results
+### [x] PHASE 20 — Exams + results (2026-09-23)
 ### [ ] PHASE 21 — Certificates (public QR verification) + student ID cards
 ### [ ] PHASE 22 — Tickets, meetings, internal messaging, notifications
 ### [ ] PHASE 23 — Reports, analytics, activity log, audit trail, global search, exports
@@ -671,6 +678,67 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 ---
 
 ## 6. Change Log
+
+### 2026-09-23 — Phase 20: exams, results, and a status nobody could write
+
+**Shipped.** Four tables, four enums, four models, two data objects, five services, three policies, three
+Form Requests, eight controllers, 40 routes across three panels, 24 screens, one seeded grade scale, and
+78 acceptance tests on top of the 18 unit cases the band validator already had.
+
+**The spine is small and the rules are all in one place.** A grade scale is a ladder of contiguous bands
+covering exactly 0–100; an exam belongs to one batch and snapshots what it was out of onto every row it
+produces; a sheet saves whole or not at all; a second person checks it; publishing ranks the class and
+stamps every row; withdrawing hides them again without deleting anything; a published mark changes only
+by amendment, with a reason and an audit record. `ResultCalculator` is the only thing that may write a
+grade — the model refuses the write otherwise, so a controller, a Form Request and a seeder all cannot.
+
+**Six defects, found by probing rather than by a test going red**, because no test existed yet. Every one
+was in code that compiled, linted and read correctly.
+
+The worst was **`exams.status` at `varchar(16)`**. `ExamStatus::ResultsPublished` is seventeen characters:
+six of seven cases fitted, and the one that did not was the one the whole phase exists for. An institute
+could set an exam, sit it, mark it, have it checked, and then get *"Data too long"* on publish. CLAUDE.md
+§3 says `string(32)` precisely because nobody counts their longest case — D126, and the manifest test now
+measures every enum against its column.
+
+Then **seven `settings_repo()->asSystem()->get(...)` reads** that would have fataled on first render
+(D127); **the clash detector never told about exams**, so it scanned its three built-in tables, found no
+exam source and reported clean while two papers could be booked on one batch at overlapping times (D128);
+a **tautological guard** in the band validator — `Money::compare` rounds both sides to two decimals, so
+comparing a value with its own two-decimal rounding is always equal, and `39.9950` was accepted and
+stored as `40.00`, moving a pass boundary the administrator had deliberately drawn (D129); and two
+**Form Request rules that disagreed with the domain they validated** — four decimals where the validator
+reasons at two, and a hex colour where `x-ui.badge` needs a Tailwind token (D130).
+
+**A seventh was a form lying about what a save does.** `ExamService::update()` never writes
+`scheduled_date` — moving an exam takes a reason and re-runs the clash check, so it has its own entry
+point — but the shared form offered an editable date anyway, which would have reported "Exam updated" and
+changed nothing. That is D121 in a second place, and D131 here.
+
+**And one thing I nearly broke by fixing it.** An all-pass grade scale looks like a misconfiguration, and
+the one-line change to require exactly one pass/fail transition was already written when two of my own
+assertions contradicted each other. The contract says *at most* one transition, and [D-20-2] explains
+why: an exam with a pass mark above zero decides the outcome outright, so a participation ladder with no
+fail band is legitimate. D132 — when a new test disagrees with an old one, the contract decides which is
+wrong, not whichever was written last.
+
+**`results.delete` and `results.restore` are no longer declared.** Phase 1 registered both through
+`self::CRUD`; Phase 20 assembles the `results` ability list by hand to leave them out. A result is
+amended with a reason, never removed — the policy returned false for both and the model refused the act
+regardless, so the permissions only ever existed to be granted by mistake. `PermissionSeeder` reports the
+two orphans rather than deleting them, which is the correct non-destructive behaviour and worth knowing
+about before somebody wonders where they went.
+
+**Verified:** 78 acceptance tests across six files plus 18 unit cases — grade-scale geometry and the
+INV-20-4 deletion refusals, the exam ladder and its slot, the sheet's all-or-nothing rule and the
+absence-is-not-a-zero pair at three layers, the four-eyes step, publication, withdrawal, amendment and
+what a student may see, authorization across three panels, and the manifest. Every one of the 24 screens
+rendered and every intentional 404 was a 404.
+
+**Carried forward:** §6.12's `progress_from_assessment` writes to the syllabus register when an exam
+names a topic — the setting ships defaulted off and the hook belongs with Phase 23's reporting; the four
+notification classes go with Phase 22; `ExamStatisticsService` and the CSV result importer
+(`results.import` is registered and has no route yet) belong with Phase 23.
 
 ### 2026-09-23 — D112 for the third time, and the test that ends it
 
@@ -2513,4 +2581,3 @@ Recorded here so nobody later calls them scope creep, and so you can cut any of 
 | F-13.11 | Backup restore wizard + scratch verification | phase-24-25 | build | "a backup is not a backup until it has been restored" |
 | F-13.12 | `collaborator_referral_visits` funnel report + retention | phase-08-09 | build | H5 |
 | F-13.13 | `grade_scales` / `grade_scale_bands` | phase-19-23 | build | §82 needs a grade; a scale makes it configurable |
-| D125 | **The same index bug shipped three times, so it stopped being a decision and became a test.** | D112 was Phase 18's: `student_fee_reminders.student_fee_id` leaned on `uq_sfr_dedupe`, so `down()` could not drop that index and the migration was no longer reversible. The fix came with a decision stating the rule in as many words — *a composite index is not a substitute for the foreign key's own index when the composite is `UNIQUE` and you will ever want to drop it.* **Phase 19 then made the same mistake twice**, in `uq_cmt` and `uq_as_superseded`, one commit after writing that sentence. Both were caught by the same install-and-rollback tests, ten minutes into a thirty-minute suite. A decision nobody rereads while writing the next migration is a decision that gets made again, so the rule is now `ReversibleMigrationTest`: it walks the index names any migration that calls `dropIndex` mentions, finds each index's leading column, and fails when that column is a foreign key nothing else indexes. It is scoped to **the index rather than the table** on purpose — asking the question of every foreign key in every table that drops *any* index would flag `attendance_monthly_summaries.employee_id`, which is perfectly safe because that migration drops something else entirely. It runs in under a second instead of ten minutes, and it found exactly the two offenders and nothing else. |

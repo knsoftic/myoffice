@@ -244,7 +244,13 @@ final class GradeBandValidator
             );
         }
 
-        if ($crossings === 1 && $bands[0]['is_pass']) {
+        // **Zero crossings is deliberately allowed**, and it was worth stopping to check: a scale
+        // where every band agrees looks like a misconfiguration, and tightening this to "exactly one"
+        // is a one-line change. The contract says *at most* one transition, and [D-20-2] is why —
+        // when an exam carries a `passing_marks` above zero it decides pass and fail outright, and the
+        // bands are only a naming ladder. A participation scale with no fail band is a real thing.
+        // Refusing it here would have made the validator stricter than the rule it enforces.
+        if ($bands[0]['is_pass'] && $crossings === 1) {
             throw InvalidGradeScale::because(sprintf(
                 'The lowest band, %s, passes while a higher one fails. That is the pass line upside down.',
                 $bands[0]['grade'],
