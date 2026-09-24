@@ -87,6 +87,15 @@ class User extends Authenticatable
      * `updated_by`, `email_verified_at` and `remember_token` are written by the
      * Blameable trait / framework, never by a request payload.
      *
+     * **`must_change_password` is a security flag, so it is set, never filled** (phase-24-25
+     * section 11.1, SEC-12). It is the switch that pins an account to the change-password screen
+     * and nothing else, so a request that could mass-assign it could also *clear* it — a user
+     * flagged for a forced reset posting `must_change_password=0` onto any form that fills this
+     * model would walk straight past the gate. Every legitimate writer already sets it directly:
+     * `UserService` assigns the property from validated input, `PasswordChangeService`,
+     * `EmployeeService`, `StudentService` and `TeacherService` use `forceFill()`, and factories
+     * run unguarded. Removing it from this list costs those paths nothing and closes the door.
+     *
      * @var list<string>
      */
     protected $fillable = [
@@ -105,7 +114,6 @@ class User extends Authenticatable
         'last_login_at',
         'last_login_ip',
         'password_changed_at',
-        'must_change_password',
         'branch_id',
     ];
 
@@ -144,6 +152,23 @@ class User extends Authenticatable
     protected function activityModule(): ?string
     {
         return 'users';
+    }
+
+    /**
+     * The logged attribute set, which the trait derives from `$fillable`, plus the one flag that
+     * is deliberately **not** fillable.
+     *
+     * **Taking a column out of `$fillable` must not take it out of the audit trail.** The trait's
+     * default (`LogsActivityWithContext::activityLogAttributes()`) reads `$fillable`, so removing
+     * `must_change_password` from it for SEC-12 would silently stop recording the moment an
+     * administrator forces — or lifts — a password reset on somebody else's account. That is
+     * exactly the change a reader of the activity log needs to see, so it is named here.
+     *
+     * @return array<int, string>
+     */
+    protected function activityLogAttributes(): array
+    {
+        return [...$this->getFillable(), 'must_change_password'];
     }
 
     /**

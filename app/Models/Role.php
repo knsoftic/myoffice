@@ -37,6 +37,20 @@ class Role extends SpatieRole
      * spatie guards only the primary key; an explicit whitelist is safer and still covers
      * everything `Role::create()` / `findOrCreate()` need.
      *
+     * **`created_by` and `updated_by` are stamped, never filled** (phase-24-25 section 11.1,
+     * SEC-12). {@see Blameable} writes them with `setAttribute()` inside the `creating` / `saving`
+     * hooks, which does not consult this list at all, so naming them here bought nothing and cost
+     * the one thing that matters: a payload that reaches `fill()` with `created_by` set could
+     * re-attribute the role grant to somebody who never made it — rewriting the audit trail that
+     * would have shown the escalation. No seeder and no service fills them either: `RoleSeeder`
+     * fills label/description/panel/level/is_system/is_default, and `RoleService` fills an
+     * explicit whitelist.
+     *
+     * `is_system` stays, reluctantly: `RoleSeeder` converges protected roles through `fill()`, and
+     * strict-model mode turns a discarded attribute into an exception. It is safe because no Form
+     * Request declares a rule for it, so it never survives validation into the payload a service
+     * mass-assigns — asserted by SEC-12's exemption in `CsrfAndInjectionTest`.
+     *
      * @var list<string>
      */
     protected $fillable = [
@@ -48,8 +62,6 @@ class Role extends SpatieRole
         'level',
         'is_system',
         'is_default',
-        'created_by',
-        'updated_by',
     ];
 
     /**

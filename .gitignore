@@ -16,6 +16,10 @@
 /public/build
 /public/hot
 /public/storage
+# phase-24-25 6.2: database dumps and file archives. A backup is every row in the system in one
+# file, and the one place it must never end up is a repository that gets cloned, mirrored and
+# pushed. Ignored as a directory so a new archive is never offered by .
+/storage/app/backups
 /storage/*.key
 /storage/pail
 /vendor

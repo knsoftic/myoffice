@@ -99,6 +99,17 @@ class Page extends Model
      * The four publish columns are writable because `PageService::publish()` owns them; no Form
      * Request may accept them — publishing is `pages.change_status`, not `pages.edit` ([D-W3-10]).
      *
+     * **`is_system` is mass-assignable, and `ValidatesPage` is what makes that safe** (phase-24-25
+     * section 11.1, SEC-12). It marks the four policy pages, which are never deletable and whose
+     * slug moves only with `pages.change_status` (§6.4, FT-17), so a request that could set it
+     * could also *clear* it and delete a policy page. It stays on this list because
+     * `PageService::create()` and `::duplicate()` both force `'is_system' => false` through
+     * `Page::create()`, and `Model::shouldBeStrict()` — on outside production — throws on an
+     * attribute `fill()` would discard, so removing it would break the service rather than the
+     * attack. The attack is already closed one layer up: `App\Http\Requests\Cms\Concerns\
+     * ValidatesPage` declares `'is_system' => ['prohibited']`, which **422s** a payload that even
+     * mentions the key. SEC-12 names this column in its exemption list and re-asserts that rule.
+     *
      * @var list<string>
      */
     protected $fillable = [

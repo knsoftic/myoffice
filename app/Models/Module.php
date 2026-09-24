@@ -45,6 +45,20 @@ class Module extends Model
     use LogsActivityWithContext;
 
     /**
+     * **`is_core` is mass-assignable on purpose, and the reason is `ModuleSeeder`** (phase-24-25
+     * section 11.1, SEC-12). Core means "can never be disabled" (§1.3) and `Gate::before` denies
+     * every ability of a disabled module, so a request that could set `is_core` could pin a module
+     * open past the module gate. It stays here because `ModuleSeeder` converges the registry onto
+     * the row with `$module->fill(['is_core' => ...])`, and `Model::shouldBeStrict()` — on outside
+     * production — turns a discarded attribute into a thrown exception, so removing it would break
+     * the seeder rather than harden anything.
+     *
+     * What makes that safe is that **no Form Request declares a rule for `is_core`**, so a forged
+     * key never survives validation into the array a service mass-assigns, and SEC-14 separately
+     * asserts that no controller passes the raw request body into `create`/`update`/`fill`. SEC-12
+     * names this column in its exemption list and re-asserts both guarantees there, so the day
+     * somebody adds an `is_core` rule the test fails.
+     *
      * @var list<string>
      */
     protected $fillable = [

@@ -83,6 +83,18 @@ class Setting extends Model
     public const MASK = '••••••••';
 
     /**
+     * **`updated_by` is stamped by `SettingsService`, never filled** (phase-24-25 section 11.1,
+     * SEC-12). A settings row is the one place where "who changed this" is the whole audit: the
+     * value itself is often a single boolean, and the only interesting fact about it is which
+     * account flipped it. `SettingsService::writeOne()` assigns the property directly
+     * (`$setting->updated_by = ...`), so nothing legitimate needs it on this list — while leaving
+     * it here let any payload that reached `fill()` name a different author for a change to
+     * `security.force_https` or `security.password_min_length`.
+     *
+     * Neither metadata builder that does reach `fill()` carries the column:
+     * `SettingsService::metadataFor()` and `SettingSeeder::metadata()` both write type, options,
+     * flags, label, description and sort order only.
+     *
      * @var list<string>
      */
     protected $fillable = [
@@ -96,7 +108,6 @@ class Setting extends Model
         'label',
         'description',
         'sort_order',
-        'updated_by',
         'is_readonly',
     ];
 
