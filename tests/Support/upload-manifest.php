@@ -26,6 +26,8 @@ declare(strict_types=1);
 |   'owner_phase'      the phase that ships the field
 |   'public_reachable' true when the stored file is served straight from a public URL
 |   'stored_as'        (optional) where and under what name the file is written
+|   'request'          (optional) the Form Request class(es) this row covers, for a request whose
+|                      rules are built at runtime and whose field name cannot be read from source
 |
 */
 
@@ -397,4 +399,116 @@ return [
         'stored_as' => 'courses/{course}/resources/{40 random chars}.{ext} — streamed by admin.course-resources.download and, when public, site.courses.resource',
     ],
 
+
+    /*
+    |----------------------------------------------------------------------
+    | phase-24-25 §6.1 — the twelve fields that had no row.
+    |
+    | `audit:manifest` compares every Form Request rule containing file / image / mimes against
+    | this file, and twelve had nothing to compare against. That means SEC-15 was not attacking
+    | them and `--check` was not holding their disk to D21. An upload nobody listed is an upload
+    | nobody tests.
+    |
+    | Five of the twelve are NOT here, and deliberately. ValidatesContentImage, ValidatesService,
+    | ValidatesPortfolioItem, ValidatesTaxonomy and TaxonomyDefinition are rule-carrying traits
+    | rather than requests behind a route, and D24 is why they exist: the media library is the
+    | website's only uploader, so their file rules are there to REFUSE a raw file and demand a
+    | `media_assets` pick. A row needs a live route — a placeholder one becomes an orphan, and an
+    | orphaned row is a guarantee about a screen nobody can open. They are named instead in
+    | ManifestAuditor::UPLOAD_RULE_ONLY, with the same reason.
+    |----------------------------------------------------------------------
+    */
+    [
+        'route' => 'admin.users.store / admin.users.update',
+        'field' => 'avatar',
+        'disk' => 'public',
+        'allowed_mimes' => [
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+        ],
+        'max_mb' => '2',
+        'permission' => 'users.create / users.edit',
+        'owner_phase' => 1,
+        'public_reachable' => true,
+        'stored_as' => 'avatars/{ulid}.{ext} — a profile photo is shown to whoever may see the user, so the public disk is correct (D21 covers private artefacts). Content-sniffed; SVG refused.',
+    ],
+    [
+        'route' => 'account.avatar.store',
+        'field' => 'avatar',
+        'disk' => 'public',
+        'allowed_mimes' => [
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+        ],
+        'max_mb' => 'security.max_upload_mb',
+        'permission' => '(none — a user always owns their own avatar)',
+        'owner_phase' => 1,
+        'public_reachable' => true,
+        'stored_as' => 'avatars/{ulid}.{ext}. Extensions come from SettingsRegistry::uploadExtensions() intersected with this field own map, so widening security.allowed_file_types cannot widen this field.',
+    ],
+    [
+        'route' => 'admin.assignments.store / admin.assignments.update',
+        'field' => 'brief',
+        'disk' => 'private',
+        'allowed_mimes' => [
+            'application/pdf',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        ],
+        'max_mb' => 'FileRules::assignmentBrief()',
+        'permission' => 'assignments.create / assignments.edit',
+        'owner_phase' => 19,
+        'public_reachable' => false,
+        'stored_as' => 'assignments/{assignment}/brief/{ulid}.{ext} on the private disk, served by a controller that re-runs the permission chain (D21).',
+    ],
+    [
+        'route' => 'student.submissions.submit / student.submissions.resubmit',
+        'field' => 'files.*',
+        'disk' => 'private',
+        'allowed_mimes' => [
+            '(the assignment own allowed types)',
+        ],
+        'max_mb' => 'FileRules::submission()',
+        'permission' => '(the student own enrolment — scoped by ownership, not a grant)',
+        'owner_phase' => 19,
+        'public_reachable' => false,
+        'stored_as' => 'assignment_submission_files rows on the private disk. A submission is a student own work and is never reachable by URL.',
+    ],
+    [
+        'route' => 'admin.assignment-submissions.grade / admin.assignment-submissions.grade-bulk',
+        'field' => 'feedback_file',
+        'disk' => 'private',
+        'allowed_mimes' => [
+            'application/pdf',
+            'image/jpeg',
+            'image/png',
+        ],
+        'max_mb' => 'FileRules::feedback()',
+        'permission' => 'assignments.grade',
+        'owner_phase' => 19,
+        'public_reachable' => false,
+        'stored_as' => 'assignments/{assignment}/feedback/{ulid}.{ext}, private. Feedback names a student and a mark, so it is served by a controller, never by a URL.',
+    ],
+    [
+        'route' => 'admin.portfolio.images.store',
+        'field' => 'images',
+        // Named explicitly: this request builds its rules at runtime (the gallery maximum is a
+        // setting), so the field name cannot be read out of the source and field matching alone
+        // would never clear the warning.
+        'request' => ['App\\Http\\Requests\\Cms\\StorePortfolioImagesRequest'],
+        'disk' => 'public',
+        'allowed_mimes' => [
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+            'image/avif',
+        ],
+        'max_mb' => 'security.max_upload_mb',
+        'permission' => 'portfolio.upload',
+        'owner_phase' => 4,
+        'public_reachable' => true,
+        'stored_as' => 'Through the media library (D24): an upload becomes a media_assets row and the gallery attaches it. A gallery may never exceed 20 attached images; a batch that would is refused whole.',
+    ],
 ];

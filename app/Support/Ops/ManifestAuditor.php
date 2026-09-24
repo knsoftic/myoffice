@@ -92,6 +92,30 @@ final class ManifestAuditor
         return $byPhase;
     }
 
+    /**
+     * Classes whose file rule exists to REFUSE a file, not to accept one.
+     *
+     * Each is a trait (or, for `TaxonomyDefinition`, a shared definition) mixed into the website's
+     * forms rather than a Form Request behind a route. D24 is the reason they carry a file rule at
+     * all: the CMS media library is the website's only uploader, so every later image field picks
+     * a `media_assets` row, and these rules are what turn a raw upload into a validation error.
+     *
+     * They are named here rather than given manifest rows because a row's `route` is checked
+     * against the live router — a placeholder route becomes an orphan, and an orphaned row asserts
+     * a guarantee about a screen nobody can open, which reads as coverage.
+     *
+     * The list is short on purpose. The moment it grows, the pattern it exempts has spread.
+     *
+     * @var array<string, string>
+     */
+    private const UPLOAD_RULE_ONLY = [
+        'ValidatesContentImage' => 'refuses a raw section image; the form picks a media_assets row (D24)',
+        'ValidatesService' => 'refuses a raw service icon or hero; the form picks a media_assets row (D24)',
+        'ValidatesPortfolioItem' => 'refuses a raw portfolio cover; the form picks a media_assets row (D24)',
+        'ValidatesTaxonomy' => 'refuses a raw category image; the form picks a media_assets row (D24)',
+        'TaxonomyDefinition' => 'declares the shared service/portfolio/blog category rules, which refuse a raw file (D24)',
+    ];
+
     /*
     |--------------------------------------------------------------------------
     | The four audits
@@ -298,8 +322,19 @@ final class ManifestAuditor
         $warnings = [];
 
         foreach ($declared as $name) {
-            if ($name !== null && $name !== '' && ! Route::has($name)) {
-                $orphaned[] = $name;
+            if ($name === null || $name === '') {
+                continue;
+            }
+
+            // The manifest header documents `route` as "route name (or names, `a / b`)", because
+            // one upload field is often reached by a store AND an update endpoint. Splitting is
+            // what makes that documented form true: without it a two-route row reported as an
+            // orphan, which is the finding that means "this row describes a screen nobody can
+            // open" — exactly the wrong signal.
+            foreach ($this->routeNames((string) $name) as $single) {
+                if (! Route::has($single)) {
+                    $orphaned[] = $single;
+                }
             }
         }
 
@@ -328,6 +363,11 @@ final class ManifestAuditor
         // A Form Request that validates a file, whose route has no row.
         foreach ($this->requestsValidatingFiles() as $class => $fields) {
             if ($this->anyRowMentions($rows, $class, $fields)) {
+                continue;
+            }
+
+            // A rule that exists to refuse a file is not an upload endpoint. See the constant.
+            if (isset(self::UPLOAD_RULE_ONLY[class_basename($class)])) {
                 continue;
             }
 
@@ -627,6 +667,21 @@ final class ManifestAuditor
     private function anyRowMentions(array $rows, string $class, array $fields): bool
     {
         foreach ($rows as $row) {
+            /*
+            | A row may name the Form Request it covers.
+            |
+            | Field matching alone is not enough: when a rule is built at runtime — the portfolio
+            | gallery reads its own maximum from a setting — the field name cannot be read out of
+            | the source, and this audit reports the generic "(a file rule)". A row could then
+            | never match it, so a correctly documented endpoint stayed a warning for ever, and a
+            | warning nobody can clear is a warning everybody stops reading.
+            */
+            $covers = (array) ($row['request'] ?? []);
+
+            if (in_array($class, $covers, true) || in_array(class_basename($class), $covers, true)) {
+                return true;
+            }
+
             foreach ($fields as $field) {
                 if (($row['field'] ?? null) === $field) {
                     return true;
@@ -635,6 +690,22 @@ final class ManifestAuditor
         }
 
         return false;
+    }
+
+    /**
+     * The route names in a manifest row's `route` value.
+     *
+     * One field is often reached by two endpoints — a store and an update — and the manifest
+     * header has always documented `a / b` for that. This is what makes it true.
+     *
+     * @return list<string>
+     */
+    private function routeNames(string $value): array
+    {
+        return array_values(array_filter(array_map(
+            static fn (string $name): string => trim($name),
+            explode('/', $value),
+        ), static fn (string $name): bool => $name !== ''));
     }
 
     /**
