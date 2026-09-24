@@ -9,6 +9,7 @@ use App\Enums\CourseResourceType;
 use App\Enums\FixedCommissionRelease;
 use App\Enums\ProgressBasis;
 use App\Enums\RemainderPlacement;
+use App\Enums\SearchEntityType;
 use App\Enums\StudentFeeType;
 use App\Enums\ThemePreference;
 use App\Enums\Weekday;
@@ -457,6 +458,16 @@ final class SettingsRegistry
                 'icon' => 'wrench-screwdriver',
                 'description' => 'Switch the public site, its forms and maintenance mode on or off. The admin panel is never affected.',
                 'sort' => 120,
+            ],
+            // phase-19-23 5.3, [D-23-1]. Sort 125 - last, deliberately. Every other group
+            // configures a part of the business; this one configures how the business is *read*.
+            // It is the tab an administrator opens least often and the one whose defaults are
+            // most often right, so it belongs at the end rather than competing with Finance.
+            'reports' => [
+                'label' => 'Reports & Search',
+                'icon' => 'chart-bar',
+                'description' => 'Report defaults, export limits and retention, the global search palette, and what the audit trail treats as sensitive.',
+                'sort' => 125,
             ],
         ];
 
@@ -1437,6 +1448,7 @@ final class SettingsRegistry
             'hr' => self::hrFields(),
             'crm' => self::crmFields(),
             'maintenance' => self::maintenanceFields(),
+            'reports' => self::reportsFields(),
         ];
     }
 
@@ -6182,6 +6194,248 @@ final class SettingsRegistry
                 'public' => true,
                 'span' => 4,
                 'sort' => 50,
+            ],
+        ];
+    }
+
+    /**
+     * phase-19-23 5.3 - the fifteen keys Phase 23 owns.
+     *
+     * Three of these defaults are arguments rather than numbers, and each is written down where it
+     * is set rather than in a design note nobody re-reads:
+     *
+     * - `activity_log_retention_days` is **0, meaning never**. Every other retention key in this
+     *   registry counts down to a deletion; this one does not, because 110 asks for an audit trail
+     *   and a financial log that quietly deletes its own oldest rows is not one. An administrator
+     *   can still set a number, and the help text says plainly what that costs.
+     *
+     * - `excel_enabled` is **false**, and turning it on is not enough on its own -
+     *   {@see \App\Enums\ExportFormat::isAvailable()} also asks whether a writer package is
+     *   installed. A switch that produces a button that 500s is worse than no switch.
+     *
+     * - `sync_row_limit` does **not** override `finance.report_sync_row_limit` for Phase 13's four
+     *   finance reports. Two keys for one idea is a convergence ask 13.2 records, not a thing to
+     *   fix by quietly changing which one wins - a finance report that suddenly streamed 5,000 rows
+     *   inline because Phase 23 arrived would be a regression nobody asked for.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private static function reportsFields(): array
+    {
+        return [
+            // -------------------------------------------------------------- defaults
+            'default_date_preset' => [
+                'label' => 'Reports open on',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string', 'in:today,yesterday,week,month,year'],
+                'default' => 'month',
+                'options' => [
+                    'today' => 'Today',
+                    'yesterday' => 'Yesterday',
+                    'week' => 'This week',
+                    'month' => 'This month',
+                    'year' => 'This year',
+                ],
+                // `custom` is always offered on the screen and is never a default: a report that
+                // opens on an empty date range asks a question instead of answering one.
+                'help' => 'The range a report starts on. A custom range is always available.',
+                'span' => 4,
+                'sort' => 10,
+            ],
+            'cache_ttl_seconds' => [
+                'label' => 'Remember a result for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'between:0,86400'],
+                'default' => 300,
+                'suffix' => 'seconds',
+                // Per user and per filter set, never global: two people with different branch scopes
+                // asking the same question must not share an answer.
+                'help' => 'Caches a report per person and per filter set. 0 recalculates every time.',
+                'span' => 4,
+                'sort' => 20,
+            ],
+
+            // -------------------------------------------------------------- exports
+            'sync_row_limit' => [
+                'label' => 'Show inline up to',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'between:100,100000'],
+                'default' => 5000,
+                'suffix' => 'rows',
+                'help' => 'A bigger result is queued as an export instead of being rendered. '
+                    .'Finance reports keep their own limit under the Finance tab.',
+                'span' => 4,
+                'sort' => 100,
+            ],
+            'export_max_rows' => [
+                'label' => 'Refuse an export above',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'between:1000,2000000'],
+                'default' => 200000,
+                'suffix' => 'rows',
+                // Named in the refusal, so the message is "your filters match 412,900 rows" rather
+                // than "too many rows" - one of those a person can act on.
+                'help' => 'The request is refused with the row count, so the person knows how much '
+                    .'to narrow by.',
+                'span' => 4,
+                'sort' => 110,
+            ],
+            'export_retention_days' => [
+                'label' => 'Keep an exported file for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'between:1,365'],
+                'default' => 7,
+                'suffix' => 'days',
+                // The file goes; the row stays, marked expired. Somebody who bookmarked a link is
+                // told the file has gone rather than that it never existed.
+                'help' => 'Only the file is deleted. The record of who exported what is kept.',
+                'span' => 4,
+                'sort' => 120,
+            ],
+            'excel_enabled' => [
+                'label' => 'Offer Excel downloads',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                'default' => false,
+                'help' => 'Needs a spreadsheet package installed on the server as well. Until one is, '
+                    .'this stays off by itself and CSV opens in Excel anyway.',
+                'span' => 6,
+                'sort' => 130,
+            ],
+            'pdf_paper_size' => [
+                'label' => 'PDF paper',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string', 'in:a4,letter,legal'],
+                'default' => 'a4',
+                'options' => [
+                    'a4' => 'A4',
+                    'letter' => 'Letter',
+                    'legal' => 'Legal',
+                ],
+                'span' => 3,
+                'sort' => 140,
+            ],
+            'pdf_orientation' => [
+                'label' => 'PDF orientation',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string', 'in:portrait,landscape'],
+                // Landscape, because a report is a wide table and a portrait page truncates columns.
+                'default' => 'landscape',
+                'options' => [
+                    'portrait' => 'Portrait',
+                    'landscape' => 'Landscape',
+                ],
+                'span' => 3,
+                'sort' => 150,
+            ],
+
+            // -------------------------------------------------------------- the search palette
+            'global_search_min_chars' => [
+                'label' => 'Search after',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'between:1,10'],
+                'default' => 2,
+                'suffix' => 'characters',
+                'span' => 3,
+                'sort' => 200,
+            ],
+            'global_search_debounce_ms' => [
+                'label' => 'Wait before searching',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'between:0,2000'],
+                'default' => 250,
+                'suffix' => 'ms',
+                'help' => 'Stops a query firing on every keystroke.',
+                'span' => 3,
+                'sort' => 210,
+            ],
+            'global_search_per_entity_limit' => [
+                'label' => 'Results per section',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'between:1,25'],
+                'default' => 5,
+                'suffix' => 'rows',
+                'help' => 'The palette shows this many of each kind, with a link to the full list.',
+                'span' => 3,
+                'sort' => 220,
+            ],
+            'global_search_entities' => [
+                'label' => 'Search these',
+                'type' => self::TYPE_MULTISELECT,
+                'rules' => ['required', 'array', 'min:1'],
+                'item_rules' => [
+                    '*' => ['string', 'in:'.implode(',', SearchEntityType::values())],
+                ],
+                'default' => SearchEntityType::values(),
+                'options' => SearchEntityType::options(),
+                // This narrows the palette; it does not grant anything. A person still only ever
+                // sees rows their permissions and their scope already allow - unticking a kind here
+                // hides it from everyone, and ticking one back on gives nobody new access.
+                'help' => 'Narrows what the palette looks through. It never widens what anyone may '
+                    .'see: permissions and branch scope still decide that.',
+                'span' => 12,
+                'sort' => 230,
+            ],
+
+            // -------------------------------------------------------------- the audit trail
+            'activity_log_retention_days' => [
+                'label' => 'Prune the activity log after',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'between:0,3650'],
+                'default' => 0,
+                'suffix' => 'days',
+                'help' => '0 never prunes, and that is the default on purpose: the audit trail is '
+                    .'the record of who changed money, and a log that deletes its own history is '
+                    .'not evidence of anything.',
+                'span' => 6,
+                'sort' => 300,
+            ],
+            'audit_show_financial_values' => [
+                'label' => 'Show money values in the audit trail',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['required', 'boolean'],
+                'default' => true,
+                // Off does not hide the row - somebody without `view_financial` still sees that a
+                // commission rate changed, who changed it and when. Only the two numbers are
+                // masked. Hiding the event as well would turn a privacy setting into a way to make
+                // a change invisible, which is the opposite of what an audit trail is for.
+                'help' => 'Off, the old and new amounts need the financial permission. The change '
+                    .'itself, and who made it, stays visible either way.',
+                'span' => 6,
+                'sort' => 310,
+            ],
+            'audit_sensitive_modules' => [
+                'label' => 'Treat these as sensitive',
+                'type' => self::TYPE_MULTISELECT,
+                'rules' => ['nullable', 'array'],
+                'item_rules' => [
+                    '*' => ['string', 'in:'.implode(',', array_keys(PermissionRegistry::modules()))],
+                ],
+                'default' => [
+                    'collaborator_commission_settings',
+                    'collaborator_commissions',
+                    'collaborator_payouts',
+                    'collaborator_referrals',
+                    'student_fees',
+                    'fee_discounts',
+                    'results',
+                    'certificates',
+                    'users',
+                    'roles',
+                    'settings',
+                    'modules',
+                ],
+                // From the registry, not the `modules` table: the registry is the source of truth
+                // and never needs the database, so this list is right on a fresh install and on a
+                // settings screen rendered before the seeder has run.
+                'options' => static fn (): array => array_map(
+                    static fn (array $module): string => (string) $module['name'],
+                    PermissionRegistry::modules(),
+                ),
+                'help' => 'Changes in these modules appear in the audit trail by default. Every '
+                    .'module is still logged; this decides what the trail opens on.',
+                'span' => 12,
+                'sort' => 320,
             ],
         ];
     }
