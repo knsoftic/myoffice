@@ -53,4 +53,4 @@
         ->all();
 @endphp
 
-<script type="application/json" id="cms-media-library">@json($library)</script>
+<script nonce="{{ csp_nonce() }}" type="application/json" id="cms-media-library">@json($library)</script>

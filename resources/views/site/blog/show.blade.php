@@ -74,7 +74,7 @@
 
 @unless ($isPreview)
     @push('head')
-        <script type="application/ld+json">@json($jsonLd)</script>
+        <script nonce="{{ csp_nonce() }}" type="application/ld+json">@json($jsonLd)</script>
     @endpush
 @endunless
 

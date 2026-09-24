@@ -217,7 +217,7 @@
 @endsection
 
 @push('scripts')
-    <script>
+    <script nonce="{{ csp_nonce() }}">
         function rulePreview(url) {
             return {
                 result: null,

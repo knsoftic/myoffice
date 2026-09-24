@@ -79,4 +79,136 @@ return [
         'why' => 'A course FAQ is a Phase 3 `faqs` row (F-2.2) rendered on this page, so it prints exactly as the FAQ manager previews it — same value, same sanitiser, one definition of what an answer may contain.',
     ],
 
+
+    /*
+    |----------------------------------------------------------------------------------------------
+    | phase-24-25 SEC-05 - the rows phases 14-23 owed.
+    |
+    | `security:audit` found nineteen raw echoes against four allowlist rows. Two of the gaps were
+    | live stored XSS (messages.body, meetings.agenda / .notes printed raw with nothing sanitising
+    | them on write) and are fixed in the views themselves. The rest were legitimate and simply
+    | never written down - which is the failure this file exists to prevent, because "legitimate"
+    | and "nobody checked" look identical from outside.
+    |----------------------------------------------------------------------------------------------
+    */
+    [
+        'view' => 'components/ui/icon.blade.php',
+        'expression' => '$markup',
+        'occurrences' => 1,
+        'sanitiser' => 'App\\Support\\RichText::sanitize()',
+        'owner_phase' => 14,
+        'why' => 'The inline SVG for one icon, looked up by name in the component own fixed map. No value from a request reaches it - an unknown name renders nothing rather than anything.',
+    ],
+    [
+        'view' => 'admin/roles/partials/matrix.blade.php',
+        'expression' => '$bulk',
+        'occurrences' => 3,
+        'sanitiser' => 'App\\Support\\RichText::sanitize()',
+        'owner_phase' => 1,
+        'why' => 'A string of checkbox attributes the view itself builds two lines above, from literals. It is markup by construction and carries no stored or submitted value.',
+    ],
+    [
+        'view' => 'support/messages/_show.blade.php',
+        'expression' => 'nl2br(e((string) $message->body))',
+        'occurrences' => 1,
+        'sanitiser' => 'App\\Support\\RichText::sanitize()',
+        'owner_phase' => 22,
+        'why' => 'The value is escaped by e() before nl2br turns its newlines into breaks, so the only markup in the output is the <br> this line adds. Message::$body is plain text by contract and is never sanitised on write - it used to be printed raw, which was stored XSS across all five panels.',
+    ],
+    [
+        'view' => 'admin/messages/show.blade.php',
+        'expression' => 'nl2br(e((string) $message->body))',
+        'occurrences' => 1,
+        'sanitiser' => 'App\\Support\\RichText::sanitize()',
+        'owner_phase' => 22,
+        'why' => 'The admin side of the same thread, and the same reasoning.',
+    ],
+    [
+        'view' => 'support/meetings/_show.blade.php',
+        'expression' => 'RichText::sanitize((string) $meeting->agenda)',
+        'occurrences' => 2,
+        'sanitiser' => 'App\\Support\\RichText::sanitize()',
+        'owner_phase' => 22,
+        'why' => 'Agenda and notes are rich text typed by staff and are NOT sanitised on write - only validated for length - so the sanitiser runs here, which also covers every row already stored.',
+    ],
+    [
+        'view' => 'admin/meetings/show.blade.php',
+        'expression' => 'RichText::sanitize((string) $meeting->agenda)',
+        'occurrences' => 2,
+        'sanitiser' => 'App\\Support\\RichText::sanitize()',
+        'owner_phase' => 22,
+        'why' => 'The admin meeting screen, and the same reasoning.',
+    ],
+    [
+        'view' => 'support/tickets/_show.blade.php',
+        'expression' => 'RichText::sanitize((string) $ticket->description)',
+        'occurrences' => 2,
+        'sanitiser' => 'App\\Support\\RichText::sanitize()',
+        'owner_phase' => 22,
+        'why' => 'The description and every reply are sanitised on write by StoreTicketRequest and ReplyToTicketRequest, and sanitised again here for rows written before those rules existed.',
+    ],
+    [
+        'view' => 'admin/tickets/show.blade.php',
+        'expression' => 'RichText::sanitize((string) $ticket->description)',
+        'occurrences' => 2,
+        'sanitiser' => 'App\\Support\\RichText::sanitize()',
+        'owner_phase' => 22,
+        'why' => 'The admin ticket screen, and the same reasoning.',
+    ],
+    [
+        'view' => 'admin/courses/show.blade.php',
+        'expression' => 'RichText::sanitize($course->full_description)',
+        'occurrences' => 1,
+        'sanitiser' => 'App\\Support\\RichText::sanitize()',
+        'owner_phase' => 14,
+        'why' => 'The course rich text, sanitised on render exactly as the public course page does.',
+    ],
+    [
+        'view' => 'site/courses/show.blade.php',
+        'expression' => 'RichText::sanitize($course->full_description)',
+        'occurrences' => 2,
+        'sanitiser' => 'App\\Support\\RichText::sanitize()',
+        'owner_phase' => 14,
+        'why' => 'The public course description and each FAQ answer, both sanitised on render.',
+    ],
+    [
+        'view' => 'layouts/document.blade.php',
+        'expression' => '$css',
+        'occurrences' => 1,
+        'sanitiser' => 'App\\Support\\RichText::sanitize()',
+        'owner_phase' => 19,
+        'why' => 'The print template stylesheet, already sanitised on write by PrintTemplateService::sanitizeCss() through Phase 3 material profile. CSS, never script.',
+    ],
+    [
+        'view' => 'layouts/print.blade.php',
+        'expression' => '$footerHtml',
+        'occurrences' => 1,
+        'sanitiser' => 'App\\Support\\RichText::sanitize()',
+        'owner_phase' => 19,
+        'why' => 'The print template footer, sanitised on write by PrintTemplateService::sanitize().',
+    ],
+    [
+        'view' => 'admin/certificates/print.blade.php',
+        'expression' => '$body',
+        'occurrences' => 1,
+        'sanitiser' => 'App\\Support\\RichText::sanitize()',
+        'owner_phase' => 21,
+        'why' => 'The rendered certificate, produced from a print template whose body_html was sanitised on write. A certificate is the one artefact that must render exactly as designed, so it is not sanitised a second time here - the write path is the control.',
+    ],
+    [
+        'view' => 'admin/student-id-cards/print.blade.php',
+        'expression' => '$row[\'body\']',
+        'occurrences' => 1,
+        'sanitiser' => 'App\\Support\\RichText::sanitize()',
+        'owner_phase' => 21,
+        'why' => 'One rendered ID card, from the same sanitised-on-write print template pipeline.',
+    ],
+    [
+        'view' => 'admin/print-templates/preview.blade.php',
+        'expression' => '$body',
+        'occurrences' => 1,
+        'sanitiser' => 'App\\Support\\RichText::sanitize()',
+        'owner_phase' => 21,
+        'why' => 'The designer preview of a template, rendered from the same sanitised body_html the print path uses - so the preview shows what will actually print.',
+    ],
 ];

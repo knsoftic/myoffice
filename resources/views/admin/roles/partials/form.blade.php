@@ -289,7 +289,7 @@
 </form>
 
 @push('scripts')
-    <script>
+    <script nonce="{{ csp_nonce() }}">
         /*
          * roleMatrix — the permission grid's only behaviour.
          *

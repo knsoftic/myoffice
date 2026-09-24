@@ -248,7 +248,7 @@
 </div>
 
 @push('scripts')
-    <script>
+    <script nonce="{{ csp_nonce() }}">
         function invoiceForm(config) {
             return {
                 lines: config.lines,

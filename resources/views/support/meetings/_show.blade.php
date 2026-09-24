@@ -50,14 +50,14 @@
                 @endif
 
                 @if ($meeting->agenda)
-                    <div class="prose prose-sm mt-4 max-w-none dark:prose-invert">{!! $meeting->agenda !!}</div>
+                    <div class="prose prose-sm mt-4 max-w-none dark:prose-invert">{!! \App\Support\RichText::sanitize((string) $meeting->agenda) !!}</div>
                 @endif
             </x-ui.card>
 
             @if ($canViewNotes && $meeting->notes)
                 <x-ui.card>
                     <x-ui.section-heading title="Notes" />
-                    <div class="prose prose-sm mt-3 max-w-none dark:prose-invert">{!! $meeting->notes !!}</div>
+                    <div class="prose prose-sm mt-3 max-w-none dark:prose-invert">{!! \App\Support\RichText::sanitize((string) $meeting->notes) !!}</div>
                 </x-ui.card>
             @endif
         </div>

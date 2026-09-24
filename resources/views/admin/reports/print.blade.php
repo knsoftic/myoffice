@@ -149,7 +149,7 @@
 </footer>
 
 @if (! ($asPdf ?? false))
-    <script>window.addEventListener('load', () => window.print());</script>
+    <script nonce="{{ csp_nonce() }}">window.addEventListener('load', () => window.print());</script>
 @endif
 </body>
 </html>

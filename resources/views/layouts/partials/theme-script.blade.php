@@ -49,7 +49,7 @@
     $sidebarRailDefault = (bool) setting('appearance.sidebar_collapsed_by_default', false);
 @endphp
 
-<script>
+<script nonce="{{ csp_nonce() }}">
     (function () {
         var root = document.documentElement;
         var themes = @json($themeValues);

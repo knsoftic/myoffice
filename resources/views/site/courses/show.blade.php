@@ -441,5 +441,5 @@
         $jsonLdFlags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
             | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT;
     @endphp
-    <script type="application/ld+json">@json($jsonLd, $jsonLdFlags)</script>
+    <script nonce="{{ csp_nonce() }}" type="application/ld+json">@json($jsonLd, $jsonLdFlags)</script>
 @endpush

@@ -221,7 +221,7 @@
 @endsection
 
 @push('scripts')
-    <script>
+    <script nonce="{{ csp_nonce() }}">
         /*
          * Reordering is a local rehearsal that only becomes real when the form is submitted: the rows
          * move on screen, and `order[]` is read off the DOM at submit time. Nothing is saved by a drag,

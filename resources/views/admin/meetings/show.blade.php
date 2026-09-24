@@ -76,7 +76,7 @@
                 </dl>
 
                 @if ($meeting->agenda)
-                    <div class="prose prose-sm mt-4 max-w-none dark:prose-invert">{!! $meeting->agenda !!}</div>
+                    <div class="prose prose-sm mt-4 max-w-none dark:prose-invert">{!! \App\Support\RichText::sanitize((string) $meeting->agenda) !!}</div>
                 @endif
             </x-ui.card>
 
@@ -172,7 +172,7 @@
                             </div>
                         </form>
                     @elseif ($meeting->notes)
-                        <div class="prose prose-sm mt-3 max-w-none dark:prose-invert">{!! $meeting->notes !!}</div>
+                        <div class="prose prose-sm mt-3 max-w-none dark:prose-invert">{!! \App\Support\RichText::sanitize((string) $meeting->notes) !!}</div>
                     @else
                         <p class="mt-3 text-sm text-slate-500 dark:text-slate-400">Nothing written up yet.</p>
                     @endif

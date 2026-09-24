@@ -349,7 +349,7 @@
 @include('admin.courses._outline-modals')
 
 @push('scripts')
-    <script>
+    <script nonce="{{ csp_nonce() }}">
         /*
          * The outline tree's drag, collapse and reorder behaviour.
          *

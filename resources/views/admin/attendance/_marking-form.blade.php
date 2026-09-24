@@ -157,7 +157,7 @@
     </form>
 
     @push('scripts')
-        <script>
+        <script nonce="{{ csp_nonce() }}">
             function attendanceRegister() {
                 const students = @json($roster->pluck('student_id')->values());
                 const initial = @json($roster->mapWithKeys(fn ($e) => [

@@ -29,7 +29,7 @@
                                     <div class="mb-1 text-xs font-medium opacity-70">{{ $message->author?->name ?? 'Somebody' }}</div>
                                 @endunless
 
-                                <div class="prose prose-sm max-w-none dark:prose-invert">{!! $message->body !!}</div>
+                                <div class="prose prose-sm max-w-none dark:prose-invert">{!! nl2br(e((string) $message->body)) !!}</div>
 
                                 <div @class(['mt-1 text-right text-[10px]', 'text-white/70' => $mine, 'text-slate-400' => ! $mine])>
                                     {{ $message->created_at?->diffForHumans() }}

@@ -118,7 +118,7 @@
         data-chart-type="{{ $type }}"
     >
         {{-- The runtime reads this; a non-executable script type survives an innerHTML swap. --}}
-        <script type="application/json" data-chart-config>@json($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE)</script>
+        <script nonce="{{ csp_nonce() }}" type="application/json" data-chart-config>@json($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE)</script>
 
         <div data-chart-canvas style="height: {{ $height }}px">
             <canvas

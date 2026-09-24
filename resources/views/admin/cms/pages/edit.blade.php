@@ -260,7 +260,7 @@
 
 @if ($errors->has('publish_at'))
     @push('scripts')
-        <script>
+        <script nonce="{{ csp_nonce() }}">
             document.addEventListener('alpine:initialized', () => {
                 window.Alpine?.store('toasts')?.push({ type: 'error', message: @js('The page was not scheduled: '.$errors->first('publish_at')) });
             });

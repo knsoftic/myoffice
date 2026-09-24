@@ -212,7 +212,7 @@
 @endsection
 
 @push('scripts')
-    <script>
+    <script nonce="{{ csp_nonce() }}">
         /*
          * The same rehearsal-then-commit shape the finance categories use: dragging moves rows on
          * screen and nothing else, and `order[]` is read off the DOM at submit time. A mis-drop costs

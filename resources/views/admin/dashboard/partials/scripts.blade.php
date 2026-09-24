@@ -16,7 +16,7 @@
           3. **Save.** One PUT with `{ order, hidden }`. The server re-checks every key against this
              viewer's permissions, so this payload is a request, not an authority.
     --}}
-    <script>
+    <script nonce="{{ csp_nonce() }}">
         document.addEventListener('alpine:init', () => {
             window.Alpine.data('adminDashboard', (config = {}) => ({
                 // ── configuration ───────────────────────────────────────────────────────────

@@ -30,7 +30,7 @@
         : (in_array($themeDefault, ['light', 'dark', 'system'], true) ? $themeDefault : 'system');
 @endphp
 
-<script>
+<script nonce="{{ csp_nonce() }}">
     (function () {
         var root = document.documentElement;
         var valid = ['light', 'dark', 'system'];

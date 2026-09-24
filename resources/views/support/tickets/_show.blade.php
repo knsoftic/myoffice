@@ -19,7 +19,7 @@
                     @endif
                 </div>
 
-                <div class="prose prose-sm max-w-none dark:prose-invert">{!! $ticket->description !!}</div>
+                <div class="prose prose-sm max-w-none dark:prose-invert">{!! \App\Support\RichText::sanitize((string) $ticket->description) !!}</div>
 
                 <p class="mt-4 text-xs text-slate-400">Raised {{ $ticket->created_at?->diffForHumans() }}</p>
             </x-ui.card>
@@ -35,7 +35,7 @@
                         <span class="text-xs text-slate-400">{{ $reply->created_at?->diffForHumans() }}</span>
                     </div>
 
-                    <div class="prose prose-sm max-w-none dark:prose-invert">{!! $reply->body !!}</div>
+                    <div class="prose prose-sm max-w-none dark:prose-invert">{!! \App\Support\RichText::sanitize((string) $reply->body) !!}</div>
                 </x-ui.card>
             @endforeach
 

@@ -174,7 +174,7 @@
 @endif
 
 @if ($gtmId !== null)
-    <script>
+    <script nonce="{{ csp_nonce() }}">
         (function (w, d, s, l, i) {
             w[l] = w[l] || [];
             w[l].push({ 'gtm.start': new Date().getTime(), event: 'gtm.js' });
@@ -188,7 +188,7 @@
 
 @if ($gaId !== null)
     <script async src="https://www.googletagmanager.com/gtag/js?id={{ $gaId }}"></script>
-    <script>
+    <script nonce="{{ csp_nonce() }}">
         window.dataLayer = window.dataLayer || [];
         function gtag() { window.dataLayer.push(arguments); }
         gtag('js', new Date());
@@ -197,7 +197,7 @@
 @endif
 
 @if ($pixelId !== null)
-    <script>
+    <script nonce="{{ csp_nonce() }}">
         !function (f, b, e, v, n, t, s) {
             if (f.fbq) return; n = f.fbq = function () { n.callMethod ? n.callMethod.apply(n, arguments) : n.queue.push(arguments); };
             if (!f._fbq) f._fbq = n; n.push = n; n.loaded = !0; n.version = '2.0'; n.queue = [];

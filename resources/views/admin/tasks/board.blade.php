@@ -90,7 +90,7 @@
     </div>
 
     @push('scripts')
-        <script>
+        <script nonce="{{ csp_nonce() }}">
             function taskBoard(config) {
                 return {
                     dragging: null,

@@ -175,7 +175,7 @@
 </x-ui.card>
 
 @push('scripts')
-    <script>
+    <script nonce="{{ csp_nonce() }}">
         /*
          |  Branding live preview (phase-02 §5).
          |

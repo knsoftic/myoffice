@@ -324,7 +324,7 @@
 @endsection
 
 @push('scripts')
-    <script>
+    <script nonce="{{ csp_nonce() }}">
         function commissionSelection() {
             return {
                 selected: [],

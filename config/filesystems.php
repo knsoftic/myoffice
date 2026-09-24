@@ -30,10 +30,24 @@ return [
 
     'disks' => [
 
+        /*
+        | phase-24-25 6.6. `serve` is OFF, and it was on.
+        |
+        | `serve => true` makes the framework register `GET /storage/{path}` and
+        | `PUT /storage/{path}` against this disk - which is rooted at `storage/app/private`. Both
+        | answer 403 without a signature, so nothing was exposed; the objection is that they are
+        | doors this application never opens. D21 is explicit that a private artefact is served by a
+        | controller that re-runs the permission chain, and every upload in twenty-three phases goes
+        | through one. A framework route that bypasses that chain is a second way in whose only
+        | protection is a signature check nobody in this codebase generates.
+        |
+        | Nothing references `storage.local` or calls `Storage::disk('local')->url()`. Reads and
+        | writes through `Storage::disk('local')` are unaffected - only the HTTP routes go away.
+        */
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),
-            'serve' => true,
+            'serve' => false,
             'throw' => false,
             'report' => false,
         ],

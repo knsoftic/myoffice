@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Finance;
 
+use InvalidArgumentException;
 use App\Enums\AgingBucket;
 use App\Enums\ExpenseStatus;
 use App\Enums\FinanceContext;
@@ -613,6 +614,24 @@ class FinanceReportService
     ): array {
         if (! $allowed) {
             return [];
+        }
+
+        /*
+        | phase-24-25 6.6. The two column names below are interpolated into SQL, because a column
+        | identifier cannot be a bound parameter. Every caller passes a literal, so nothing reaches
+        | here from a request - but that is a property of the callers, not of this method, and a
+        | later refactor that threads a sort column through would silently change it.
+        |
+        | Refused rather than escaped: a column name that is not a plain identifier is a bug at the
+        | call site, and quoting it would hide the bug while running the query anyway.
+        */
+        foreach (['table' => $table, 'date column' => $dateColumn, 'amount column' => $amountColumn] as $what => $identifier) {
+            if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $identifier) !== 1) {
+                throw new InvalidArgumentException(sprintf(
+                    'monthlySums(): [%s] is not a plain identifier, and identifiers are interpolated here.',
+                    $what,
+                ));
+            }
         }
 
         $rows = $this->db->table($table)

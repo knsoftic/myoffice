@@ -114,7 +114,7 @@
 
 @once
     @push('scripts')
-        <script>
+        <script nonce="{{ csp_nonce() }}">
             // Registered once per page rather than inlined per modal: the rebuild and build dialogs
             // are the same wizard and there is no version of this that should differ between them.
             window.feePlanWizard = (config) => ({
