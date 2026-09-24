@@ -112,6 +112,20 @@ Route::prefix('collaborator')
         | to guarantee that is not to write it five times.
         |
         */
+
+        /*
+        |----------------------------------------------------------------------
+        | Phase 22 - tickets, meetings and messages (sec 7.6, sec 8)
+        |----------------------------------------------------------------------
+        |
+        | One shared file for all four portals, included here so it picks up this
+        | panel's prefix, name prefix and middleware. See its own header for why
+        | there is one rather than four.
+        |
+        */
+        $portal = 'collaborator_portal';
+        require __DIR__.'/portal-support.php';
+
         $ability = 'collaborator_portal.notifications';
         require __DIR__.'/notifications.php';
 

@@ -34,11 +34,23 @@ final class SupportTicketPolicy
 
     public const MODULE = 'support_tickets';
 
+    /**
+     * May this person open a ticket list at all?
+     *
+     * **A portal user holds neither `support_tickets.view_any` nor `.view`** — their access runs
+     * through `{panel}_portal.support_tickets`, exactly as `create()` already allowed for. Leaving
+     * them out here meant every portal's ticket list answered 403 while the *create* form and the
+     * *detail* page beside it both worked, which is the kind of gap a permission table cannot show
+     * you and a rendered screen can.
+     *
+     * What each of them then *sees* is decided by the query, not by this: §9.4 gives `view_any` the
+     * queue and everybody else their own rows.
+     */
     public function viewAny(User $user): bool
     {
-        // A portal user reaches their own list through their panel's permission, not this one.
         return $this->holds($user, self::MODULE, Ability::ViewAny)
-            || $this->holds($user, self::MODULE, Ability::View);
+            || $this->holds($user, self::MODULE, Ability::View)
+            || $this->onAPortal($user);
     }
 
     public function view(User $user, SupportTicket $ticket): bool
@@ -54,11 +66,7 @@ final class SupportTicketPolicy
     {
         // Every panel may raise one; which desks accept them is `TicketService::assertMayRaise()`,
         // because that answer depends on the department and a policy is handed no department.
-        return $this->holds($user, self::MODULE, Ability::Create)
-            || $user->can('client_portal.support_tickets')
-            || $user->can('student_portal.support_tickets')
-            || $user->can('teacher_portal.support_tickets')
-            || $user->can('collaborator_portal.support_tickets');
+        return $this->holds($user, self::MODULE, Ability::Create) || $this->onAPortal($user);
     }
 
     /**
@@ -156,6 +164,24 @@ final class SupportTicketPolicy
     private function isStaff(User $user): bool
     {
         return $this->holds($user, self::MODULE, Ability::ViewAny);
+    }
+
+    /**
+     * Does this person reach tickets through a portal rather than through the module?
+     *
+     * Built from the panel list rather than written out, so the next panel added does not need this
+     * method edited — and so `viewAny()` and `create()` cannot come to disagree about who counts,
+     * which is what happened when they were two separate lists.
+     */
+    private function onAPortal(User $user): bool
+    {
+        foreach (['client', 'student', 'teacher', 'collaborator'] as $panel) {
+            if ($user->can($panel.'_portal.support_tickets')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function isRequester(User $user, SupportTicket $ticket): bool

@@ -6,15 +6,11 @@ use App\Http\Controllers\Client\DashboardController;
 use App\Http\Controllers\Client\DocumentController;
 use App\Http\Controllers\Client\FileController;
 use App\Http\Controllers\Client\InvoiceController;
-use App\Http\Controllers\Client\MeetingController;
-use App\Http\Controllers\Client\MessageController;
 use App\Http\Controllers\Client\MilestoneController;
-use App\Http\Controllers\Client\NotificationController;
 use App\Http\Controllers\Client\PaymentController;
 use App\Http\Controllers\Client\ProfileController;
 use App\Http\Controllers\Client\ProjectController;
 use App\Http\Controllers\Client\TaskController;
-use App\Http\Controllers\Client\TicketController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -79,15 +75,28 @@ Route::prefix('client')
         Route::get('invoices/{invoice}/pdf', [InvoiceController::class, 'pdf'])->whereNumber('invoice')->middleware(['module:invoices', 'can:client_portal.download'])->name('invoices.pdf');
         Route::get('payments', [PaymentController::class, 'index'])->middleware(['module:project_payments', 'can:client_portal.payments'])->name('payments.index');
 
-        // Phase 22 sections: meetings, tickets, messages, notifications.
-        Route::get('meetings', [MeetingController::class, 'index'])->middleware(['module:meetings', 'can:client_portal.meetings'])->name('meetings.index');
-        Route::get('tickets', [TicketController::class, 'index'])->middleware(['module:support_tickets', 'can:client_portal.tickets'])->name('tickets.index');
-        Route::get('tickets/{ticket}', [TicketController::class, 'show'])->whereNumber('ticket')->middleware(['module:support_tickets', 'can:client_portal.tickets'])->name('tickets.show');
-        Route::get('messages', [MessageController::class, 'index'])->middleware(['module:messages', 'can:client_portal.messages'])->name('messages.index');
-        Route::get('messages/{conversation}', [MessageController::class, 'show'])->whereNumber('conversation')->middleware(['module:messages', 'can:client_portal.messages'])->name('messages.show');
-        Route::get('notifications', [NotificationController::class, 'index'])->middleware('can:client_portal.notifications')->name('notifications.index');
-        Route::post('notifications/read-all', [NotificationController::class, 'readAll'])->middleware('can:client_portal.notifications')->name('notifications.read-all');
-        Route::post('notifications/{notification}/read', [NotificationController::class, 'read'])->whereUuid('notification')->middleware('can:client_portal.notifications')->name('notifications.read');
+        /*
+        |----------------------------------------------------------------------
+        | Phase 22 - tickets, meetings, messages, notifications
+        |----------------------------------------------------------------------
+        |
+        | The five read-only stubs Phase 5 left here have been replaced by the
+        | shared portal files, and the `// Phase 22: client writes` marker they
+        | carried is what this is. Replaced rather than added to: a second
+        | `client.tickets.index` is a route-name collision, and Phase 5's
+        | ClientPortalRegistry sections for these three were never registered -
+        | filling them was always this phase's job.
+        |
+        | `App\Http\Controllers\Client\{Ticket,Meeting,Message,Notification}Controller`
+        | are now unreferenced. They are left in place rather than deleted: they
+        | are Phase 5's files, deleting somebody else's code to tidy up is how a
+        | later phase loses something it did not understand, and an unused class
+        | costs nothing.
+        |
+        */
+        $portal = 'client_portal';
+        require __DIR__.'/portal-support.php';
 
-        // Phase 22: client writes
+        $ability = 'client_portal.notifications';
+        require __DIR__.'/notifications.php';
     });

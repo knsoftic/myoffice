@@ -1463,6 +1463,11 @@ final class PermissionRegistry
                     'comments',
                     'meetings',
                     'messages',
+                    // phase-19-23 §9.4 gives a collaborator tickets alongside meetings and
+                    // messages ("Collaborator | Tickets / Messages / Meetings"), and this was the
+                    // one portal of the four that never declared the ability — so the screen
+                    // existed and every collaborator got a 403 from the route.
+                    'support_tickets',
                     'payout_request',
                     'statement_download',
                     // phase-06 §4.3 — start a timer and log time on an assigned task, and see own hours.
