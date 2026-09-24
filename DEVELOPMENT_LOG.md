@@ -262,6 +262,8 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D147 | **A permission is not an audience, and using one as the other hides exactly the wrong rows.** | `NotificationRegistry::forUser()` is §6.19's "events whose module is enabled and whose audience can include this user", and I first implemented the second half as `requiredPermission`. The probe reported a student seeing *more* events than a project manager, which was true and was the bug: most events declare no `requiredPermission` at all, so almost everything passed for everyone, and a student's preference screen offered to mute "a wallet disagrees with its ledger". The obvious tightening — require a permission on the event's module — is worse. **A student holds no permission whatsoever on `meetings`, `messages` or `support_tickets`**; their access runs through `student_portal.*`, and yet they are invited to meetings and raise tickets daily. That rule would have hidden the rows they most need while still showing them the ones they cannot use. So the registry says it outright: each event declares the panels it reaches. The general shape is the one D141 found from the other side — **when a check needs a fact, declare the fact rather than inferring it from a neighbouring one that was never about it.** Permissions answer "may you act"; they were never asked "could this ever concern you". |
 | D148 | **A cache with two owners has one of them holding a stale answer from the moment the other writes.** | `NotificationService` kept its own copy of a user's `notification_preferences` rows, and `NotificationPreferenceService` wrote them. Within one request that is enough: the probe muted an event and the very next dispatch still delivered, because the save went to one cache and the read came from the other. Nothing failed, nothing logged, and the only visible symptom was a person receiving something they had just switched off — which reads as "preferences do not work" and is close to unreportable. The cache now lives with the writer and the reader asks for it, so `update()` and `resetToDefaults()` empty the only copy there is. The same run turned up the probe-craft version of it: `DatabaseTransactionRecord::executeCallbacks()` runs the whole array and **does not clear it**, so a probe draining after-commit callbacks by hand replays every earlier one — which had this probe reporting that a client was notified about their own reply, when what had happened was the previous reply's notification being delivered a second time. An offset per record fixes it. Both halves are the same sentence: **if something can be run or read twice, say which copy is authoritative and where the mark is.** |
 | D149 | **`permissionNamesFor('module')` grants every ability that module declares, which is how a privacy rule gets undone by a helper that was only being tidy.** | §9.4 says `messages.view_any` is "granted to nobody by default" — it is the compliance reader's permission, read-only even then, and every read it allows is logged. `RoleSeeder` gave the whole `messages` module to **Admin** and **Support Agent** in one line each, because that is what the helper returns. The effect was that every support agent in the installation could read every private conversation in it: a student's thread with their teacher, a collaborator's with staff, a client's with their project manager. **Nothing about the symptom would ever have announced itself** — the threads simply appeared, to people who had every reason to think they were meant to. The §94 matrix decides who may *talk* to whom, and a blanket read makes that decision cosmetic. Phase 22's policy probe found it by asking the question the contract asks rather than the question the code implies, which is the whole reason for asking it. Three things came out of the fix and each is a rule. **First: a module whose abilities are not uniformly safe must be granted ability by ability**, with the withheld ones named in a comment, or the next person to add a role will reach for the one-liner again. **Second: a seeder cannot correct an existing install** — D65 says converge additively and never revoke, which is right, so the correction is a dated, reversible migration where it can be seen. **Third: `Gate::before` means Super Admin keeps the row, and pretending otherwise in the permissions table would be worse than saying so.** |
+| D150 | **A sweep is idempotent at its source or it is not idempotent.** | `withoutOverlapping` stops two runs of a command overlapping; it does nothing about a second run ten minutes later doing the work again. Every Phase 22 sweep therefore carries its guard on the row: `first_response_breached` and `resolution_breached` on a ticket, `reminder_sent_at` on a meeting, `emailed_at` on a notification — each stamped **inside** the transaction that selects the row, with the notification dispatched **after** it commits. That order is the whole thing: stamping after the dispatch re-sends everything on the next run, and dispatching inside the transaction tells somebody about a row a rollback removed. A crash between the two loses one message and never sends two, which is the right way round. The probe is built the same way, and this is the part worth copying: it runs each sweep, asserts what moved, then **runs it again and asserts nothing moved**. Without that second run a sweep that notified on "is it past the target" would pass every test and page the assignee 144 times a day. |
+| D151 | **A screen probe's own plumbing can hide two real defects, and the way to tell is that the symptom moves when you reorder the list.** | The portal screen probe reported the *first* screen of each panel redirecting to `/login`. It was not a permissions bug: `$kernel->handle()` re-resolves the auth guard against that request's fresh session and discards a login made just before it, so whichever screen happened to be first was the one that failed. Reordering the list moved the failure, which is what identified it. A warm-up request per panel fixed it — **and with that noise gone, two genuine 403s were sitting underneath**: `SupportTicketPolicy::viewAny()` had never accounted for portal users, so every portal's ticket list refused while the create form and the detail page beside it worked; and `collaborator_portal.support_tickets` had never been declared at all, though §9.4 gives collaborators tickets in the same breath as meetings and messages. Two rules. **A probe failure that is uniform across a dimension is usually the probe** — four panels failing on the same *position* rather than the same *screen* is not four bugs. And **a policy's `viewAny` and `create` must ask one question in one place**: those two had separate lists of who counts as a portal user, which is exactly how they came to disagree. |
 ---
 
 ## 5. Phase Tracker
@@ -726,8 +728,9 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 | [x] | Seven policies over §9.4's table, and a probe that found `messages.view_any` granted to two roles the contract grants it to nobody (D149) |
 | [x] | 40 admin routes, five controllers, five Form Requests and 21 screens — every one rendered through the HTTP kernel, plus the shared bell across four panels |
 | [x] | The Workspace sidebar group, whose Phase 1 placeholder pointed at a route name that never existed and gated Messages on a permission nobody holds |
-| [ ] | The four portal panels' ticket, meeting and message screens, and the client panel's bell migration off Phase 5's controller |
-| [ ] | The scheduled commands: `meetings:send-reminders`, the SLA breach sweep, the daily digest, the retention prune |
+| [x] | The four portal panels' ticket, meeting and message screens — three shared controllers, 44 screens rendered — and the client panel migrated off Phase 5's own read-only stubs |
+| [x] | Seven scheduled commands, each idempotent at its source rather than at its schedule (D150) |
+| [x] | Portal sidebar entries, re-gated on their subject module so the menu and the route give the same answer |
 | [ ] | The trigger call sites Phases 19-21 own — the registry entries exist and are preference-able; each act needs one `dispatch()` in its own phase's service |
 
 ### [ ] PHASE 23 — Reports, analytics, activity log, audit trail, global search, exports
@@ -737,6 +740,70 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 ---
 
 ## 6. Change Log
+
+### 2026-09-24 — Phase 22 closes: seven sweeps and the four portals
+
+**Seven scheduled commands, each idempotent at its source** (D150). The probe runs every one,
+asserts what moved, then runs it again and asserts nothing moved — 41 checks. `tickets:sla-sweep`
+notifies at most twice in a ticket's life, once per kind, because the breach booleans are stamped in
+the transaction that selects the row; without that it would page the assignee 144 times a day about
+one ticket. `tickets:auto-close` never closes a ticket whose requester replied after it was
+resolved, because that reply is somebody saying "it is not fixed" and closing it answers them with
+silence. `meetings:close-past` waits two hours past the end, because a meeting that overruns is
+still a meeting. `notifications:prune` deletes only *archived* rows — an unread notification is
+somebody's outstanding record of being told something, and age is not consent.
+
+**The four portals share three controllers and seven partials**, the same argument as the bell: a
+client, a student, a teacher and a collaborator all raise tickets, sit in meetings and send
+messages, and what differs between them is who the *person* is rather than which URL they arrived
+at. Twelve controllers would have agreed about that until one of them was edited.
+
+**The portal screen probe found two real defects once its own noise was removed** (D151).
+`SupportTicketPolicy::viewAny()` had never accounted for portal users — every portal's ticket list
+answered 403 while the create form and the detail page beside it both worked — and
+`collaborator_portal.support_tickets` had never been declared, making the collaborator the one
+portal of four whose ticket screen existed and refused everybody.
+
+**The client panel moved off Phase 5's own bell and read screens.** Its `tickets`, `meetings` and
+`messages` sections were registered in `ClientPortalRegistry` by nobody, so those three routes had
+never rendered anything — filling them was always this phase's job, and the
+`// Phase 22: client writes` marker Phase 5 left is where they went. The four now-unreferenced
+`App\Http\Controllers\Client\*` classes are left in place rather than deleted: deleting another
+phase's code to tidy up is how a later phase loses something it did not understand.
+
+**Portal sidebar entries are gated on their subject module**, not on the panel namespace or a
+neighbouring business module. `meetings`, `messages`, `support_tickets` and `notifications` are what
+the route middleware checks, so the menu and the route now give the same answer — previously a
+switch could hide a link whose route still worked, or show one that 403s. One older assertion had to
+change rather than be satisfied: switching `collaborators` off no longer empties that sidebar,
+because a collaborator keeps a support desk and a bell and neither was ever about that module.
+
+**An environment incident worth recording.** MariaDB died mid-session and would not restart, dying
+silently each time at the point where it loads the grant tables. `aria_chk` found `mysql.db` with a
+3.4 MB index against a 28 KB data file and zero readable records, and twenty-one other system tables
+marked crashed. The system-table directory was backed up first, then `--safe-recover` repaired all
+of them; `mysql.global_priv` came back with its five accounts intact. Both application databases
+were untouched — 173 tables, 18 roles, 19 users on each. The one real loss is `mysql.db`, which on
+this installation held only the default `test` grants; the application connects as root, whose
+rights come from `global_priv`.
+
+**Files.** `app/Console/Commands/Support/` (seven commands), `app/Http/Controllers/Portal/` (three
+controllers plus `Concerns/ServesPortalSupport`), `app/Http/Requests/Portal/`,
+`app/Events/Support/{TicketSlaBreached,MeetingReminderDue}.php`,
+`app/Listeners/Support/{NotifyOfSlaBreach,NotifyOfMeetingReminder}.php`,
+`app/Notifications/Support/DailyDigestNotification.php`, `routes/portal-support.php`,
+`routes/console.php`, `routes/{client,student,teacher,collaborator}.php`, `app/Support/Sidebar.php`,
+`app/Support/PermissionRegistry.php`, `app/Policies/Support/SupportTicketPolicy.php`,
+`app/Services/Support/{TicketSlaService,TicketService,MeetingService,NotificationService}.php`,
+`resources/views/support/{tickets,meetings,messages}/`,
+`resources/views/{client,student,teacher,collaborator}/{tickets,meetings,messages}/`,
+`resources/views/client/notifications/`, `tests/Feature/Modules/SidebarVisibilityTest.php`.
+
+**What Phase 22 still owes, and it is small:** the *trigger* call sites in Phases 19, 20 and 21. The
+registry entries for `material.published`, `assignment.*`, `exam.scheduled`, `result.published`,
+`certificate.*` and `idcard.issued` exist and are preference-able; the services that perform those
+acts do not yet dispatch them. §10.3 assigns the trigger to the owning phase, so each is one
+`dispatch()` call in that phase's own service.
 
 ### 2026-09-23 — Phase 22 screens: 40 routes, five controllers, twenty-one screens
 
@@ -2787,6 +2854,9 @@ The two HIGH findings are both real and are being fixed now:
 
 | Date | What was tested | Command / method | Result |
 |---|---|---|---|
+| 2026-09-24 | The seven scheduled sweeps | probe with fixtures built to be swept, rolled back | PASS — **41/41**, and every section runs its sweep twice: the second run must move nothing. Covers the SLA booleans, a ticket parked on the customer being left alone, auto-close skipping one the requester answered, the department recount, reminders skipping a decliner, `close-past` leaving a meeting that ended fifteen minutes ago, and a retention of `0` meaning keep-for-ever |
+| 2026-09-24 | Every portal screen, four panels | 44 GET routes through the HTTP kernel, rolled back | PASS — **44/44**, after the probe's own guard handling stopped hiding two real 403s: `SupportTicketPolicy::viewAny()` ignoring portal users, and `collaborator_portal.support_tickets` never having been declared (D151) |
+| 2026-09-24 | Sidebar after the portal entries | `DB_DATABASE=my_office_test php artisan test --filter=SidebarVisibility` | PASS — **9 tests / 228 assertions**; all four portals carry Meetings, Messages, Support and Notifications, and disabling `collaborators` now leaves exactly those four rather than emptying the tree |
 | 2026-09-23 | Every Phase 22 admin screen | 21 GET routes through the HTTP kernel against live data, rolled back | PASS — **21/21**, after finding two 500s on the first run: the queue and the SLA desk both ordered on column names I had guessed (`sla_resolution_due_at`, `last_activity_at`) rather than the ones the table has |
 | 2026-09-23 | Sidebar after the Workspace group | `DB_DATABASE=my_office_test php artisan test --filter=SidebarVisibility` | PASS — **9 tests / 226 assertions**; the five new entries appear for a Super Admin, and `Files` and `Reports` stay hidden until Phase 23 registers their routes |
 | 2026-09-23 | The Phase 22 policies | probe over §9.4's table, rolled back | PASS — **54/54**, and one real finding on the way: a client sees their firm's shared ticket and not its private one and not another firm's; a requester may reply and reopen and may never set a priority, assign, or write an internal note; an internal note is invisible to the requester; being in the room is what grants a meeting, and removing somebody revokes it at once; a student never writes minutes and reads them only once the meeting is completed; `messages.view_any` reads and never writes; somebody who left a thread loses it; a desk with tickets cannot be deleted but can be retired; and for every invariant the gate says yes to a Super Admin while the model still throws |
