@@ -61,6 +61,11 @@ final class ExpensesReport extends Report
     {
         return [
             ColumnDefinition::text('category', 'Category'),
+            // The service returns this alongside the label and the report declares it rather than
+            // letting it through undeclared: an undeclared key reaches the CSV as a column with no
+            // heading, and the column picker cannot offer something it has never been told about.
+            // Not sortable, because the rows are already grouped by category.
+            new ColumnDefinition('category_code', 'Code', sortable: false),
             ColumnDefinition::number('entries', 'Entries', 'sum'),
             ColumnDefinition::money('amount', 'Amount', 'expenses'),
         ];

@@ -14,6 +14,7 @@ use App\Models\Concerns\HasGeneratedColumns;
 use App\Models\Concerns\LogsActivityWithContext;
 use App\Models\Crm\Client;
 use App\Models\Crm\Lead;
+use App\Models\Institute\Student;
 use App\Models\Project\Project;
 use App\Models\User;
 use App\Services\Collaborator\ReferralService;
@@ -232,6 +233,20 @@ class CollaboratorReferral extends Model
     public function collaborator(): BelongsTo
     {
         return $this->belongsTo(Collaborator::class, 'collaborator_id');
+    }
+
+    /**
+     * The referred student, when `subject_type` is `student`.
+     *
+     * Added by Phase 23 for `co.referred_students` (phase-19-23 6.20). The column has always been
+     * here - `student_id` is one of the four subject columns `chk_cr_subject` guards - and the
+     * sibling relations for project, client and lead were already declared. This is the fourth.
+     *
+     * @return BelongsTo<Student, $this>
+     */
+    public function student(): BelongsTo
+    {
+        return $this->belongsTo(Student::class, 'student_id');
     }
 
     public function project(): BelongsTo
