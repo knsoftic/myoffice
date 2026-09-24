@@ -345,3 +345,31 @@ Schedule::command('notifications:digest')
     ->withoutOverlapping(30);
 
 Schedule::command('notifications:prune')->weeklyOn(1, '03:30')->withoutOverlapping(60);
+
+/*
+|--------------------------------------------------------------------------
+| Reports, exports and the log — phase-19-23 §10.4
+|--------------------------------------------------------------------------
+|
+| `reports:prune-exports` removes files whose retention has run out and keeps
+| every row — §2.26 makes the record of what left the building permanent, so
+| the sweep expires rather than deletes.
+|
+| `reports:warm-caches` runs before the working day rather than after it, and
+| only when `reports.cache_ttl_seconds` is non-zero — the command checks that
+| itself, because warming a cache that is switched off is pure cost. It warms
+| per user, because the cache is keyed per user: two people with different
+| scopes asking one question are asking two questions.
+|
+| `activity-log:prune` is scheduled but does nothing by default.
+| `reports.activity_log_retention_days` is 0 — never — and that is deliberate
+| (§110): a financial log that deletes its own oldest rows is not an audit
+| trail. Scheduling it anyway means an institute that decides otherwise gets
+| the behaviour by changing one setting, rather than by someone remembering to
+| add a cron entry.
+|
+*/
+
+Schedule::command('reports:prune-exports')->dailyAt('03:00')->withoutOverlapping(30);
+Schedule::command('reports:warm-caches')->dailyAt('06:30')->withoutOverlapping(60);
+Schedule::command('activity-log:prune')->weeklyOn(1, '03:45')->withoutOverlapping(120);

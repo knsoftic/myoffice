@@ -206,6 +206,17 @@ final class Sidebar
                         // routes/admin.php enforces (a log module's read ability is LOGS).
                         'permission' => 'activity_log.view_logs',
                     ],
+                    // phase-19-23 4.1. Beside the activity log because it is the same table, and
+                    // separate from it because 107 is a different right: a compliance reader may be
+                    // given old-and-new values without the whole operational feed, and an operator
+                    // the feed without everybody's salary history. Two entries, two permissions.
+                    [
+                        'label' => 'Audit Trail',
+                        'icon' => 'finger-print',
+                        'route' => 'admin.audit-trail.index',
+                        'module' => 'audit_trail',
+                        'permission' => 'audit_trail.view_logs',
+                    ],
                     [
                         'label' => 'Login History',
                         'icon' => 'finger-print',
@@ -1124,12 +1135,33 @@ final class Sidebar
                         'module' => 'files',
                         'permission' => 'files.view_any',
                     ],
+                    // phase-19-23 7.8. `view_reports`, not `view_any`: the route middleware is
+                    // `can:reports.view_reports`, and an item that states a different ability from
+                    // the route it points at is an item that renders for somebody who then gets a
+                    // 403 - the exact defect the sidebar rule exists to prevent.
                     [
                         'label' => 'Reports',
                         'icon' => 'chart-pie',
                         'route' => 'admin.reports.index',
                         'module' => 'reports',
-                        'permission' => 'reports.view_any',
+                        'permission' => 'reports.view_reports',
+                    ],
+                    [
+                        'label' => 'Analytics',
+                        'icon' => 'chart-bar',
+                        'route' => 'admin.analytics.index',
+                        'module' => 'reports',
+                        'permission' => 'reports.view_reports',
+                    ],
+                    // Its own entry rather than a tab on Reports: a queued export is work somebody
+                    // has to come back for, and a file nobody can find from the sidebar is a file
+                    // they export again.
+                    [
+                        'label' => 'My Exports',
+                        'icon' => 'arrow-down-tray',
+                        'route' => 'admin.report-exports.index',
+                        'module' => 'reports',
+                        'permission' => 'reports.export',
                     ],
                 ],
             ],
