@@ -42,6 +42,28 @@ final class SecurityAuditor
     private const GUARDED_EXEMPT = [];
 
     /**
+     * Interpolations into SQL that are not injections, each with the reason it is not.
+     *
+     * **A column or table name cannot be a bound parameter.** `?` stands for a value; an identifier
+     * has to reach the statement as text. So a report that groups by a column chosen at runtime has
+     * no parameterised form, and the control has to be somewhere else - validating the identifier
+     * before it is interpolated.
+     *
+     * A row here is a promise that such a check exists in that file, and the promise is worth about
+     * as much as whoever wrote it. The list is deliberately keyed by file and kept short: the
+     * moment it grows, the pattern it exempts has spread.
+     *
+     * @var array<string, string>
+     */
+    private const RAW_SQL_EXEMPT = [
+        'app/Services/Finance/FinanceReportService.php' =>
+            'monthlySums() interpolates a table and two column names into DATE_FORMAT and SUM, '
+            .'because an identifier cannot be bound. It refuses anything that is not '
+            .'/^[A-Za-z_][A-Za-z0-9_]*$/ before building the query, and every caller passes a '
+            .'literal.',
+    ];
+
+    /**
      * Directories that must not be writable by the web server in production.
      */
     private const MUST_NOT_BE_WRITABLE = ['app', 'config', 'routes', 'database/migrations'];
@@ -225,6 +247,11 @@ final class SecurityAuditor
 
                 // The auditor's own docblock example is not a finding.
                 if (str_contains($file->getPathname(), 'SecurityAuditor')) {
+                    continue;
+                }
+
+                // An identifier interpolation that has a written reason and a validator behind it.
+                if (isset(self::RAW_SQL_EXEMPT[$this->relative($file->getPathname())])) {
                     continue;
                 }
 

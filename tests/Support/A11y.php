@@ -49,11 +49,11 @@ final class A11y
     {
         $count = self::query($html, '//h1')->length;
 
-        Assert::assertSame(
-            1,
-            $count,
-            self::message($context, sprintf('expected exactly one <h1>, found %d', $count)),
-        );
+        if ($count !== 1) {
+            Assert::fail(self::message($context, sprintf('expected exactly one <h1>, found %d', $count)));
+        }
+
+        self::pass();
     }
 
     /**
@@ -81,7 +81,7 @@ final class A11y
             $previous = $level;
         }
 
-        Assert::assertTrue(true);
+        self::pass();
     }
 
     /**
@@ -91,17 +91,15 @@ final class A11y
     {
         $lang = self::query($html, '//html/@lang');
 
-        Assert::assertGreaterThan(
-            0,
-            $lang->length,
-            self::message($context, '<html> carries no lang attribute'),
-        );
+        if ($lang->length === 0) {
+            Assert::fail(self::message($context, '<html> carries no lang attribute'));
+        }
 
-        Assert::assertNotSame(
-            '',
-            trim((string) $lang->item(0)?->nodeValue),
-            self::message($context, '<html lang> is empty'),
-        );
+        if (trim((string) $lang->item(0)?->nodeValue) === '') {
+            Assert::fail(self::message($context, '<html lang> is empty'));
+        }
+
+        self::pass();
     }
 
     /**
@@ -111,15 +109,18 @@ final class A11y
     {
         $titles = self::query($html, '//head/title');
 
-        Assert::assertSame(1, $titles->length, self::message($context, sprintf(
-            'expected exactly one <title>, found %d',
-            $titles->length,
-        )));
+        if ($titles->length !== 1) {
+            Assert::fail(self::message($context, sprintf(
+                'expected exactly one <title>, found %d',
+                $titles->length,
+            )));
+        }
 
-        Assert::assertNotSame('', trim((string) $titles->item(0)?->textContent), self::message(
-            $context,
-            '<title> is empty',
-        ));
+        if (trim((string) $titles->item(0)?->textContent) === '') {
+            Assert::fail(self::message($context, '<title> is empty'));
+        }
+
+        self::pass();
     }
 
     /**
@@ -132,25 +133,24 @@ final class A11y
     {
         $main = self::query($html, '//main | //*[@role="main"]');
 
-        Assert::assertSame(1, $main->length, self::message($context, sprintf(
-            'expected exactly one <main>, found %d',
-            $main->length,
-        )));
+        if ($main->length !== 1) {
+            Assert::fail(self::message($context, sprintf(
+                'expected exactly one <main>, found %d',
+                $main->length,
+            )));
+        }
 
         foreach (['header' => '//header | //*[@role="banner"]', 'footer' => '//footer | //*[@role="contentinfo"]'] as $name => $xpath) {
-            Assert::assertGreaterThan(0, self::query($html, $xpath)->length, self::message(
-                $context,
-                sprintf('no <%s> landmark', $name),
-            ));
+            if (self::query($html, $xpath)->length === 0) {
+                Assert::fail(self::message($context, sprintf('no <%s> landmark', $name)));
+            }
         }
 
-        if ($requireNav) {
-            Assert::assertGreaterThan(
-                0,
-                self::query($html, '//nav | //*[@role="navigation"]')->length,
-                self::message($context, 'no <nav> landmark'),
-            );
+        if ($requireNav && self::query($html, '//nav | //*[@role="navigation"]')->length === 0) {
+            Assert::fail(self::message($context, 'no <nav> landmark'));
         }
+
+        self::pass();
     }
 
     /**
@@ -176,11 +176,14 @@ final class A11y
                 continue;
             }
 
-            Assert::assertGreaterThan(
-                0,
-                self::query($html, sprintf('//*[@id="%s"]', $target))->length,
-                self::message($context, sprintf('the skip link points at #%s, which is not on the page', $target)),
-            );
+            if (self::query($html, sprintf('//*[@id="%s"]', $target))->length === 0) {
+                Assert::fail(self::message(
+                    $context,
+                    sprintf('the skip link points at #%s, which is not on the page', $target),
+                ));
+            }
+
+            self::pass();
 
             return;
         }
@@ -224,11 +227,15 @@ final class A11y
             $unlabelled[] = self::excerpt($control);
         }
 
-        Assert::assertSame([], $unlabelled, self::message($context, sprintf(
-            "%d form control(s) have no accessible name:\n  %s",
-            count($unlabelled),
-            implode("\n  ", $unlabelled),
-        )));
+        if ($unlabelled !== []) {
+            Assert::fail(self::message($context, sprintf(
+                "%d form control(s) have no accessible name:\n  %s",
+                count($unlabelled),
+                implode("\n  ", $unlabelled),
+            )));
+        }
+
+        self::pass();
     }
 
     /**
@@ -264,11 +271,15 @@ final class A11y
             $unnamed[] = self::excerpt($element);
         }
 
-        Assert::assertSame([], $unnamed, self::message($context, sprintf(
-            "%d icon-only control(s) have no accessible name:\n  %s",
-            count($unnamed),
-            implode("\n  ", $unnamed),
-        )));
+        if ($unnamed !== []) {
+            Assert::fail(self::message($context, sprintf(
+                "%d icon-only control(s) have no accessible name:\n  %s",
+                count($unnamed),
+                implode("\n  ", $unnamed),
+            )));
+        }
+
+        self::pass();
     }
 
     /**
@@ -305,7 +316,11 @@ final class A11y
             }
         }
 
-        Assert::assertSame([], $orphans, self::message($context, implode("\n  ", $orphans)));
+        if ($orphans !== []) {
+            Assert::fail(self::message($context, implode("\n  ", $orphans)));
+        }
+
+        self::pass();
     }
 
     /*
@@ -341,11 +356,15 @@ final class A11y
             $unnamed[] = self::excerpt($table);
         }
 
-        Assert::assertSame([], $unnamed, self::message($context, sprintf(
-            "%d table(s) have no caption or accessible name:\n  %s",
-            count($unnamed),
-            implode("\n  ", $unnamed),
-        )));
+        if ($unnamed !== []) {
+            Assert::fail(self::message($context, sprintf(
+                "%d table(s) have no caption or accessible name:\n  %s",
+                count($unnamed),
+                implode("\n  ", $unnamed),
+            )));
+        }
+
+        self::pass();
     }
 
     /**
@@ -380,11 +399,15 @@ final class A11y
             $bare[] = self::excerpt($canvas);
         }
 
-        Assert::assertSame([], $bare, self::message($context, sprintf(
-            "%d chart(s) have no text alternative:\n  %s",
-            count($bare),
-            implode("\n  ", $bare),
-        )));
+        if ($bare !== []) {
+            Assert::fail(self::message($context, sprintf(
+                "%d chart(s) have no text alternative:\n  %s",
+                count($bare),
+                implode("\n  ", $bare),
+            )));
+        }
+
+        self::pass();
     }
 
     /**
@@ -395,23 +418,27 @@ final class A11y
      */
     public static function assertLiveRegions(string $html, string $context = '', bool $requireToast = true): void
     {
-        if ($requireToast) {
-            Assert::assertGreaterThan(
-                0,
-                self::query($html, '//*[@aria-live="polite" or @aria-live="assertive" or @role="status" or @role="alert"]')->length,
-                self::message($context, 'no live region — a toast nobody is told about is not feedback'),
-            );
+        if ($requireToast
+            && self::query($html, '//*[@aria-live="polite" or @aria-live="assertive" or @role="status" or @role="alert"]')->length === 0) {
+            Assert::fail(self::message(
+                $context,
+                'no live region — a toast nobody is told about is not feedback',
+            ));
         }
 
         // A live region with an invalid value announces nothing, silently.
         foreach (self::query($html, '//*[@aria-live]') as $region) {
             $value = trim($region->getAttribute('aria-live'));
 
-            Assert::assertContains($value, ['polite', 'assertive', 'off'], self::message(
-                $context,
-                sprintf('aria-live="%s" is not a valid value', $value),
-            ));
+            if (! in_array($value, ['polite', 'assertive', 'off'], true)) {
+                Assert::fail(self::message(
+                    $context,
+                    sprintf('aria-live="%s" is not a valid value', $value),
+                ));
+            }
         }
+
+        self::pass();
     }
 
     /**
@@ -431,11 +458,15 @@ final class A11y
             }
         }
 
-        Assert::assertSame([], $offenders, self::message($context, sprintf(
-            "%d element(s) carry a positive tabindex:\n  %s",
-            count($offenders),
-            implode("\n  ", $offenders),
-        )));
+        if ($offenders !== []) {
+            Assert::fail(self::message($context, sprintf(
+                "%d element(s) carry a positive tabindex:\n  %s",
+                count($offenders),
+                implode("\n  ", $offenders),
+            )));
+        }
+
+        self::pass();
     }
 
     /**
@@ -461,6 +492,24 @@ final class A11y
     | Internals
     |--------------------------------------------------------------------------
     */
+
+    /**
+     * Record that an assertion passed.
+     *
+     * PHPUnit counts assertions, and a test whose checks all pass without calling Assert would be
+     * reported as risky. `Assert::assertTrue(true)` is the cheapest honest way to say "this one
+     * held" — and it is wrapped, because outside a PHPUnit run there is no Configuration registry
+     * for the assertion counter to reach and the whole point of these checks is that `a11y:scan`
+     * can run them from the console.
+     */
+    private static function pass(): void
+    {
+        try {
+            Assert::assertTrue(true);
+        } catch (\Throwable) {
+            // Not running under PHPUnit. Nothing to count.
+        }
+    }
 
     /**
      * Whether an element has a name a screen reader would announce.
