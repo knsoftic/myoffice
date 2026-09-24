@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Console\Commands\Ops;
 
 use App\Support\Ops\ManifestAuditor;
+use App\Support\Ops\ManifestWriter;
 use Illuminate\Console\Command;
 
 /**
@@ -25,6 +26,7 @@ final class AuditManifest extends Command
 {
     protected $signature = 'audit:manifest
                             {--check : Fail on drift. The CI gate.}
+                            {--write : Scaffold the missing rows to a file for review}
                             {--coverage : Print per-phase manifest coverage}
                             {--json : Machine-readable output}';
 
@@ -37,6 +39,10 @@ final class AuditManifest extends Command
         }
 
         $findings = $auditor->audit();
+
+        if ($this->option('write')) {
+            return $this->scaffold($findings);
+        }
 
         if ($this->option('json')) {
             $this->line((string) json_encode($findings, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
@@ -125,6 +131,64 @@ final class AuditManifest extends Command
         if (count($lines) > 25) {
             $this->line(sprintf('      … and %d more (use --json for the full list)', count($lines) - 25));
         }
+    }
+
+    /**
+     * Write the missing rows out for a human to review and paste in.
+     *
+     * **Written beside the manifests rather than into them.** These files carry human judgement —
+     * a measured budget, a written rationale — and a command that appended to them directly would
+     * eventually be a command that reformatted them. A reviewer pastes what they agree with.
+     *
+     * @param  array<string, array{missing: list<string>, orphaned: list<string>, warnings: list<string>}>  $findings
+     */
+    private function scaffold(array $findings): int
+    {
+        $writer = app(ManifestWriter::class);
+        $written = 0;
+
+        foreach ([
+            'route' => ['routeGuardRows', 'route-guard-manifest.scaffold.php'],
+            'screen' => ['screenRows', 'screen-manifest.scaffold.php'],
+        ] as $kind => [$method, $file]) {
+            $missing = $findings[$kind]['missing'] ?? [];
+
+            if ($missing === []) {
+                continue;
+            }
+
+            $rows = $writer->{$method}($missing);
+            $path = base_path('tests/Support/'.$file);
+
+            file_put_contents($path, sprintf(
+                '<?php%s%s// Scaffolded by `audit:manifest --write` on %s.%s'
+                .'// %d row(s). Review each one, then paste into %s.%s'
+                .'// `query_budget` is null on purpose: `perf:budget --write-baseline` measures it.%s'
+                .'// A TODO rationale is a question for a human, not a blank to delete.%s%sreturn [%s%s];%s',
+                PHP_EOL.PHP_EOL,
+                '',
+                now()->toDateString(),
+                PHP_EOL,
+                count($rows),
+                ManifestAuditor::paths()[$kind],
+                PHP_EOL,
+                PHP_EOL,
+                PHP_EOL,
+                PHP_EOL.PHP_EOL,
+                PHP_EOL.$writer->render($rows),
+                PHP_EOL,
+                PHP_EOL,
+            ));
+
+            $this->components->info(sprintf('%d %s row(s) scaffolded to %s', count($rows), $kind, $file));
+            $written += count($rows);
+        }
+
+        if ($written === 0) {
+            $this->components->info('Nothing to scaffold — every route already has a row.');
+        }
+
+        return self::SUCCESS;
     }
 
     private function printCoverage(ManifestAuditor $auditor): int

@@ -343,13 +343,29 @@ return [
         'public_reachable' => false,
         'stored_as' => 'incomes/{Y}/{m}/{ulid}.{ext} — streamed by admin.income.receipt',
     ],
+    // Phase 24: `admin.finance-reversals.store` no longer exists. The route was split per subject
+    // - a reversal is raised against the expense or the income it reverses, not against a generic
+    // endpoint - so the one row became two. Found by `audit:manifest`, which is the whole reason
+    // the orphan side of the check exists: a row for a route nobody can reach still passes every
+    // sweep, and that looks like coverage.
     [
-        'route' => 'admin.finance-reversals.store',
+        'route' => 'admin.expenses.reversals.store',
         'field' => 'attachment',
         'disk' => 'local',
         'allowed_mimes' => ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
         'max_mb' => 'security.max_upload_mb',
         'permission' => 'expenses.change_status',
+        'owner_phase' => 13,
+        'public_reachable' => false,
+        'stored_as' => 'finance-reversals/{Y}/{m}/{ulid}.{ext} — shown on the parent row only',
+    ],
+    [
+        'route' => 'admin.income.reversals.store',
+        'field' => 'attachment',
+        'disk' => 'local',
+        'allowed_mimes' => ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
+        'max_mb' => 'security.max_upload_mb',
+        'permission' => 'income.change_status',
         'owner_phase' => 13,
         'public_reachable' => false,
         'stored_as' => 'finance-reversals/{Y}/{m}/{ulid}.{ext} — shown on the parent row only',

@@ -185,21 +185,34 @@ final class ManifestAuditor
 
             // §6.1: "a public route must carry an explicit rationale string, so 'I forgot the
             // permission' can never look like 'this route is deliberately public'."
+            //
+            // **A policy-gated route is guarded.** `can:viewAny,App\Models\Client` enforces a
+            // real decision; its ability is a method name rather than a `module.ability` string,
+            // which is why it does not appear in `permission`. Demanding a rationale for it would
+            // put two hundred "this route is deliberately public" sentences next to two hundred
+            // routes that are nothing of the kind — and a rationale column that is mostly noise is
+            // a column nobody reads, which defeats the one thing it is for.
             $permission = $row['permission'] ?? null;
             $rationale = trim((string) ($row['rationale'] ?? ''));
 
-            if ($permission === null && $rationale === '') {
+            if ($permission === null && $rationale === '' && ! $this->isGuarded($route)) {
                 $missing[] = $name.' (no permission and no rationale — say which it is)';
             }
 
             // The row has to describe the route as it is now, not as it was when somebody wrote it.
+            //
+            // A row may name several abilities as `"a + b"`, because a route can stack them - an
+            // export that needs both `invoices.export` and `invoices.view_financial`, say. Compared
+            // as one opaque string that reads as a mismatch against a route enforcing exactly those
+            // two, which is how a checker ends up reporting twelve findings that are all itself.
+            $declared = $this->declaredAbilities($permission);
             $live = $this->abilitiesOf($route);
 
-            if ($permission !== null && $live !== [] && ! in_array($permission, $live, true)) {
+            if ($declared !== [] && $live !== [] && array_diff($declared, $live) !== []) {
                 $warnings[] = sprintf(
-                    '%s declares "%s" but the route enforces %s',
+                    '%s declares [%s] but the route enforces [%s]',
                     $name,
-                    $permission,
+                    implode(', ', $declared),
                     implode(', ', $live),
                 );
             }
@@ -515,6 +528,45 @@ final class ManifestAuditor
     | Small judgements, each stated once
     |--------------------------------------------------------------------------
     */
+
+    /**
+     * The abilities a manifest row declares.
+     *
+     * One row may name several, joined by `+` - a route that stacks an export permission and a
+     * financial one is a real shape, and 12 of the first run's findings were this checker not
+     * knowing it.
+     *
+     * @return list<string>
+     */
+    private function declaredAbilities(?string $permission): array
+    {
+        if ($permission === null || trim($permission) === '') {
+            return [];
+        }
+
+        return array_values(array_filter(
+            array_map('trim', explode('+', $permission)),
+            static fn (string $one): bool => str_contains($one, '.'),
+        ));
+    }
+
+    /**
+     * Does any authorization middleware run on this route at all?
+     *
+     * Broader than {@see self::abilitiesOf()} on purpose: that one answers "which named permission",
+     * this one answers "is a decision made". A `can:viewAny,Model` satisfies the second and not the
+     * first, and conflating them is how a guarded route gets reported as a hole.
+     */
+    private function isGuarded(RouteInstance $route): bool
+    {
+        foreach ($route->gatherMiddleware() as $middleware) {
+            if (is_string($middleware) && (str_starts_with($middleware, 'can:') || str_starts_with($middleware, 'permission:'))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private function isInfrastructure(string $name): bool
     {
