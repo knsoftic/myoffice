@@ -15,6 +15,7 @@ use App\Services\Core\Concerns\WritesAuditTrail;
 use App\Services\Finance\DocumentNumberService;
 use App\Services\Institute\Exceptions\CourseRuleException;
 use App\Services\Support\NotificationService;
+use App\Support\DateRange;
 use App\Support\Money;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -565,6 +566,69 @@ final class CertificateService
      * `QrCodeService::forDisplay()` — this exists only so a Blade file never has to reach into the
      * container for a service to render one field.
      */
+    /**
+     * The certificate register, bucketed by month (phase-19-23 6.22 `certificateIssuanceTrend`).
+     *
+     * **Issued and revoked are counted on different dates**, which is the only reading that makes
+     * this chart honest: a certificate issued in March and revoked in June is one issuance in March
+     * and one revocation in June, not a March row that cancels itself out. Two queries, merged by
+     * bucket.
+     *
+     * @param  array<string, mixed>  $filters  `course_id`, `batch_id`, `branch_id`
+     * @return array{rows: list<array<string, mixed>>, totals: array<string, mixed>}
+     */
+    public function register(DateRange $range, array $filters = []): array
+    {
+        $apply = static function ($query) use ($filters) {
+            foreach (['course_id', 'batch_id', 'branch_id'] as $key) {
+                if (! empty($filters[$key])) {
+                    $query->where($key, $filters[$key]);
+                }
+            }
+
+            return $query;
+        };
+
+        $issued = $apply(
+            DB::table('certificates')
+                ->whereNull('deleted_at')
+                ->whereNotNull('issued_on')
+                ->whereBetween('issued_on', [$range->start()->toDateString(), $range->end()->toDateString()])
+        )
+            ->selectRaw("DATE_FORMAT(issued_on, '%Y-%m') as bucket, COUNT(*) as total")
+            ->groupByRaw("DATE_FORMAT(issued_on, '%Y-%m')")
+            ->pluck('total', 'bucket');
+
+        $revoked = $apply(
+            DB::table('certificates')
+                ->whereNull('deleted_at')
+                ->whereNotNull('revoked_at')
+                ->whereBetween('revoked_at', [$range->start(), $range->end()])
+        )
+            ->selectRaw("DATE_FORMAT(revoked_at, '%Y-%m') as bucket, COUNT(*) as total")
+            ->groupByRaw("DATE_FORMAT(revoked_at, '%Y-%m')")
+            ->pluck('total', 'bucket');
+
+        $buckets = array_values(array_unique([...$issued->keys()->all(), ...$revoked->keys()->all()]));
+        sort($buckets);
+
+        $rows = [];
+        $totals = ['issued' => 0, 'revoked' => 0];
+
+        foreach ($buckets as $bucket) {
+            $rows[] = [
+                'bucket' => (string) $bucket,
+                'issued' => (int) ($issued[$bucket] ?? 0),
+                'revoked' => (int) ($revoked[$bucket] ?? 0),
+            ];
+
+            $totals['issued'] += (int) ($issued[$bucket] ?? 0);
+            $totals['revoked'] += (int) ($revoked[$bucket] ?? 0);
+        }
+
+        return ['rows' => $rows, 'totals' => $totals];
+    }
+
     public function displayCodeFor(Certificate $certificate): string
     {
         return $this->qr->forDisplay((string) $certificate->getAttribute('verification_code'));

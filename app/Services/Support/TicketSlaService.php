@@ -10,7 +10,10 @@ use App\Enums\TicketStatus;
 use App\Events\Support\TicketSlaBreached;
 use App\Models\Support\SupportTicket;
 use App\Services\Support\Exceptions\SupportRuleException;
+use App\Support\DateRange;
+use App\Support\Money;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -215,6 +218,63 @@ final class TicketSlaService
      *
      * @return array{first_response: int, resolution: int}
      */
+    /**
+     * How many tickets breached, and of what (phase-19-23 6.22 `ticketVolumeAndSla`).
+     *
+     * **Two kinds of breach, counted separately and together.** A ticket can miss its first-response
+     * target, its resolution target, or both, and collapsing them loses the distinction that
+     * actually tells a support lead what to fix: slow to answer and slow to finish are different
+     * problems with different causes.
+     *
+     * Counted on `resolved_at`, so the rate sits over the tickets it is a rate of.
+     *
+     * @param  array<string, mixed>  $filters  `department_id`, `assigned_to`
+     * @return array<string, mixed>
+     */
+    public function breaches(DateRange $range, array $filters = []): array
+    {
+        $base = function () use ($range, $filters): Builder {
+            $query = DB::table('support_tickets')
+                ->whereNull('deleted_at')
+                ->whereNotNull('resolved_at')
+                ->whereBetween('resolved_at', [$range->start(), $range->end()]);
+
+            if (! empty($filters['department_id'])) {
+                $query->where('ticket_department_id', $filters['department_id']);
+            }
+
+            if (! empty($filters['assigned_to'])) {
+                $query->where('assigned_to', $filters['assigned_to']);
+            }
+
+            return $query;
+        };
+
+        $resolved = (int) $base()->count();
+        $firstResponse = (int) $base()->where('first_response_breached', true)->count();
+        $resolution = (int) $base()->where('resolution_breached', true)->count();
+        $either = (int) $base()
+            ->where(fn ($q) => $q->where('first_response_breached', true)->orWhere('resolution_breached', true))
+            ->count();
+
+        $rate = static fn (int $part): ?string => $resolved > 0
+            ? Money::round(Money::mul(Money::div((string) $part, (string) $resolved), '100'), 2)
+            : null;
+
+        return [
+            'resolved' => $resolved,
+            'first_response_breached' => $firstResponse,
+            'resolution_breached' => $resolution,
+            'any_breached' => $either,
+            'first_response_rate' => $rate($firstResponse),
+            'resolution_rate' => $rate($resolution),
+            'breach_rate' => $rate($either),
+            // Stated rather than inferred: a report reading 0% should be able to tell "nothing
+            // breached" from "the clock is off and nothing was measured".
+            'sla_enabled' => $this->enabled(),
+        ];
+    }
+
     public function sweep(?CarbonImmutable $asOf = null, int $limit = 500): array
     {
         if (! $this->enabled()) {

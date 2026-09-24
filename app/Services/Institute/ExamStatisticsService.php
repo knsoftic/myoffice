@@ -12,8 +12,10 @@ use App\Models\Institute\Exam;
 use App\Models\Institute\ExamResult;
 use App\Models\Institute\GradeScale;
 use App\Models\Institute\StudentBatchEnrollment;
+use App\Support\DateRange;
 use App\Support\Money;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * The one definition of "how did they do" that every screen, card, certificate and report reads
@@ -96,6 +98,114 @@ final class ExamStatisticsService
             majorsPassed: $passedMajors,
             majorsMissing: $missingMajors,
         );
+    }
+
+    /**
+     * Exam statistics for one batch, or for every batch of a course (phase-19-23 6.22).
+     *
+     * **Aggregated from the counters `ExamService` maintains on each exam row**, never recounted
+     * from `exam_results`. Those counters are written inside the transaction that enters, amends or
+     * publishes a result, so they are the same numbers the exam's own page shows - and a chart that
+     * recounted would be a second answer to "what was the pass rate", differing from the first
+     * exactly when somebody had amended a mark.
+     *
+     * **Unpublished exams are excluded.** A pass rate computed from a sheet nobody has released is
+     * a figure about a decision that has not been taken, and putting it on a dashboard would leak
+     * results before the institute meant to.
+     *
+     * @param  array<string, mixed>  $filters  `course_id`, `batch_id`, `exam_type`, `teacher_id`
+     * @return array{rows: list<array<string, mixed>>, totals: array<string, mixed>}
+     */
+    public function forBatch(DateRange $range, array $filters = []): array
+    {
+        return $this->aggregateExams($range, $filters, 'batch');
+    }
+
+    /**
+     * The same figures bucketed by month, for the trend chart (6.22 `examPassRateTrend`).
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array{rows: list<array<string, mixed>>, totals: array<string, mixed>}
+     */
+    public function forCourse(DateRange $range, array $filters = []): array
+    {
+        return $this->aggregateExams($range, $filters, 'month');
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     * @return array{rows: list<array<string, mixed>>, totals: array<string, mixed>}
+     */
+    private function aggregateExams(DateRange $range, array $filters, string $grouping): array
+    {
+        $query = DB::table('exams as e')
+            ->leftJoin('batches as b', 'b.id', '=', 'e.batch_id')
+            ->leftJoin('courses as c', 'c.id', '=', 'e.course_id')
+            ->whereNull('e.deleted_at')
+            ->whereNotNull('e.results_published_at')
+            ->whereBetween('e.scheduled_date', [$range->start()->toDateString(), $range->end()->toDateString()]);
+
+        foreach (['course_id' => 'e.course_id', 'batch_id' => 'e.batch_id', 'teacher_id' => 'e.teacher_id'] as $key => $column) {
+            if (! empty($filters[$key])) {
+                $query->where($column, $filters[$key]);
+            }
+        }
+
+        if (! empty($filters['exam_type'])) {
+            $query->whereIn('e.exam_type', (array) $filters['exam_type']);
+        }
+
+        $bucket = $grouping === 'month'
+            ? "DATE_FORMAT(e.scheduled_date, '%Y-%m')"
+            : 'COALESCE(b.name, c.name, CONCAT("Exam #", e.id))';
+
+        $rows = [];
+        $totals = ['exams' => 0, 'expected' => 0, 'appeared' => 0, 'absent' => 0, 'passed' => 0, 'failed' => 0];
+
+        $results = $query
+            ->selectRaw($bucket.' as bucket, e.exam_type as series')
+            ->selectRaw(
+                'COUNT(*) as exams, '
+                .'COALESCE(SUM(e.expected_count), 0) as expected, '
+                .'COALESCE(SUM(e.appeared_count), 0) as appeared, '
+                .'COALESCE(SUM(e.absent_count), 0) as absent, '
+                .'COALESCE(SUM(e.passed_count), 0) as passed, '
+                .'COALESCE(SUM(e.failed_count), 0) as failed, '
+                .'AVG(e.average_percentage) as average'
+            )
+            ->groupByRaw($bucket.', e.exam_type')
+            ->orderByRaw($bucket)
+            ->get();
+
+        foreach ($results as $row) {
+            $appeared = (int) $row->appeared;
+
+            $rows[] = [
+                'bucket' => (string) $row->bucket,
+                'series' => (string) ($row->series ?? ''),
+                'exams' => (int) $row->exams,
+                'expected' => (int) $row->expected,
+                'appeared' => $appeared,
+                'absent' => (int) $row->absent,
+                'passed' => (int) $row->passed,
+                'failed' => (int) $row->failed,
+                // Against those who sat it. A student who did not appear has not failed.
+                'pass_rate' => $appeared > 0
+                    ? Money::round(Money::mul(Money::div((string) $row->passed, (string) $appeared), '100'), 2)
+                    : null,
+                'average' => $row->average === null ? null : Money::round((string) $row->average, 2),
+            ];
+
+            foreach (['exams', 'expected', 'appeared', 'absent', 'passed', 'failed'] as $key) {
+                $totals[$key] += (int) $row->{$key};
+            }
+        }
+
+        $totals['pass_rate'] = $totals['appeared'] > 0
+            ? Money::round(Money::mul(Money::div((string) $totals['passed'], (string) $totals['appeared']), '100'), 2)
+            : null;
+
+        return ['rows' => $rows, 'totals' => $totals];
     }
 
     /**

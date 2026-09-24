@@ -24,6 +24,9 @@ use App\Services\Core\Concerns\WritesAuditTrail;
 use App\Services\Finance\DocumentNumberService;
 use App\Services\Support\Exceptions\SupportRuleException;
 use App\Support\ClientContext;
+use App\Support\DateRange;
+use App\Support\Money;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -529,6 +532,109 @@ final class TicketService
      *
      * @return array{departments: int, repaired: int}
      */
+    /**
+     * Tickets created and resolved per bucket, for the 6.22 charts.
+     *
+     * **Created and resolved are counted on different dates**, the same reasoning as the
+     * certificate register: a ticket raised in March and closed in April is one arrival in March and
+     * one resolution in April. Counting both on `created_at` would make every month look like it
+     * closed everything it opened.
+     *
+     * `$dimension` decides the second axis - `month` for the volume trend, `department` or
+     * `priority` for the stacked breakdown.
+     *
+     * @param  array<string, mixed>  $filters  `department_id`, `assigned_to`, `priority`
+     * @return array{rows: list<array<string, mixed>>, totals: array<string, mixed>}
+     */
+    public function queue(DateRange $range, string $dimension = 'month', array $filters = []): array
+    {
+        $apply = static function ($query) use ($filters) {
+            foreach (['ticket_department_id' => 'department_id', 'assigned_to' => 'assigned_to'] as $column => $key) {
+                if (! empty($filters[$key])) {
+                    $query->where('t.'.$column, $filters[$key]);
+                }
+            }
+
+            if (! empty($filters['priority'])) {
+                $query->whereIn('t.priority', (array) $filters['priority']);
+            }
+
+            return $query;
+        };
+
+        $bucket = match ($dimension) {
+            'department' => 'COALESCE(d.name, "Unassigned queue")',
+            'priority' => 't.priority',
+            default => "DATE_FORMAT(t.created_at, '%Y-%m')",
+        };
+
+        $base = fn (): Builder => DB::table('support_tickets as t')
+            ->leftJoin('ticket_departments as d', 'd.id', '=', 't.ticket_department_id')
+            ->whereNull('t.deleted_at');
+
+        $created = $apply($base()->whereBetween('t.created_at', [$range->start(), $range->end()]))
+            ->selectRaw($bucket.' as bucket, COUNT(*) as total')
+            ->groupByRaw($bucket)
+            ->pluck('total', 'bucket');
+
+        $resolved = $apply(
+            $base()->whereNotNull('t.resolved_at')->whereBetween('t.resolved_at', [$range->start(), $range->end()])
+        )
+            ->selectRaw($bucket.' as bucket, COUNT(*) as total')
+            ->groupByRaw($bucket)
+            ->pluck('total', 'bucket');
+
+        // Breaches are counted where they were resolved, so a breach-rate line sits over the
+        // resolutions it is a rate of - not over the arrivals, which would be a different ratio
+        // wearing the same label.
+        $breached = $apply(
+            $base()
+                ->whereNotNull('t.resolved_at')
+                ->whereBetween('t.resolved_at', [$range->start(), $range->end()])
+                ->where(fn ($q) => $q->where('t.resolution_breached', true)->orWhere('t.first_response_breached', true))
+        )
+            ->selectRaw($bucket.' as bucket, COUNT(*) as total')
+            ->groupByRaw($bucket)
+            ->pluck('total', 'bucket');
+
+        $buckets = array_values(array_unique([
+            ...$created->keys()->all(),
+            ...$resolved->keys()->all(),
+            ...$breached->keys()->all(),
+        ]));
+        sort($buckets);
+
+        $rows = [];
+        $totals = ['created' => 0, 'resolved' => 0, 'breached' => 0];
+
+        foreach ($buckets as $key) {
+            $c = (int) ($created[$key] ?? 0);
+            $r = (int) ($resolved[$key] ?? 0);
+            $b = (int) ($breached[$key] ?? 0);
+
+            $rows[] = [
+                'bucket' => (string) $key,
+                'created' => $c,
+                'resolved' => $r,
+                'breached' => $b,
+                // Of what was resolved. No resolutions means no rate, not a zero.
+                'breach_rate' => $r > 0
+                    ? Money::round(Money::mul(Money::div((string) $b, (string) $r), '100'), 2)
+                    : null,
+            ];
+
+            $totals['created'] += $c;
+            $totals['resolved'] += $r;
+            $totals['breached'] += $b;
+        }
+
+        $totals['breach_rate'] = $totals['resolved'] > 0
+            ? Money::round(Money::mul(Money::div((string) $totals['breached'], (string) $totals['resolved']), '100'), 2)
+            : null;
+
+        return ['rows' => $rows, 'totals' => $totals];
+    }
+
     public function recountAllDepartments(): array
     {
         $open = array_map(

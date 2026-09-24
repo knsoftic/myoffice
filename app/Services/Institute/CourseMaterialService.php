@@ -9,6 +9,7 @@ use App\DataObjects\Files\FileTarget;
 use App\DataObjects\Institute\TargetResult;
 use App\DataObjects\Support\AudienceInput;
 use App\Enums\CourseResourceType;
+use App\Enums\EnrollmentStatus;
 use App\Enums\MaterialAccessAction;
 use App\Enums\MaterialStatus;
 use App\Enums\MaterialTargetType;
@@ -22,6 +23,8 @@ use App\Services\Core\Concerns\WritesAuditTrail;
 use App\Services\Files\SecureFileService;
 use App\Services\Institute\Exceptions\CourseRuleException;
 use App\Services\Support\NotificationService;
+use App\Support\DateRange;
+use App\Support\Money;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -418,6 +421,111 @@ final class CourseMaterialService
      * course-wide target of a material that also names two batches correctly narrows the badge from
      * "whole course" to "batch".
      */
+    /**
+     * Who opened a material, against who was meant to (phase-19-23 6.22 `materialEngagement`).
+     *
+     * **Unique students, not download count.** One student opening a file nine times is one student
+     * who engaged; counting downloads would turn a chart of "engagement" into a chart of how often
+     * people lose their place in a PDF. `COUNT(DISTINCT student_id)` is the whole point.
+     *
+     * **The denominator is the resolved target audience**, counted per material rather than read
+     * from a column: a material targeted at a course reaches every student enrolled on it today,
+     * and that number moves as people enrol.
+     *
+     * @param  array<string, mixed>  $filters  `course_id`, `material_id`
+     * @return array{rows: list<array<string, mixed>>, totals: array<string, mixed>}
+     */
+    public function engagement(DateRange $range, array $filters = []): array
+    {
+        $materials = DB::table('course_materials as m')
+            ->leftJoin('courses as c', 'c.id', '=', 'm.course_id')
+            ->whereNull('m.deleted_at')
+            ->whereBetween('m.created_at', [$range->start(), $range->end()])
+            ->when(! empty($filters['course_id']), fn ($q) => $q->where('m.course_id', $filters['course_id']))
+            ->when(! empty($filters['material_id']), fn ($q) => $q->where('m.id', $filters['material_id']))
+            ->orderBy('m.id')
+            ->get(['m.id', 'm.title', 'm.course_id', 'c.name as course_name']);
+
+        $rows = [];
+        $totals = ['targeted' => 0, 'opened' => 0];
+
+        foreach ($materials as $material) {
+            $opened = (int) DB::table('course_material_downloads')
+                ->where('course_material_id', $material->id)
+                ->whereNotNull('student_id')
+                ->distinct()
+                ->count('student_id');
+
+            $targeted = $this->targetedStudentCount((int) $material->id);
+
+            $rows[] = [
+                'material' => (string) $material->title,
+                'course' => $material->course_name,
+                'targeted' => $targeted,
+                'opened' => $opened,
+                // No audience means no percentage: a material nobody was assigned has not been
+                // ignored by 100% of anybody.
+                'rate' => $targeted > 0
+                    ? Money::round(Money::mul(Money::div((string) $opened, (string) $targeted), '100'), 2)
+                    : null,
+            ];
+
+            $totals['targeted'] += $targeted;
+            $totals['opened'] += $opened;
+        }
+
+        $totals['rate'] = $totals['targeted'] > 0
+            ? Money::round(Money::mul(Money::div((string) $totals['opened'], (string) $totals['targeted']), '100'), 2)
+            : null;
+
+        return ['rows' => $rows, 'totals' => $totals];
+    }
+
+    /**
+     * How many students a material's targets resolve to right now.
+     *
+     * A distinct set across all three target kinds, so a student both enrolled on a targeted course
+     * and named individually counts once rather than twice.
+     */
+    private function targetedStudentCount(int $materialId): int
+    {
+        $targets = DB::table('course_material_targets')
+            ->where('course_material_id', $materialId)
+            ->get(['target_type', 'target_course_id', 'target_batch_id', 'target_student_id']);
+
+        if ($targets->isEmpty()) {
+            return 0;
+        }
+
+        $students = [];
+
+        foreach ($targets as $target) {
+            if ($target->target_student_id !== null) {
+                $students[(int) $target->target_student_id] = true;
+
+                continue;
+            }
+
+            $query = DB::table('student_batch_enrollments')
+                ->whereNull('deleted_at')
+                ->where('status', EnrollmentStatus::Active->value);
+
+            if ($target->target_batch_id !== null) {
+                $query->where('batch_id', $target->target_batch_id);
+            } elseif ($target->target_course_id !== null) {
+                $query->where('course_id', $target->target_course_id);
+            } else {
+                continue;
+            }
+
+            foreach ($query->pluck('student_id') as $id) {
+                $students[(int) $id] = true;
+            }
+        }
+
+        return count($students);
+    }
+
     public function recountCaches(CourseMaterial $material): void
     {
         $targets = $material->targets()->get();
