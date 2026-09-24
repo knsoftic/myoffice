@@ -124,7 +124,7 @@ final class AttendanceController extends Controller
     {
         $this->authorize('view', $attendance);
 
-        $attendance->load(['employee:id,name,employee_code,department_id', 'workShift:id,name', 'holiday', 'leaveType', 'lockedByRun', 'corrections.requester']);
+        $attendance->load(['employee:id,name,employee_code,department_id', 'workShift:id,name,weekly_off_days', 'holiday', 'leaveType', 'lockedByRun', 'corrections.requester']);
 
         return view('admin.hr.attendance.show', [
             'attendance' => $attendance,
@@ -301,7 +301,10 @@ final class AttendanceController extends Controller
      */
     private function visibleEmployees(Request $request)
     {
-        $query = Employee::query()->with(['department:id,name', 'workShift:id,name']);
+        // `weekly_off_days` because Employee::offDays() falls back to the shift's own list.
+        // Without the column the fallback fell through again to the system-wide weekend, so a
+        // person on a Tuesday-off shift was marked absent every Tuesday.
+        $query = Employee::query()->with(['department:id,name', 'workShift:id,name,weekly_off_days']);
 
         $this->scopes->apply($query, $request->user(), 'id');
 

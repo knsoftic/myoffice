@@ -206,10 +206,21 @@ final class ConversationController extends Controller
                 $query->where(fn ($q) => $q->where('name', 'like', $like)->orWhere('email', 'like', $like));
             })
             ->orderBy('name')
-            // Bounded before the matrix runs: `mayStart()` resolves roles per candidate, so an
-            // unbounded list would be a query per user in the system for one keystroke.
+            // `mayStart()` asks each candidate for its roles, so this was a query per candidate -
+            // fifty of them for one keystroke, which the limit below capped rather than fixed.
+            // Eager-loaded, it is one more query for the whole page. Strict mode is what made the
+            // difference visible; the comment below already knew.
+            ->with('roles:id,name,level')
             ->limit(50)
-            ->get(['id', 'name', 'email']);
+            // `status` because MessagingMatrix::mayStart() asks both parties whether they are
+            // active, and a status that was never loaded is not an inactive account - it is no
+            // answer at all. The picker denied every candidate and rendered an empty list.
+            ->get(['id', 'name', 'email', 'status']);
+
+        // Three queries for the whole list instead of three per candidate: `mayStart()` asks each
+        // half of the pair whether it is a student, a teacher or a collaborator, and without this
+        // the initiator is asked once per candidate.
+        MessagingMatrix::prime($candidates->concat([$user]));
 
         $allowed = $candidates
             ->map(static function (User $candidate) use ($user): ?array {

@@ -43,9 +43,27 @@ use App\Models\User;
  *
  * Pure: no database writes, no container, no request state beyond what it is handed. The settings it
  * reads are the two gates above the matrix — the master switch and the per-pair list.
+ *
+ * **Membership lookups are memoised for the life of the request** (phase-24-25 §6.4). Deciding a
+ * pair asks whether each half is a student, a teacher or a collaborator, and `eitherWay()` asks
+ * about both halves — so a recipient picker looping over candidates asked the same three questions
+ * about the *initiator* once per candidate. Eighteen candidates cost fifty-six queries, of which
+ * three were the answer. The memo is a plain static array rather than the cache store: these are
+ * membership facts, they are cheap to re-derive, and a cached answer that outlived a revoked
+ * enrolment would decide a messaging permission on stale data.
+ *
+ * {@see self::prime()} resolves a whole set in three queries, and a caller that is about to loop
+ * should use it.
  */
 final class MessagingMatrix
 {
+    /**
+     * user id => whether they hold that membership, for this request only.
+     *
+     * @var array<string, array<int, bool>>
+     */
+    private static array $memberships = [];
+
     /**
      * The pairing that authorises these two talking, or null.
      *
@@ -272,17 +290,112 @@ final class MessagingMatrix
 
     private static function isStudent(User $user): bool
     {
-        return Student::query()->where('user_id', $user->getKey())->exists();
+        return self::hasMembership('student', $user);
     }
 
     private static function isTeacher(User $user): bool
     {
-        return Teacher::query()->where('user_id', $user->getKey())->exists();
+        return self::hasMembership('teacher', $user);
     }
 
     private static function isCollaborator(User $user): bool
     {
-        return Collaborator::query()->where('user_id', $user->getKey())->exists();
+        return self::hasMembership('collaborator', $user);
+    }
+
+    /**
+     * Resolve every membership for a set of users in three queries.
+     *
+     * A caller about to ask the matrix about many people calls this first. Without it the answer is
+     * the same and the cost is three queries per person — see the note on the class.
+     *
+     * @param  iterable<User>  $users
+     */
+    public static function prime(iterable $users): void
+    {
+        $ids = [];
+
+        foreach ($users as $user) {
+            $id = $user->getKey();
+
+            if ($id !== null) {
+                $ids[] = (int) $id;
+            }
+        }
+
+        $ids = array_values(array_unique($ids));
+
+        if ($ids === []) {
+            return;
+        }
+
+        foreach ([
+            'student' => Student::class,
+            'teacher' => Teacher::class,
+            'collaborator' => Collaborator::class,
+        ] as $membership => $model) {
+            // Only the ones not already answered: priming twice must not re-ask.
+            $unknown = array_values(array_filter(
+                $ids,
+                static fn (int $id): bool => ! isset(self::$memberships[$membership][$id]),
+            ));
+
+            if ($unknown === []) {
+                continue;
+            }
+
+            /** @var list<int> $found */
+            $found = $model::query()
+                ->whereIn('user_id', $unknown)
+                ->pluck('user_id')
+                ->map(static fn (mixed $id): int => (int) $id)
+                ->all();
+
+            $found = array_flip($found);
+
+            foreach ($unknown as $id) {
+                self::$memberships[$membership][$id] = isset($found[$id]);
+            }
+        }
+    }
+
+    /**
+     * Forget every memoised membership.
+     *
+     * For a test that enrols somebody and then asks again in the same request, and for a queued job
+     * that processes more than one conversation in one process.
+     */
+    public static function flushMemberships(): void
+    {
+        self::$memberships = [];
+    }
+
+    /**
+     * One memoised membership question.
+     */
+    private static function hasMembership(string $membership, User $user): bool
+    {
+        $id = $user->getKey();
+
+        if ($id === null) {
+            return false;
+        }
+
+        $id = (int) $id;
+
+        if (isset(self::$memberships[$membership][$id])) {
+            return self::$memberships[$membership][$id];
+        }
+
+        $model = match ($membership) {
+            'student' => Student::class,
+            'teacher' => Teacher::class,
+            default => Collaborator::class,
+        };
+
+        return self::$memberships[$membership][$id] = $model::query()
+            ->where('user_id', $id)
+            ->exists();
     }
 
     /**

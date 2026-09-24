@@ -36,44 +36,44 @@
                             <th class="px-4 py-3"><span class="sr-only">Actions</span></th>
                         </x-slot:head>
 
-                        @foreach ($rows as $component)
+                        @foreach ($rows as $salaryComponent)
                             <tr>
                                 <td class="px-4 py-3">
-                                    <span class="block font-medium text-slate-900 dark:text-white">{{ $component->name }}</span>
+                                    <span class="block font-medium text-slate-900 dark:text-white">{{ $salaryComponent->name }}</span>
                                     <span class="block text-xs text-slate-500 dark:text-slate-400">
-                                        {{ $component->code }}
-                                        @if ($component->is_system) · system @endif
-                                        @unless ($component->is_active) · retired @endunless
-                                        @unless ($component->is_taxable) · not taxable @endunless
+                                        {{ $salaryComponent->code }}
+                                        @if ($salaryComponent->is_system) · system @endif
+                                        @unless ($salaryComponent->is_active) · retired @endunless
+                                        @unless ($salaryComponent->is_taxable) · not taxable @endunless
                                     </span>
                                 </td>
                                 <td class="px-4 py-3">
-                                    <x-ui.badge :color="$component->component_group->color()" size="xs">{{ $component->component_group->label() }}</x-ui.badge>
+                                    <x-ui.badge :color="$salaryComponent->component_group->color()" size="xs">{{ $salaryComponent->component_group->label() }}</x-ui.badge>
                                 </td>
                                 <td class="px-4 py-3 text-xs text-slate-600 dark:text-slate-300">
-                                    {{ $component->calculation_type->label() }}
-                                    @if ($component->calculation_type->needsRate())
-                                        · {{ app_number((float) $component->default_rate, 2) }}%
+                                    {{ $salaryComponent->calculation_type->label() }}
+                                    @if ($salaryComponent->calculation_type->needsRate())
+                                        · {{ app_number((float) $salaryComponent->default_rate, 2) }}%
                                     @else
-                                        · {{ money((string) $component->default_amount) }}
+                                        · {{ money((string) $salaryComponent->default_amount) }}
                                     @endif
                                 </td>
                                 <td class="px-4 py-3">
                                     <div class="flex items-center justify-end gap-1">
                                         @if ($canEdit)
                                             <x-ui.button variant="ghost" size="sm" icon="pencil"
-                                                x-on:click="$dispatch('open-modal', 'component-{{ $component->id }}')">Edit</x-ui.button>
+                                                x-on:click="$dispatch('open-modal', 'component-{{ $salaryComponent->id }}')">Edit</x-ui.button>
                                         @endif
                                         @if ($canToggle)
-                                            <form method="POST" action="{{ route('admin.salary-components.toggle', $component) }}">
+                                            <form method="POST" action="{{ route('admin.salary-components.toggle', $salaryComponent) }}">
                                                 @csrf
-                                                <x-ui.button type="submit" variant="ghost" size="sm">{{ $component->is_active ? 'Retire' : 'Restore' }}</x-ui.button>
+                                                <x-ui.button type="submit" variant="ghost" size="sm">{{ $salaryComponent->is_active ? 'Retire' : 'Restore' }}</x-ui.button>
                                             </form>
                                         @endif
-                                        @if ($canDelete && ! $component->is_system)
+                                        @if ($canDelete && ! $salaryComponent->is_system)
                                             <x-ui.confirm
-                                                :action="route('admin.salary-components.destroy', $component)"
-                                                title="Remove {{ $component->name }}?"
+                                                :action="route('admin.salary-components.destroy', $salaryComponent)"
+                                                title="Remove {{ $salaryComponent->name }}?"
                                                 message="Refused while any structure uses it — retire it instead, and past slips keep what they said."
                                                 confirm-label="Remove component"
                                             >
@@ -120,30 +120,30 @@
 
     @if ($canEdit)
         @foreach ($components as $rows)
-            @foreach ($rows as $component)
-                <x-ui.modal :name="'component-' . $component->id" title="Edit {{ $component->name }}" icon="pencil">
-                    <form method="POST" action="{{ route('admin.salary-components.update', $component) }}" class="space-y-3">
+            @foreach ($rows as $salaryComponent)
+                <x-ui.modal :name="'component-' . $salaryComponent->id" title="Edit {{ $salaryComponent->name }}" icon="pencil">
+                    <form method="POST" action="{{ route('admin.salary-components.update', $salaryComponent) }}" class="space-y-3">
                         @csrf
                         @method('PUT')
-                        <x-ui.form.input name="code" label="Code" required maxlength="32" :value="$component->code"
-                            :disabled="$component->is_system"
-                            :help="$component->is_system ? 'A system component keeps its code — past slips carry it.' : null" />
-                        <x-ui.form.input name="name" label="Name" required maxlength="100" :value="$component->name" />
-                        @unless ($component->is_system)
+                        <x-ui.form.input name="code" label="Code" required maxlength="32" :value="$salaryComponent->code"
+                            :disabled="$salaryComponent->is_system"
+                            :help="$salaryComponent->is_system ? 'A system component keeps its code — past slips carry it.' : null" />
+                        <x-ui.form.input name="name" label="Name" required maxlength="100" :value="$salaryComponent->name" />
+                        @unless ($salaryComponent->is_system)
                             <x-ui.form.select name="component_group" label="Group" :options="$groups"
-                                :selected="$component->component_group->value" required />
+                                :selected="$salaryComponent->component_group->value" required />
                         @endunless
                         <x-ui.form.select name="calculation_type" label="Calculation" :options="$calculations"
-                            :selected="$component->calculation_type->value" required />
+                            :selected="$salaryComponent->calculation_type->value" required />
                         <div class="grid grid-cols-2 gap-3">
                             <x-ui.form.input type="number" step="0.01" min="0" name="default_amount" label="Default amount"
-                                :value="(string) $component->default_amount" />
+                                :value="(string) $salaryComponent->default_amount" />
                             <x-ui.form.input type="number" step="0.0001" min="0" max="100" name="default_rate" label="Default rate (%)"
-                                :value="(string) $component->default_rate" />
+                                :value="(string) $salaryComponent->default_rate" />
                         </div>
-                        <x-ui.form.input name="print_label" label="Label on the slip" maxlength="100" :value="$component->print_label" />
-                        <x-ui.form.checkbox name="is_taxable" label="Part of the taxable base" :checked="$component->is_taxable" />
-                        <x-ui.form.checkbox name="is_active" label="Active" :checked="$component->is_active" with-hidden />
+                        <x-ui.form.input name="print_label" label="Label on the slip" maxlength="100" :value="$salaryComponent->print_label" />
+                        <x-ui.form.checkbox name="is_taxable" label="Part of the taxable base" :checked="$salaryComponent->is_taxable" />
+                        <x-ui.form.checkbox name="is_active" label="Active" :checked="$salaryComponent->is_active" with-hidden />
                         <x-ui.button type="submit" class="w-full">Save component</x-ui.button>
                     </form>
                 </x-ui.modal>

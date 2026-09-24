@@ -37,8 +37,8 @@
             <form method="POST" action="{{ route('admin.payroll-items.correction', $item) }}" class="grid gap-3 sm:grid-cols-4">
                 @csrf
                 <x-ui.form.select name="salary_component_id" label="Component" required placeholder="Choose one">
-                    @foreach (\App\Models\Hr\SalaryComponent::query()->where('is_active', true)->orderBy('name')->get() as $component)
-                        <option value="{{ $component->id }}">{{ $component->name }}</option>
+                    @foreach (\App\Models\Hr\SalaryComponent::query()->where('is_active', true)->orderBy('name')->get() as $salaryComponent)
+                        <option value="{{ $salaryComponent->id }}">{{ $salaryComponent->name }}</option>
                     @endforeach
                 </x-ui.form.select>
                 <x-ui.form.select name="side" label="Direction" required

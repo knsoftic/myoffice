@@ -269,10 +269,17 @@ final class StudentFeeController extends Controller
      */
     private function totals(Request $request): array
     {
-        $rows = (clone $this->query($request))->reorder()->get([
-            'gross_amount', 'discount_amount', 'scholarship_amount',
-            'net_amount', 'paid_amount', 'balance_amount',
-        ]);
+        // `without()` because this clones the filtered builder, and that builder eager-loads the
+        // student, the course and the batch for the table above. The sum row renders no names, so
+        // those were three extra queries per page load - and, since the select below lists only the
+        // money columns, the loader had no foreign key to match them on either.
+        $rows = (clone $this->query($request))
+            ->without(['student', 'course', 'batch'])
+            ->reorder()
+            ->get([
+                'gross_amount', 'discount_amount', 'scholarship_amount',
+                'net_amount', 'paid_amount', 'balance_amount',
+            ]);
 
         $sum = static fn (string $column): string => Money::sum(
             $rows->map(static fn (StudentFee $c): string => (string) $c->{$column})->all(),

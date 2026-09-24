@@ -222,6 +222,10 @@ use App\Services\Support\NotificationService;
 use App\Support\ClientPortalRegistry;
 use App\Support\Cms\PublicFormRateLimits;
 use App\Support\Ops\CspBuilder;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\View;
 use App\Support\Cms\SectionRegistry;
 use App\Support\Cms\Sections\MarketingSectionTypes;
@@ -487,7 +491,97 @@ class AppServiceProvider extends ServiceProvider
         $this->registerPhase05();
         $this->registerPhase20();
         $this->registerPhase22();
+        $this->registerPhase24();
         $this->configureFromSettings();
+    }
+
+    /**
+     * phase-24-25 6.4 - the performance runtime.
+     *
+     * @see self::enforceStrictModels()
+     * @see self::logSlowQueries()
+     */
+    private function registerPhase24(): void
+    {
+        $this->enforceStrictModels();
+        $this->logSlowQueries();
+    }
+
+    /**
+     * Eloquent strict mode everywhere except production (phase-24-25 6.4).
+     *
+     * **This is the N+1 audit, and it is the whole of it.** `preventLazyLoading` turns every
+     * unguarded relation access into an exception, which means the existing test suite - a thousand
+     * tests that already render every screen - becomes an eager-loading test without a line being
+     * written for it. There is no way to add a screen with an N+1 and have the suite stay green.
+     *
+     * The other two catch the mistakes that are worse for being silent:
+     *
+     *   - `preventSilentlyDiscardingAttributes` turns a `fill()` of a field that is not fillable
+     *     into an error rather than a value that quietly did not save. That is the shape of a bug
+     *     somebody finds a month later in a figure that was never written.
+     *
+     *   - `preventAccessingMissingAttributes` turns `$model->totl` into an error rather than null,
+     *     and a null that reaches money arithmetic is a zero.
+     *
+     * **Off in production**, because a missed `with()` must not 500 a paying client. The violation
+     * is still reported there - `LazyLoadingViolationException` is logged with the route and the
+     * relation by the handler in bootstrap/app.php, and `ops:digest` collects them - so production
+     * still tells you about an N+1; it simply does not break to do it.
+     */
+    private function enforceStrictModels(): void
+    {
+        Model::shouldBeStrict(! $this->app->isProduction());
+    }
+
+    /**
+     * Log a query that took longer than `ops.slow_query_ms` (phase-24-25 6.4).
+     *
+     * **Once per request, not once per query.** A page that runs the same slow statement forty
+     * times would otherwise write forty lines, and the fortieth tells you nothing the first did
+     * not. The route name is the part that matters and the part a stack trace does not make
+     * obvious.
+     *
+     * **Bindings are never logged.** The SQL is the shape of the problem; the bindings are the row
+     * data the query was about - an email address, a national ID, a salary - and a log file is the
+     * one store in this system with no access control on it at all.
+     */
+    private function logSlowQueries(): void
+    {
+        // Registered in every environment, including production: this is a report, not a guard,
+        // and production is where a slow query actually matters.
+        DB::whenQueryingForLongerThan($this->slowQueryThreshold(), static function ($connection): void {
+            Log::warning('Slow query threshold exceeded', [
+                'connection' => $connection->getName(),
+                'route' => Route::currentRouteName() ?? (request()?->path() ?? 'console'),
+                'threshold_ms' => (int) setting('ops.slow_query_ms', 250),
+                // The statements, shapes only. `getQueryLog()` is empty unless logging is on, which
+                // it is in local and testing; in production this is the route and the threshold,
+                // which is what a digest needs.
+                'queries' => array_map(
+                    static fn (array $entry): string => (string) ($entry['query'] ?? ''),
+                    array_slice($connection->getQueryLog(), -5),
+                ),
+            ]);
+        });
+    }
+
+    /**
+     * The slow-query threshold in milliseconds, clamped.
+     *
+     * Read at boot and wrapped: this runs before a request has necessarily reached a database, and
+     * a settings read that throws here would take the whole application down rather than leave one
+     * log line unwritten.
+     */
+    private function slowQueryThreshold(): int
+    {
+        try {
+            $value = setting('ops.slow_query_ms', 250);
+        } catch (Throwable) {
+            return 250;
+        }
+
+        return is_numeric($value) ? max(20, min(60000, (int) $value)) : 250;
     }
 
     /**

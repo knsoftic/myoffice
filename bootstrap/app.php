@@ -13,6 +13,7 @@ use App\Http\Middleware\EnsureSiteModuleEnabled;
 use App\Http\Middleware\EnsureUserIsActive;
 use App\Http\Middleware\ForceHttps;
 use App\Http\Middleware\NoStoreForAuthenticated;
+use App\Http\Middleware\QueryBudgetGuard;
 use App\Http\Middleware\ResolvePreviewMode;
 use App\Http\Middleware\SecurityHeaders;
 use App\Support\Cms\PublicOrigin;
@@ -110,6 +111,22 @@ return Application::configure(basePath: dirname(__DIR__))
             SecurityHeaders::class,
             NoStoreForAuthenticated::class,
         ]);
+
+        /*
+        | phase-24-25 6.4. Counts what a screen asked the database and says so in a header.
+        |
+        | Appended here and gated inside the class, not gated here. `app()->environment()` cannot be
+        | asked at this point: this closure runs while the kernel is being resolved, before the
+        | container has an `env` binding, and asking throws "Class env does not exist". The class
+        | returns on its first line outside local and testing, so production attaches no listener
+        | and pays for nothing beyond one function call.
+        |
+        | **The environment decides, never the setting.** A budget that throws is how an N+1 is
+        | found before it ships; one that throws in production is how a missed `with()` becomes a
+        | 500 for a paying client. `ops.query_budget_enforced` chooses between throwing and logging
+        | *within* local and testing, and can never reach production behaviour.
+        */
+        $middleware->web(append: [QueryBudgetGuard::class]);
 
         /*
         | phase-24-25 6.3 - the absolute session ceiling.

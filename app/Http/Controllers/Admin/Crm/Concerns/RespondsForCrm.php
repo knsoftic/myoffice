@@ -304,6 +304,15 @@ trait RespondsForCrm
         return User::query()
             ->active()
             ->orderBy('name')
+            // phase-24-25 6.4. `can()` asks each user for its roles and its direct permissions, and
+            // spatie caches those on the model instance - so without this the filter below ran two
+            // queries per user. Nineteen staff meant thirty-eight queries to build one dropdown,
+            // and the cost grew with the payroll. Eager-loaded it is three, whatever the headcount.
+            //
+            // `can()` stays rather than spatie's `permission()` scope: the scope reads the grant
+            // tables directly and would miss what Gate::before decides - the Super Admin bypass,
+            // and the module-disabled deny that outranks it.
+            ->with(['roles:id,name', 'roles.permissions:id,name', 'permissions:id,name'])
             ->get(['id', 'name', 'email', 'status'])
             ->filter(static fn (User $user): bool => $user->can($permission))
             ->mapWithKeys(static fn (User $user): array => [(int) $user->getKey() => (string) $user->name])

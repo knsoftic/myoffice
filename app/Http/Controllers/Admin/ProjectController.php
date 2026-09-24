@@ -305,7 +305,11 @@ final class ProjectController extends Controller
         return Project::query()
             ->select($columns)
             ->visibleTo($actor)
-            ->with(['client:id,name,company_name', 'projectManager:id,name'])
+            // `avatar_path` because the index renders the manager's avatar, and `avatar_url`
+            // is derived from it. Selected rather than inferred: without the column the
+            // accessor falls through to generated initials, so a manager with a photo was
+            // silently shown without one.
+            ->with(['client:id,name,company_name', 'projectManager:id,name,email,avatar_path'])
             ->when($request->boolean('trashed'), fn (Builder $query) => $query->onlyTrashed())
             ->when($request->search(), fn (Builder $query, string $term) => $query->where(
                 fn (Builder $scoped) => $scoped
