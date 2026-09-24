@@ -2598,13 +2598,22 @@ Route::prefix('admin')
         | id - the numeric constraint would 404 it, which is a confusing way to
         | discover the route order was wrong.
         |
-        | The index takes either permission: sec 9.4 gives `view_any` the queue
+        | The index is gated on the POLICY, not on a permission string. Laravel's
+        | `can:` middleware takes ONE ability and has no OR syntax - the pipe
+        | that used to be here was read as a single ability named
+        | `support_tickets.view_any|support_tickets.view`, which exists in no
+        | permissions table, so the route denied everybody except Super Admin
+        | (who passes through `Gate::before` before any of this is consulted).
+        | The Support Agent whose entire job is this queue could not open it.
+        |
+        | `viewAny()` on the policy already expresses the OR, and expressing it
+        | once is the point: sec 9.4 gives `view_any` the queue
         | and `view` their own, and the controller applies the difference to the
         | query rather than to the button.
         |
         */
         Route::middleware('module:support_tickets')->group(static function (): void {
-            Route::get('tickets', [TicketController::class, 'index'])->middleware('can:support_tickets.view_any|support_tickets.view')->name('tickets.index');
+            Route::get('tickets', [TicketController::class, 'index'])->middleware('can:viewAny,App\Models\Support\SupportTicket')->name('tickets.index');
             Route::get('tickets/create', [TicketController::class, 'create'])->middleware('can:support_tickets.create')->name('tickets.create');
             Route::post('tickets', [TicketController::class, 'store'])->middleware(['can:support_tickets.create', 'throttle:20,1'])->name('tickets.store');
             Route::get('tickets/sla', [TicketController::class, 'sla'])->middleware('can:support_tickets.view_reports')->name('tickets.sla');
@@ -2635,8 +2644,8 @@ Route::prefix('admin')
         |
         */
         Route::middleware('module:meetings')->group(static function (): void {
-            Route::get('meetings', [MeetingController::class, 'index'])->middleware('can:meetings.view_any|meetings.view')->name('meetings.index');
-            Route::get('meetings/calendar', [MeetingController::class, 'calendar'])->middleware('can:meetings.view_any|meetings.view')->name('meetings.calendar');
+            Route::get('meetings', [MeetingController::class, 'index'])->middleware('can:viewAny,App\Models\Support\Meeting')->name('meetings.index');
+            Route::get('meetings/calendar', [MeetingController::class, 'calendar'])->middleware('can:viewAny,App\Models\Support\Meeting')->name('meetings.calendar');
             Route::get('meetings/create', [MeetingController::class, 'create'])->middleware('can:meetings.create')->name('meetings.create');
             Route::post('meetings', [MeetingController::class, 'store'])->middleware('can:meetings.create')->name('meetings.store');
             Route::get('meetings/{meeting}', [MeetingController::class, 'show'])->whereNumber('meeting')->middleware('can:view,meeting')->name('meetings.show');

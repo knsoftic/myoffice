@@ -56,14 +56,21 @@ final class SettingsFormRoundTripTest extends TestCase
         return $groups;
     }
 
+    /**
+     * The provider walks every group, so this asserts the list it walks.
+     *
+     * Spelled out rather than counted: the value of the assertion is that a group cannot start
+     * being round-tripped, or stop being round-tripped, without somebody deciding it should.
+     * `support` arrived with Phase 22 and `reports` with Phase 23.
+     */
     #[Test]
-    public function the_registry_declares_the_seventeen_groups_this_suite_walks(): void
+    public function the_registry_declares_the_groups_this_suite_walks(): void
     {
         $this->assertSame(
             [
                 'company', 'branding', 'appearance', 'localization', 'contact', 'social', 'seo', 'mail',
-                'website', 'collaborator', 'projects', 'institute', 'finance', 'hr', 'security', 'crm',
-                'maintenance',
+                'website', 'collaborator', 'projects', 'institute', 'support', 'finance', 'hr',
+                'security', 'crm', 'maintenance', 'reports',
             ],
             array_keys(self::groupProvider()),
         );

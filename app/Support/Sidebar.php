@@ -1668,7 +1668,14 @@ final class Sidebar
                         'icon' => 'lifebuoy',
                         'route' => 'client.tickets.index',
                         'module' => 'support_tickets',
-                        'permission' => 'client_portal.tickets',
+                        // `support_tickets`, not `tickets`. `client.tickets.index` is served by
+                        // Phase 22's shared `Portal\TicketController`, which asks for
+                        // `client_portal.support_tickets` - the same name the other three portals
+                        // use. Phase 5's `client_portal.tickets` is still declared and still
+                        // checked by the orphaned `Client\TicketController` that no route reaches;
+                        // an item advertising it was a link that rendered on one permission and
+                        // 403'd on another.
+                        'permission' => 'client_portal.support_tickets',
                     ],
                     [
                         'label' => 'Notifications',

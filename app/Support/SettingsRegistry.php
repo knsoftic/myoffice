@@ -6419,20 +6419,30 @@ final class SettingsRegistry
                 'item_rules' => [
                     '*' => ['string', 'in:'.implode(',', array_keys(PermissionRegistry::modules()))],
                 ],
-                'default' => [
-                    'collaborator_commission_settings',
-                    'collaborator_commissions',
-                    'collaborator_payouts',
-                    'collaborator_referrals',
-                    'student_fees',
-                    'fee_discounts',
-                    'results',
-                    'certificates',
-                    'users',
-                    'roles',
-                    'settings',
-                    'modules',
-                ],
+                // The twelve 5.3 names, **in registry order** rather than the order the contract
+                // lists them. The set is what matters, but the order has to match `options()` or a
+                // round trip through the form is not a no-op: the browser submits checked boxes in
+                // the order they render, so an administrator who opened the tab and saved it without
+                // touching anything would rewrite the row and mark the setting as changed. Filtering
+                // the registry keeps the two in step for ever, including when a later phase inserts
+                // a module in the middle.
+                'default' => array_values(array_intersect(
+                    array_keys(PermissionRegistry::modules()),
+                    [
+                        'collaborator_commission_settings',
+                        'collaborator_commissions',
+                        'collaborator_payouts',
+                        'collaborator_referrals',
+                        'student_fees',
+                        'fee_discounts',
+                        'results',
+                        'certificates',
+                        'users',
+                        'roles',
+                        'settings',
+                        'modules',
+                    ],
+                )),
                 // From the registry, not the `modules` table: the registry is the source of truth
                 // and never needs the database, so this list is right on a fresh install and on a
                 // settings screen rendered before the seeder has run.
