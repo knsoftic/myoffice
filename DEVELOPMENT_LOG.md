@@ -270,6 +270,11 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D155 | **Reaching an `admin.*` route is about which panel your roles are on, not which permission you hold.** | A student holds `students.view` so the portal can show them their own record. `SearchProvider::urlFor()` checked that ability and generated `/admin/students/…` links for them: the palette looked correct and every result would have 403'd. A permission can be granted to a portal role for portal reasons, so a permission check is the wrong question when the thing being decided is whether somebody can reach a panel at all. `urlFor()` now asks `User::panels()` first. The same reasoning is why a hit the viewer cannot open is rendered **without a link rather than dropped** — filtering it out would make the count disagree with the rows, and somebody searching for a record they know exists would be told there are none, which reads as "no such record" rather than "not for you". |
 | D156 | **An audit trail withholds values; it never withholds rows.** | The obvious implementation of "this reader may not see financial values" hides the row, and the result is not an audit trail: somebody looking at a gap cannot tell whether nothing happened or whether they were not allowed to see what did, and the absence itself is unauditable. §107's rule is that every qualifying row is listed for anybody who may open the trail, with a `financial` row's figures replaced by a marker naming the permission that would lift it. Three consequences worth keeping. **The marker travels into the export**, because a CSV is the one document where an omission is invisible — nobody reading it can tell which cells were filtered. **An encrypted value is `[encrypted]` for everybody**, Super Admin included; the probe asserts the actual secret string appears nowhere. **The module scope is applied in the SQL, not to a page afterwards** — filtering a page makes pagination lie, so the probe asserts the *total* is zero rather than merely that the row is missing. |
 | D157 | **Two concurrent test runs against one database destroy it, and the recovery is not `migrate:fresh`.** | The full suite exceeds ten minutes (D142), so two runs ended up in flight at once; killing them left `my_office_test` with tables that existed and a `migrations` table that disagreed. `migrate:fresh` could not fix it — MariaDB DDL is not transactional (D70), so a half-applied `add_crm_deferred_foreign_keys` had already created `leads_service_id_foreign`, and every retry hit errno 121. `DROP DATABASE` then failed to remove the directory because an orphaned `#sql-*` temp table from an interrupted `ALTER` was still in it. **What worked: drop every table through SQL** (which clears InnoDB's dictionary entries properly, unlike deleting files), **then load a schema-only dump of the dev database and write the `migrations` table from the file list.** Two rules. **Never start a second run against a shared test database** — and because the harness backgrounds anything over ten minutes, that means running the suite one testsuite at a time rather than whole. **A known-good schema dump is a faster recovery than a replay**, because a replay re-runs every non-transactional migration that failed halfway the first time. |
+| D158 | **`appendToGroup('auth', ...)` does not append to the `auth` middleware alias - it creates a group of that name, and the group wins.** | Phase 24's session-ceiling middleware belongs in the authenticated stack, and `auth` in this application is an *alias* for `Illuminate\Auth\Middleware\Authenticate`, not a group. `appendToGroup` created a **middleware group** called `auth` containing only the new class; Laravel resolves a route's middleware by checking groups before aliases, so every route declaring `->middleware(['auth', ...])` stopped running `Authenticate` and ran the ceiling check instead. Nothing verified that anybody was signed in. **It fails open and it fails silently**: every screen still rendered, for everyone, and 271 authorization tests still passed because they act as a signed-in user. One Phase 1 test caught it - `a_guest_cannot_reach_the_verification_prompt`, asserting a 302 and getting a 200. The rule: **a middleware that belongs "in the auth stack" goes in the `web` group after `AuthenticateSession`, never in a group named after an alias** - and the general lesson is that a guest-path assertion is the only kind of test that can see an authorization layer disappear, because every other test is already authenticated. |
+| D159 | **A dependent validation rule compares strictly against a real boolean, so `required_if:field,1` on a checkbox never fires.** | `backup.archive_password` carried `required_if:encrypt_archives,1` and `backup.include_env` carried `prohibited_unless:encrypt_archives,1`. `UpdateSettingsRequest` casts a boolean field to a real `true`/`false` before validating, and Laravel's `parseDependentRuleParameters` converts the literals `true`/`false` but leaves `1` a string - `in_array(true, ['1'], true)` is false, so **encryption could be switched on with no archive password at all**. `prohibited_unless` was worse: it refuses a field that is *present and non-empty*, and an unticked checkbox posts `false`, which is present - so it refused every save of the backup form whether the box was ticked or not. **The fix is two different fixes, because they are two different mistakes**: the first is a literal (`true`, not `1`), and the second cannot be expressed as a rule at all, because what must be refused is the *value*, not the presence. It lives in `SettingsRegistry::crossFieldErrors()` beside the commission-percentage rule and the scratch-database check. Both were probed against Laravel 12's own `Validator` rather than reasoned about. The round-trip test found both: **re-submitting a form exactly as it was rendered must be accepted**, and that assertion catches a rule the screen itself violates. |
+| D160 | **Eloquent strict mode is the N+1 audit, and the three things it found were wrong data, not slow pages.** | `Model::shouldBeStrict(! production)` turns `preventLazyLoading`, `preventSilentlyDiscardingAttributes` and `preventAccessingMissingAttributes` on everywhere except production, which makes a thousand existing tests into an eager-loading test with no line written for them. Walking all 202 admin screens found **one** lazy load in twenty-three phases of code - the codebase eager-loads well - but `preventAccessingMissingAttributes` found four narrowed `select()`s whose missing column was read anyway, and in each case the old behaviour was a silent null rather than a slow page: a project manager with an uploaded photo was shown generated initials; `Employee::offDays()` never saw its shift's own list and fell through to the system-wide weekend, so somebody on a Tuesday-off shift was marked absent every Tuesday; the messaging recipient picker asked each candidate whether it was active, got no answer, and denied all of them. **A column you did not select does not read as null - it reads as "no answer", and every one of these treated that as a value.** In production strict mode stays off (a missed `with()` must not 500 a paying client) and the violation is logged with route and relation instead. |
+| D161 | **A query-count header finds what a lazy-load exception cannot: the N+1 somebody wrote out longhand.** | `preventLazyLoading` only sees a *relation* accessed without `with()`. `QueryBudgetGuard`'s `X-Query-Count` found two N+1s it could never have caught, because both were explicit queries in a loop. `MessagingMatrix::mayStart()` asks each half of a pair whether it is a student, a teacher or a collaborator - three `exists()` queries per user, and `eitherWay()` asks about both halves, so the recipient picker asked the *initiator* once per candidate: 66 queries, of which three were the answer. `RespondsForCrm::usersHolding()` loaded every active user and called `can()` on each, two queries apiece, to build one filter dropdown - 52 queries on the clients index, growing with the payroll. Memoising the first and eager-loading the permission graph for the second took them to 13 and 17. `can()` was kept over spatie's `permission()` scope deliberately: the scope reads the grant tables and would miss what `Gate::before` decides - the Super Admin bypass and the module-disabled deny that outranks it - and the eager version was asserted to return the identical set. |
+| D162 | **An error page that needs the database cannot render the failure the database caused.** | Every other layout in this application reads settings, resolves the sidebar and loads the bundle through Vite. A 500 page built on one of those is a blank screen exactly when a database is down, a cache is unreachable, or a deploy has not finished building - the three failures it most needs to render. `errors/layout.blade.php` has no `@vite`, no components and inline CSS, and its two settings reads are wrapped so a failure falls back to the framework defaults rather than throwing a second exception on top of the first. Two consequences worth stating. **No inline JavaScript anywhere on these pages**, including `onclick`: the CSP this phase ships governs inline handlers as strictly as inline `<script>`, and an attribute cannot carry a nonce - a "refresh and try again" button written as `onclick="history.back()"` would work in development and be dead in production. **The same-origin guard on the back link lives in a view composer, not the layout**, because Blade captures a child template's `@section` before the layout runs, and computing it twice would be two copies of an open-redirect check. |
 ---
 
 ## 5. Phase Tracker
@@ -767,6 +772,64 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 ---
 
 ## 6. Change Log
+
+### 2026-09-24 — Phase 24: the settings, the hardening runtime, and a middleware that switched authentication off
+
+**Sections 4 and 5 first, because the runtime reads them by name.** The `ops` group (sixteen keys),
+eighteen keys added to `security`, the `backup` group (thirty keys) and the private `backups` disk
+they default to; the module slugs `system_health` (91) and `integrity_checks` (92), neither core;
+`backups` gaining `restore` and `view_logs`. Admin reaches `system_health` whole and
+`integrity_checks` only to read — `everythingExcept()` is a default-allow list, so `create` and
+`view_logs` are withheld **by name**, because whoever can produce evidence on demand can produce it
+until it says what they want.
+
+Three secrets are stored encrypted and two of them default to **null rather than to a generated
+value**. A registry default is a pure literal re-read on every seed run; one that generated a fresh
+token would replace the token an external monitor already holds, every time somebody ran the
+seeder. They are generated once, on first use, where the act can be logged.
+
+**Two validation rules that could not do what they said.** The settings round-trip test —
+"re-submitting a form exactly as rendered must be accepted" — refused the backup group, and the
+reason was `prohibited_unless:encrypt_archives,1` on `include_env`: that rule refuses a field that
+is *present*, and an unticked checkbox posts `false`, which is present. It had been refusing every
+save, ticked or not. Its sibling `required_if:encrypt_archives,1` on the archive password was the
+opposite failure — Laravel compares a dependent value strictly against a real boolean, so `1`
+matched nothing and **encryption could have been switched on with no password at all**. Both probed
+against Laravel's own `Validator` rather than reasoned about (D159).
+
+**The bug that mattered most switched authentication off.** `EnforceSessionLifetime` belongs in the
+authenticated stack, and `auth` here is a middleware *alias*, not a group. `appendToGroup('auth',
+...)` created a **group** of that name, groups win over aliases when a route resolves its
+middleware, and every route declaring `->middleware(['auth', ...])` stopped running `Authenticate`.
+Nothing checked whether anybody was signed in. It fails open and it fails silently: the screens
+still render, for everyone, and 271 authorization tests still passed — because every one of them
+acts as a signed-in user. The test that caught it asserts a **guest** is redirected away from
+`/verify-email`, and got a 200 (D158).
+
+**Strict mode found wrong data, not slow pages.** Walking all 202 admin screens turned up exactly
+one lazy load in twenty-three phases — the codebase eager-loads well — but
+`preventAccessingMissingAttributes` found four narrowed `select()`s whose missing column was read
+anyway, and in each case the old behaviour was a silent null: a project manager with an uploaded
+photo shown generated initials; `Employee::offDays()` falling through to the system-wide weekend, so
+somebody on a Tuesday-off shift was marked absent every Tuesday; the messaging recipient picker
+asking each candidate whether it was active, getting no answer, and denying all of them. A column
+you did not select does not read as null — it reads as *no answer*, and every one of these treated
+that as a value (D160).
+
+**And `X-Query-Count` found the two N+1s a lazy-load exception cannot see**, because both were
+explicit queries written out in a loop: `MessagingMatrix` asking the initiator three membership
+questions once per candidate (66 queries → 13), and `usersHolding()` loading every active user and
+calling `can()` on each to build one dropdown (52 → 17). The second grows with the payroll (D161).
+
+Error pages are deliberately self-contained — no Vite, no components, wrapped settings reads —
+because a 500 page that needs the database cannot render the failure the database caused, and no
+inline JavaScript anywhere, because the CSP this phase ships would leave a `onclick` button working
+in development and dead in production (D162).
+
+Probes: settings 192 checks, modules and grants 193, hardening 172 — 557 in all, 0 failures.
+Suites: Settings 28, Auth 60, Rbac + Panels + Account + Smoke 271, Crm 6 — all passing.
+Commits `2e5c098`, `2cab516`, `f868fbf`.
+
 
 ### 2026-09-24 — Phase 23: everything that reads the system, and the sign that would have lied
 
