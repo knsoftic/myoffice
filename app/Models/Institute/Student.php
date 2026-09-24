@@ -276,6 +276,22 @@ class Student extends Model
      * a relation that hid them would make "has this student been certified?" and "what happened with
      * this student's certificate?" two different questions with one accessor.
      */
+    /**
+     * Every batch this student has been enrolled on.
+     *
+     * Added by Phase 23 (phase-19-23 6.20): `in.students`, `in.attendance` and `in.results` all
+     * need the enrolment row, because that is where Phase 17 and Phase 20 keep the maintained
+     * `attendance_percentage` and `progress_percentage`. `Batch::enrollments()` has always existed;
+     * this is the same edge read from the other end, and it is read-only - enrolling is
+     * `BatchEnrollmentService`'s to do.
+     *
+     * @return HasMany<StudentBatchEnrollment, $this>
+     */
+    public function enrollments(): HasMany
+    {
+        return $this->hasMany(StudentBatchEnrollment::class, 'student_id');
+    }
+
     public function certificates(): HasMany
     {
         return $this->hasMany(Certificate::class, 'student_id');

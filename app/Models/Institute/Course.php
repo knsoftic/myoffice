@@ -299,6 +299,34 @@ class Course extends Model
         return $this->belongsTo(Branch::class);
     }
 
+    /**
+     * The batches running this course.
+     *
+     * Added by Phase 23 (phase-19-23 6.20) for `in.courses` and `in.batches`. `Batch::course()` has
+     * always existed; this is the same edge from the other end, read-only.
+     *
+     * @return HasMany<Batch, $this>
+     */
+    public function batches(): HasMany
+    {
+        return $this->hasMany(Batch::class, 'course_id');
+    }
+
+    /**
+     * Every enrolment on this course, across all of its batches.
+     *
+     * `student_batch_enrollments` carries `course_id` of its own rather than only reaching the
+     * course through the batch, which is what makes this a direct relation and not a
+     * `HasManyThrough` - and what lets `in.courses` count active and completed students with two
+     * subqueries instead of one per course.
+     *
+     * @return HasMany<StudentBatchEnrollment, $this>
+     */
+    public function enrollments(): HasMany
+    {
+        return $this->hasMany(StudentBatchEnrollment::class, 'course_id');
+    }
+
     public function modules(): HasMany
     {
         return $this->hasMany(CourseModule::class)->orderBy('sort_order')->orderBy('id');
