@@ -243,6 +243,33 @@ final class Sidebar
                         'module' => 'backups',
                         'permission' => 'backups.view_any',
                     ],
+                    /*
+                    | phase-24-25 §4.1 / §7.2. Both modules are `is_core = false`, which is the
+                    | whole point: a business that does not want an operations screen in its
+                    | sidebar can switch the module off, and hiding the screen hides nothing that
+                    | matters — the proofs are console commands and the scheduler keeps running
+                    | them (§4.1, asserted by SEC-23).
+                    |
+                    | `system_health.view_any` and `integrity_checks.view_any` are the read
+                    | abilities the routes enforce, and this item states the identical string for
+                    | the same reason `activity_log.view_logs` does above: the sidebar, the route
+                    | middleware and the controller must name one rule, or a menu entry appears
+                    | that leads to a 403.
+                    */
+                    [
+                        'label' => 'System Health',
+                        'icon' => 'activity',
+                        'route' => 'admin.system-health.index',
+                        'module' => 'system_health',
+                        'permission' => 'system_health.view_any',
+                    ],
+                    [
+                        'label' => 'Integrity Checks',
+                        'icon' => 'shield-check',
+                        'route' => 'admin.integrity-checks.index',
+                        'module' => 'integrity_checks',
+                        'permission' => 'integrity_checks.view_any',
+                    ],
                 ],
             ],
 
