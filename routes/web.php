@@ -16,6 +16,7 @@ use App\Http\Controllers\Site\RobotsController;
 use App\Http\Controllers\Site\ServiceController;
 use App\Http\Controllers\Site\SitemapController;
 use App\Http\Controllers\Site\TeamController;
+use App\Http\Controllers\Ops\HealthController;
 use App\Http\Controllers\Site\VerificationController;
 use Illuminate\Support\Facades\Route;
 
@@ -257,5 +258,27 @@ Route::middleware(['site', 'throttle:120,1'])->group(static function (): void {
         ->where('code', '[A-Za-z0-9 _-]{1,64}')
         ->name('site.verify.show');
 });
+
+/*
+|--------------------------------------------------------------------------
+| The monitored health endpoint (phase-24-25 §7.3, DEP-22)
+|--------------------------------------------------------------------------
+|
+| **Outside every `site` group, deliberately.** `site` is EnsurePublicSiteAvailable, which serves
+| the maintenance holding page when the public website is switched off — and a health endpoint that
+| goes dark exactly when the system is in maintenance cannot answer the one question worth asking
+| during a deploy.
+|
+| No `auth` and no permission: a monitoring agent has no account. The token is the gate, and
+| HealthController enforces it — a wrong token, a missing token and
+| `ops.health_endpoint_enabled = false` all answer **404**, never 403, because a 403 confirms the
+| endpoint exists and is merely closed, which tells a scanner exactly where to come back to.
+|
+| `/up` (registered in bootstrap/app.php) stays the bare liveness probe beside it.
+|
+*/
+Route::get('health', HealthController::class)
+    ->middleware('throttle:health')
+    ->name('ops.health');
 
 require __DIR__.'/auth.php';

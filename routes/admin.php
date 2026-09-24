@@ -121,6 +121,8 @@ use App\Http\Controllers\Admin\LeadConversionController;
 use App\Http\Controllers\Admin\LeadFollowUpController;
 use App\Http\Controllers\Admin\LeadImportController;
 use App\Http\Controllers\Admin\LoginHistoryController;
+use App\Http\Controllers\Admin\Ops\IntegrityCheckController;
+use App\Http\Controllers\Admin\Ops\SystemHealthController;
 use App\Http\Controllers\Admin\MilestoneController;
 use App\Http\Controllers\Admin\ModuleController;
 use App\Http\Controllers\Admin\PermissionController;
@@ -379,6 +381,62 @@ Route::prefix('admin')
         Route::get('login-history/export', [LoginHistoryController::class, 'export'])
             ->middleware('can:login_history.export')
             ->name('login-history.export');
+
+        /*
+        |------------------------------------------------------------------
+        | System health and integrity checks (phase-24-25 §7.2)
+        |------------------------------------------------------------------
+        | Both modules are `is_core = false` (§4.1), so both blocks carry `module:` and a disabled
+        | module 403s every route inside it for everyone, Super Admin included (Phase 1 §6).
+        |
+        | **That gate stops at the console, and deliberately.** `integrity:verify`,
+        | `financial:verify-constraints`, `collaborators:reconcile-wallets` and the scheduler keep
+        | running and keep writing rows while the screen is dark — proof that the money is intact
+        | does not stop because somebody hid a menu item (§4.1, asserted by SEC-23).
+        |
+        | `integrity-checks` POST is the only state-changing route here: it starts a run, which is
+        | a record with a verdict. `create` is withheld from Admin and from the Accountant (§4.3),
+        | because whoever can produce evidence on demand can produce it until it says what they
+        | want. The `integrity-run` limiter caps it at 3/minute on top of that.
+        |
+        | `{run}` is `whereNumber` so a literal segment can never be swallowed by the show route.
+        */
+
+        Route::middleware('module:system_health')->group(static function (): void {
+            Route::get('system-health', [SystemHealthController::class, 'index'])
+                ->middleware('can:system_health.view_any')
+                ->name('system-health.index');
+
+            // Declared before the parameter route below it, so `export` is never read as a probe key.
+            Route::get('system-health/export', [SystemHealthController::class, 'export'])
+                ->middleware(['can:system_health.export', 'throttle:export'])
+                ->name('system-health.export');
+
+            Route::get('system-health/probe/{probe}', [SystemHealthController::class, 'probe'])
+                ->middleware('can:system_health.view')
+                ->name('system-health.probe');
+        });
+
+        Route::middleware('module:integrity_checks')->group(static function (): void {
+            Route::get('integrity-checks', [IntegrityCheckController::class, 'index'])
+                ->middleware('can:integrity_checks.view_any')
+                ->name('integrity-checks.index');
+
+            Route::post('integrity-checks', [IntegrityCheckController::class, 'store'])
+                ->middleware(['can:integrity_checks.create', 'throttle:integrity-run'])
+                ->name('integrity-checks.store');
+
+            // Literal before parameter, same reason as `system-health/export` above.
+            Route::get('integrity-checks/{run}/export', [IntegrityCheckController::class, 'export'])
+                ->whereNumber('run')
+                ->middleware(['can:integrity_checks.export', 'throttle:export'])
+                ->name('integrity-checks.export');
+
+            Route::get('integrity-checks/{run}', [IntegrityCheckController::class, 'show'])
+                ->whereNumber('run')
+                ->middleware('can:integrity_checks.view')
+                ->name('integrity-checks.show');
+        });
 
         /*
         |------------------------------------------------------------------

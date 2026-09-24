@@ -235,6 +235,51 @@ final class ConfigureFromSettings
         }
 
         Config::set('session.lifetime', self::clampSessionLifetime((int) $lifetime));
+
+        self::applySessionCookieFlags($settings);
+    }
+
+    /**
+     * `security.force_https` -> `session.secure` (phase-24-25 SEC-02).
+     *
+     * **The setting did not govern the cookie at all.** It defaults to true while
+     * `config('session.secure')` reads `SESSION_SECURE_COOKIE`, which nothing sets, so the session
+     * cookie went out with no `Secure` flag on a deployment that believed it was HTTPS-only.
+     *
+     * `ForceHttps` already redirects a plain-HTTP read and refuses a plain-HTTP write, so the
+     * cookie rarely travelled in the clear — and "rarely" is exactly the gap. The `Secure` flag is
+     * what stops the browser **sending** it over http in the first place, which covers what the
+     * middleware cannot: a request in flight before the redirect lands, a sibling host on the same
+     * domain served by something else, anything that can make the browser issue one plain-HTTP
+     * request. Defence that only works while every other layer works is not defence in depth.
+     *
+     * **Excluded by environment, never by setting.** A `Secure` cookie is not sent over http at
+     * all, so honouring an inherited `force_https = true` on a developer machine would log
+     * everybody out of localhost with no way back in — the same reasoning `ForceHttps` itself uses.
+     *
+     * `HttpOnly` and `SameSite` are left to config/session.php: they are not settings, they have no
+     * legitimate other value here, and a flag nobody may change does not belong on a screen.
+     *
+     * @param  array<string, mixed>  $settings  the `security` group, keyed relative to it
+     */
+    public static function applySessionCookieFlags(array $settings): void
+    {
+        if (app()->environment(['local', 'testing'])) {
+            return;
+        }
+
+        $force = $settings['force_https'] ?? null;
+
+        if ($force === null) {
+            return;
+        }
+
+        // Only ever tightened. A stored false does not clear a `Secure` flag the environment set
+        // deliberately — turning the setting off is a statement about redirects, not permission to
+        // start sending the session cookie in the clear.
+        if (filter_var($force, FILTER_VALIDATE_BOOLEAN)) {
+            Config::set('session.secure', true);
+        }
     }
 
     /**
