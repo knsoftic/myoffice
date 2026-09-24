@@ -102,11 +102,22 @@
                         {{ $slot }}
 
                         @if (filled($requireText))
+                            @php
+                                // Unique per dialog: a settings screen renders this component once
+                                // per group, and duplicate ids would point every label at the first
+                                // input on the page.
+                                $confirmInputId = 'confirm-text-'.\Illuminate\Support\Str::random(8);
+                            @endphp
+
                             <div class="mt-4">
-                                <label class="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                                {{-- `for` is the association, not the proximity. Without it this is
+                                     an unnamed text box on the one dialog whose whole purpose is to
+                                     make somebody stop and read. --}}
+                                <label for="{{ $confirmInputId }}" class="block text-xs font-medium text-slate-600 dark:text-slate-300">
                                     Type <span class="select-all font-semibold text-slate-900 dark:text-white">{{ $requireText }}</span> to confirm
                                 </label>
                                 <input
+                                    id="{{ $confirmInputId }}"
                                     type="text"
                                     x-model="typed"
                                     x-on:keydown.enter.prevent="submit()"

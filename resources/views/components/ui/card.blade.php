@@ -5,6 +5,7 @@
     'padded' => true,
     'compact' => false,
     'hover' => false,
+    'level' => 'h2',
 ])
 
 {{--
@@ -17,6 +18,12 @@
         </x-ui.card>
 
     Pass :padded="false" when the body is a table or list that should run edge to edge.
+
+    **`level` is the heading level of the card title, and it defaults to h2** (phase-24-25 section
+    6.5). A card sits directly under the page's h1, so the h3 this used to hard-code skipped a rung:
+    somebody navigating by heading level had no way to tell whether they had jumped a section or
+    landed inside one. Pass level="h3" for a card genuinely nested inside another section.
+    A11Y-06 asserts the order on every screen it walks.
 --}}
 
 @php
@@ -39,7 +46,10 @@
 
                 <div class="min-w-0">
                     @if (filled($title))
-                        <h3 class="truncate text-sm font-semibold tracking-tight text-slate-900 dark:text-white">{{ $title }}</h3>
+                        {{-- Rendered through $level; see the note above. The class list is the
+                             same whatever the level, because the size is the card's, not the
+                             document outline's. --}}
+                        <{{ $level }} class="truncate text-sm font-semibold tracking-tight text-slate-900 dark:text-white">{{ $title }}</{{ $level }}>
                     @endif
 
                     @if (filled($subtitle))

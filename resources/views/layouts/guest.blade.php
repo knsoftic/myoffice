@@ -131,9 +131,13 @@
             </div>
 
             <div class="relative mt-8 lg:mt-0">
-                <h1 class="max-w-lg text-2xl font-semibold leading-snug tracking-tight sm:text-3xl lg:text-4xl lg:leading-tight">
+                {{-- A <p>, not an <h1>: every page using this layout renders its own heading
+                     ("Sign in", "Reset your password"), and two <h1> elements leave a
+                     screen-reader user with no single answer to "what page is this". This is
+                     branding beside the form. The type scale is unchanged, so nothing moves. --}}
+                <p class="max-w-lg text-2xl font-semibold leading-snug tracking-tight sm:text-3xl lg:text-4xl lg:leading-tight">
                     {{ $authTagline }}
-                </h1>
+                </p>
 
                 @if ($authFeatures->isNotEmpty())
                     <ul class="mt-6 hidden space-y-3 sm:block lg:mt-8">

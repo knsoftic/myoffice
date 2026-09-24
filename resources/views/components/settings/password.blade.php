@@ -83,6 +83,10 @@
                     type="button"
                     x-on:click="revealed = ! revealed"
                     class="absolute inset-y-0 right-0 flex items-center px-3 text-slate-400 transition-colors hover:text-slate-700 dark:hover:text-slate-200"
+                    {{-- The static attribute is the name. `x-bind` alone sets it only once Alpine
+                         has booted, so the served HTML had no name on it at all - and an icon-only
+                         button with no name is announced as "button". --}}
+                    aria-label="Show the value"
                     x-bind:aria-label="revealed ? 'Hide the value' : 'Show the value'"
                 >
                     <x-ui.icon name="eye" class="h-4 w-4" x-show="! revealed" />

@@ -143,7 +143,11 @@
             </x-ui.card>
 
             <x-ui.card title="Internal notes" subtitle="Never shown in the client portal." icon="lock-closed">
-                <x-ui.form.textarea name="notes" :value="$client->notes" :rows="5" maxlength="10000" />
+                {{-- `aria-label` rather than a visible one: the card title already names this box
+                     for anybody looking at it, and a second visible label would be noise. Without
+                     it the field is announced as "edit text" and nothing else. --}}
+                <x-ui.form.textarea name="notes" :value="$client->notes" :rows="5" maxlength="10000"
+                    aria-label="Internal notes" />
             </x-ui.card>
         </div>
     </div>
