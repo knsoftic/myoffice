@@ -264,6 +264,7 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D149 | **`permissionNamesFor('module')` grants every ability that module declares, which is how a privacy rule gets undone by a helper that was only being tidy.** | §9.4 says `messages.view_any` is "granted to nobody by default" — it is the compliance reader's permission, read-only even then, and every read it allows is logged. `RoleSeeder` gave the whole `messages` module to **Admin** and **Support Agent** in one line each, because that is what the helper returns. The effect was that every support agent in the installation could read every private conversation in it: a student's thread with their teacher, a collaborator's with staff, a client's with their project manager. **Nothing about the symptom would ever have announced itself** — the threads simply appeared, to people who had every reason to think they were meant to. The §94 matrix decides who may *talk* to whom, and a blanket read makes that decision cosmetic. Phase 22's policy probe found it by asking the question the contract asks rather than the question the code implies, which is the whole reason for asking it. Three things came out of the fix and each is a rule. **First: a module whose abilities are not uniformly safe must be granted ability by ability**, with the withheld ones named in a comment, or the next person to add a role will reach for the one-liner again. **Second: a seeder cannot correct an existing install** — D65 says converge additively and never revoke, which is right, so the correction is a dated, reversible migration where it can be seen. **Third: `Gate::before` means Super Admin keeps the row, and pretending otherwise in the permissions table would be worse than saying so.** |
 | D150 | **A sweep is idempotent at its source or it is not idempotent.** | `withoutOverlapping` stops two runs of a command overlapping; it does nothing about a second run ten minutes later doing the work again. Every Phase 22 sweep therefore carries its guard on the row: `first_response_breached` and `resolution_breached` on a ticket, `reminder_sent_at` on a meeting, `emailed_at` on a notification — each stamped **inside** the transaction that selects the row, with the notification dispatched **after** it commits. That order is the whole thing: stamping after the dispatch re-sends everything on the next run, and dispatching inside the transaction tells somebody about a row a rollback removed. A crash between the two loses one message and never sends two, which is the right way round. The probe is built the same way, and this is the part worth copying: it runs each sweep, asserts what moved, then **runs it again and asserts nothing moved**. Without that second run a sweep that notified on "is it past the target" would pass every test and page the assignee 144 times a day. |
 | D151 | **A screen probe's own plumbing can hide two real defects, and the way to tell is that the symptom moves when you reorder the list.** | The portal screen probe reported the *first* screen of each panel redirecting to `/login`. It was not a permissions bug: `$kernel->handle()` re-resolves the auth guard against that request's fresh session and discards a login made just before it, so whichever screen happened to be first was the one that failed. Reordering the list moved the failure, which is what identified it. A warm-up request per panel fixed it — **and with that noise gone, two genuine 403s were sitting underneath**: `SupportTicketPolicy::viewAny()` had never accounted for portal users, so every portal's ticket list refused while the create form and the detail page beside it worked; and `collaborator_portal.support_tickets` had never been declared at all, though §9.4 gives collaborators tickets in the same breath as meetings and messages. Two rules. **A probe failure that is uniform across a dimension is usually the probe** — four panels failing on the same *position* rather than the same *screen* is not four bugs. And **a policy's `viewAny` and `create` must ask one question in one place**: those two had separate lists of who counts as a portal user, which is exactly how they came to disagree. |
+| D152 | **A notification queued inside a *nested* transaction is silently lost, so every dispatch happens after its transaction returns.** | `NotificationService` now marks every notification `afterCommit` itself rather than trusting each caller to dispatch outside a transaction — `config('queue.connections.*.after_commit')` is false here, so INV-22-8 had been resting entirely on discipline, which is an invariant in name only. Making it real immediately broke the fee reminder, and the reason generalises: **when a savepoint commits, Laravel neither runs that level's after-commit callbacks nor hands them up to the parent — it drops them.** `FeeReminderService` dispatched from inside its own `DB::transaction()`. In production that is the outermost transaction and it would have worked; under any caller that already had one open — a command wrapping a batch, a test, a probe — the student would never have been told, with nothing logged and the reminder row sitting there saying they had been. Every dispatch in the system now happens **after** its service's transaction returns, which is what `TicketService` and `MeetingService` already did and what the six Phase 19-21 triggers were written to do from the start. The rule is not "be careful about nesting": it is **do not dispatch from inside a transaction at all**, because whether you are nested is a property of your caller and you cannot see it. The probes' drain helpers had to learn the same shape — a listener that calls `dispatch()` registers another callback while it runs, so a single drain pass delivers the listener and leaves the notification unsent, which looks exactly like a listener that did nothing. They now drain in passes until nothing new appears. |
 ---
 
 ## 5. Phase Tracker
@@ -709,7 +710,7 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 > The verification page at `/verify/{code}` needs no account and is the one public write path in the
 > institute.
 
-### [~] PHASE 22 — Tickets, meetings, internal messaging, notifications (in progress)
+### [x] PHASE 22 — Tickets, meetings, internal messaging, notifications
 
 | Done | What |
 |---|---|
@@ -731,7 +732,7 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 | [x] | The four portal panels' ticket, meeting and message screens — three shared controllers, 44 screens rendered — and the client panel migrated off Phase 5's own read-only stubs |
 | [x] | Seven scheduled commands, each idempotent at its source rather than at its schedule (D150) |
 | [x] | Portal sidebar entries, re-gated on their subject module so the menu and the route give the same answer |
-| [ ] | The trigger call sites Phases 19-21 own — the registry entries exist and are preference-able; each act needs one `dispatch()` in its own phase's service |
+| [x] | The six trigger call sites Phases 19-21 owed, each dispatching after its own transaction returns (D152) |
 
 ### [ ] PHASE 23 — Reports, analytics, activity log, audit trail, global search, exports
 ### [ ] PHASE 24 — Security, financial integrity, responsive and performance testing
@@ -740,6 +741,39 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 ---
 
 ## 6. Change Log
+
+### 2026-09-24 — The six triggers, and an invariant that was resting on discipline
+
+**`NotificationService` now marks every notification `afterCommit` itself** rather than trusting
+each caller to dispatch outside a transaction. The class docblock had claimed INV-22-8 all along;
+`config('queue.connections.*.after_commit')` is false in this installation, so the guarantee was
+resting entirely on every caller remembering. Making it real broke the fee reminder within seconds,
+and what it exposed is D152: **when a savepoint commits, Laravel drops that level's after-commit
+callbacks** rather than running them or handing them up. A dispatch from inside a nested transaction
+vanishes — nothing logged, nothing sent, and a reminder row sitting there saying somebody had been
+told. Every dispatch in the system now happens after its service's transaction returns.
+
+**The six triggers Phases 19–21 owed are wired.** The registry entries for `material.published`,
+`assignment.published`, `result.published`, `certificate.generated`, `certificate.revoked` and
+`idcard.issued` had existed since the notification slice and fired nothing — which is worse than
+having no entry, because the preference screen offers to mute something that was never going to
+arrive.
+
+**The audience is where these go wrong, so that is what the probe asserts.** A result goes to each
+student who has a row and nobody else: publishing to the whole batch would tell every student
+something about everybody else. A material goes to the union of its **student, batch and course**
+targets — reading only `target_student_id` would have reached almost nobody, because sharing with a
+batch is how a material is actually shared. A revoked certificate goes to the holder *and* to
+`certificates.view_any`, because somebody may present it in good faith to an employer who checks it.
+
+**Three column names were wrong on the first pass and the schema said so**, which is the argument
+for writing rows rather than reading the model: `course_material_targets` has `target_student_id`
+not `student_id`, `assignments` has `deadline_at` not `due_at`, and `exams` has `name` not `title`.
+Writing the fixtures also turned up `chk_cm_payload` (a material is a file or a link, never both and
+never neither) and `target_key` being generated.
+
+**Files.** `app/Services/Support/NotificationService.php`,
+`app/Services/Institute/{FeeReminderService,CourseMaterialService,AssignmentService,ExamResultService,CertificateService,StudentIdCardService}.php`.
 
 ### 2026-09-24 — Phase 22 closes: seven sweeps and the four portals
 
@@ -2854,6 +2888,8 @@ The two HIGH findings are both real and are being fixed now:
 
 | Date | What was tested | Command / method | Result |
 |---|---|---|---|
+| 2026-09-24 | The six Phase 19-21 triggers | probe over the audiences, rolled back | PASS — **16/16**: a targeted student is told and an untargeted one is not, the row names its module and its material, all six keys resolve in the registry, all five owning services still construct, and a dispatch with no audience is a no-op rather than a throw |
+| 2026-09-24 | Institute suite after the triggers | `DB_DATABASE=my_office_test php artisan test tests/Feature/Institute/` | PASS — **600 tests / 20,560 assertions**, 411 s, after injecting `NotificationService` into five Phase 19-21 services |
 | 2026-09-24 | The seven scheduled sweeps | probe with fixtures built to be swept, rolled back | PASS — **41/41**, and every section runs its sweep twice: the second run must move nothing. Covers the SLA booleans, a ticket parked on the customer being left alone, auto-close skipping one the requester answered, the department recount, reminders skipping a decliner, `close-past` leaving a meeting that ended fifteen minutes ago, and a retention of `0` meaning keep-for-ever |
 | 2026-09-24 | Every portal screen, four panels | 44 GET routes through the HTTP kernel, rolled back | PASS — **44/44**, after the probe's own guard handling stopped hiding two real 403s: `SupportTicketPolicy::viewAny()` ignoring portal users, and `collaborator_portal.support_tickets` never having been declared (D151) |
 | 2026-09-24 | Sidebar after the portal entries | `DB_DATABASE=my_office_test php artisan test --filter=SidebarVisibility` | PASS — **9 tests / 228 assertions**; all four portals carry Meetings, Messages, Support and Notifications, and disabling `collaborators` now leaves exactly those four rather than emptying the tree |
