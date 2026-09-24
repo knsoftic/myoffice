@@ -172,6 +172,9 @@ final class SidebarVisibilityTest extends TestCase
                 'Permissions',
                 'Modules',
                 'Activity Log',
+                // phase-19-23 4.1: its own module, beside the log because it is the same table and
+                // separate from it because 107 is a different right.
+                'Audit Trail',
                 'Login History',
                 'Settings',
                 // phase-05 §7: the CRM entries, now that leads and clients have routes.
@@ -325,14 +328,18 @@ final class SidebarVisibilityTest extends TestCase
                 'Jobs',
                 'Job Applications',
                 'Contact Inquiries',
-                // phase-19-23 §7.6: the Workspace group, now that Phase 22 has registered its
-                // routes. `Files` and `Reports` are still absent — Phase 23 owns them, and gate 2
-                // keeps them hidden until it ships.
+                // phase-19-23 §7.6 and §7.8: the Workspace group. `Files` is still absent — Phase 6
+                // owns the `attachments` screen and has not registered its route, and gate 2 keeps
+                // it hidden until it does. Reports, Analytics and My Exports appear now that
+                // Phase 23 has shipped theirs.
                 'Support Tickets',
                 'Support Desks',
                 'Meetings',
                 'Messages',
                 'Notifications',
+                'Reports',
+                'Analytics',
+                'My Exports',
             ],
             $labels,
             'Only the screens whose phase has actually shipped its routes may appear — Phase 1, Phase 2\'s Settings, Phase 3\'s Website CMS, Phase 4\'s marketing modules, Phase 5\'s CRM and Phase 6\'s delivery screens.'

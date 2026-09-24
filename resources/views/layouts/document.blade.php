@@ -44,7 +44,12 @@
     $backUrl = $backUrl ?? null;
     $backLabel = $backLabel ?? 'Back';
 
-    $mm = static fn ($value): string => number_format((float) $value, 2, '.', '').'mm';
+    // `%.2F` on purpose: this is a CSS length, and CSS has exactly one decimal separator whatever
+    // the institute's localisation says. Routing it through `app_number()` would emit `10,00mm` for
+    // a comma locale and the browser would drop the rule entirely. The capital F is the
+    // locale-independent conversion, which is the whole reason it is used here rather than the
+    // formatting helper every other view must use.
+    $mm = static fn ($value): string => sprintf('%.2Fmm', (float) $value);
 @endphp
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">

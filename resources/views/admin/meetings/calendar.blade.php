@@ -80,7 +80,7 @@
                     'border-brand-400 bg-brand-50/40 dark:border-brand-600 dark:bg-brand-950/20' => $day->isToday(),
                 ])>
                     <div class="mb-1 text-xs font-medium text-slate-500 dark:text-slate-400">
-                        {{ $day->format('D j M') }}
+                        {{ app_date($day, 'D j M') }}
                     </div>
 
                     <div class="space-y-1">
