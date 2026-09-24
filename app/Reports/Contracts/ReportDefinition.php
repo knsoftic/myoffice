@@ -11,6 +11,7 @@ use App\DataObjects\Reporting\FilterDefinition;
 use App\DataObjects\Reporting\ReportRequest;
 use App\Enums\ExportFormat;
 use App\Enums\ReportGroup;
+use App\Models\User;
 use App\Support\ReportResult;
 
 /**
@@ -80,13 +81,26 @@ interface ReportDefinition
     /**
      * Run it. **Delegates** to the service §99 names (INV-23-1).
      *
-     * The request reaching here has already been narrowed: filters the viewer may not use are gone,
-     * and `$columns` holds only the keys they are allowed. A `run()` that ignores that and selects
-     * everything would put a withheld money column into the cache and the file.
+     * Three arguments, and each answers a different half of §9.5:
+     *
+     * · `$request` is what was asked, already narrowed — filters the viewer may not use are gone,
+     *   and gone from the submitted values too, not merely hidden.
+     *
+     * · `$columns` holds only the keys the viewer is allowed (step 6). A `run()` that ignores it
+     *   and selects everything would put a withheld money column into the cache and into the file
+     *   the export job builds from that cache.
+     *
+     * · `$viewer` is **step 4**, and it is why this parameter exists at all. The source module's
+     *   own isolation scope is the delegate's to apply — `Project::visibleTo($user)`,
+     *   `Lead::visibleTo($user)`, a branch clause, a collaborator's own rows — and none of that can
+     *   be done without knowing who is asking. `auth()->user()` would not do: `BuildReportExport`
+     *   runs a queued export **as** its requester without ever authenticating them, so a report
+     *   reading the auth guard would build that file with no scope at all and then hand it to
+     *   somebody entitled to a fraction of it.
      *
      * @param  list<string>  $columns  the column keys that survived the permission strip
      */
-    public function run(ReportRequest $request, array $columns): ReportResult;
+    public function run(ReportRequest $request, array $columns, User $viewer): ReportResult;
 
     /**
      * Which formats this report supports.
