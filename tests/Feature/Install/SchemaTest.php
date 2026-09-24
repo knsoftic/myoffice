@@ -325,6 +325,17 @@ final class SchemaTest extends TestCase
                 sprintf('%s has no down() method, so it cannot be rolled back.', $name)
             );
 
+            // An assertion migration alters nothing, so there is nothing for `down()` to undo and an
+            // empty body is the honest one. The exception is **derived from the file rather than
+            // from a list**: a migration only qualifies if its own `up()` performs no schema
+            // operation and no write, which a migration that actually changes something can never
+            // claim. See {@see self::altersNothing()}.
+            if ($this->altersNothing($source)) {
+                $checked++;
+
+                continue;
+            }
+
             $this->assertNotSame(
                 '',
                 $this->downBody($source),
@@ -446,6 +457,46 @@ final class SchemaTest extends TestCase
      * Does `down()` — together with every `$this->helper()` it reaches — perform a schema reversal or
      * a data write? A `Schema::has…()` guard alone does not count.
      */
+    /**
+     * Does this migration's `up()` change nothing at all?
+     *
+     * Phase 23's `assert_attachment_morphs_for_support_tables` is the first of these: it exists to
+     * fail loudly on every deployment if §96's one `attachments` table has lost its `visibility`
+     * column, and it creates, alters and drops nothing. A test run catches that when somebody runs
+     * the suite; a migration catches it on the deployment where a hotfix reordered things.
+     *
+     * The same walk `downReverses()` uses, pointed at `up()` instead — so a migration that reaches
+     * a schema call or a write **through a private helper** is not mistaken for one that alters
+     * nothing. `Schema::has…()` guards and `throw` do not count as alteration, which is exactly
+     * what an assertion migration is made of.
+     */
+    private function altersNothing(string $source): bool
+    {
+        $seen = ['up' => true];
+        $queue = ['up'];
+        $reached = [];
+
+        while ($queue !== []) {
+            $body = $this->methodBody($source, (string) array_shift($queue));
+            $reached[] = $body;
+
+            preg_match_all('/\$this->([A-Za-z_][A-Za-z0-9_]*)\s*\(/', $body, $calls);
+
+            foreach ($calls[1] as $call) {
+                if (! isset($seen[$call]) && $this->methodBody($source, $call) !== '') {
+                    $seen[$call] = true;
+                    $queue[] = $call;
+                }
+            }
+        }
+
+        return preg_match(
+            '/Schema::(?!has)|->drop|dropIfExists|->(?:update|insert|upsert|statement)\s*\('
+            .'|DB::(?:statement|unprepared)\s*\(|RawSchema::(?!.*Exists)/i',
+            implode(' ', $reached)
+        ) !== 1;
+    }
+
     private function downReverses(string $source): bool
     {
         if ($this->downBody($source) === '') {
