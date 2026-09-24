@@ -126,6 +126,11 @@ use App\Http\Controllers\Admin\ModuleController;
 use App\Http\Controllers\Admin\PermissionController;
 use App\Http\Controllers\Admin\ProjectController;
 use App\Http\Controllers\Admin\ProjectMemberController;
+use App\Http\Controllers\Admin\Reporting\AnalyticsController;
+use App\Http\Controllers\Admin\Reporting\AuditTrailController;
+use App\Http\Controllers\Admin\Reporting\GlobalSearchController;
+use App\Http\Controllers\Admin\Reporting\ReportController;
+use App\Http\Controllers\Admin\Reporting\ReportExportController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\SettingsController;
 use App\Http\Controllers\Admin\Support\ConversationController;
@@ -2688,6 +2693,174 @@ Route::prefix('admin')
         | to guarantee that is not to write it five times.
         |
         */
+        /*
+        |----------------------------------------------------------------------
+        | Reports, analytics, logs and search - phase-19-23 sec 7.8
+        |----------------------------------------------------------------------
+        |
+        | The route table says every report needs `can:reports.view_reports`
+        | PLUS its own `permissions()`. No static middleware string can say
+        | that: the list differs per report and changes when a report's columns
+        | do. `ReportEngine::authorise()` resolves it from `ReportRegistry` on
+        | every request, and 404s an unknown or unpermitted key rather than
+        | 403ing it - telling somebody a report exists that they may not open
+        | is a small disclosure with no upside.
+        |
+        | `{report}` is constrained to `{group}.{name}` so a dotted key does not
+        | swallow the sibling segments: without the constraint `/reports/x/schema`
+        | would match `show` with a report called "x/schema".
+        |
+        | The export route is throttled at 20/minute because each request runs
+        | the report to count it before deciding how to deliver it - it is the
+        | one read in this group that is never cheap.
+        |
+        */
+        Route::middleware('module:reports')->group(static function (): void {
+            Route::prefix('reports')->name('reports.')->group(static function (): void {
+                Route::get('/', [ReportController::class, 'index'])
+                    ->middleware('can:reports.view_reports')
+                    ->name('index');
+
+                Route::get('{report}', [ReportController::class, 'show'])
+                    ->where('report', '[a-z]+\.[a-z0-9_]+')
+                    ->middleware('can:reports.view_reports')
+                    ->name('show');
+
+                Route::get('{report}/schema', [ReportController::class, 'schema'])
+                    ->where('report', '[a-z]+\.[a-z0-9_]+')
+                    ->middleware('can:reports.view_reports')
+                    ->name('schema');
+
+                Route::get('{report}/export/{format}', [ReportController::class, 'export'])
+                    ->where('report', '[a-z]+\.[a-z0-9_]+')
+                    ->middleware(['can:reports.export', 'throttle:20,1'])
+                    ->name('export');
+
+                Route::get('{report}/print', [ReportController::class, 'print'])
+                    ->where('report', '[a-z]+\.[a-z0-9_]+')
+                    ->middleware('can:reports.print')
+                    ->name('print');
+            });
+
+            /*
+            |------------------------------------------------------------------
+            | The export register
+            |------------------------------------------------------------------
+            |
+            | Bound on `uuid`, never on the id: sec 2.26 keeps the sequential key
+            | out of every URL, so a download link cannot be walked backwards.
+            |
+            | `destroy` removes the FILE. The row is kept for ever - it is the
+            | record of what left the building - which is why the service's
+            | method is called `expire()` and not `delete()`.
+            |
+            */
+            Route::prefix('report-exports')->name('report-exports.')->group(static function (): void {
+                Route::get('/', [ReportExportController::class, 'index'])
+                    ->middleware('can:reports.export')
+                    ->name('index');
+
+                Route::get('{export:uuid}/download', [ReportExportController::class, 'download'])
+                    ->middleware(['can:reports.export', 'can:download,export'])
+                    ->name('download');
+
+                Route::delete('{export:uuid}', [ReportExportController::class, 'destroy'])
+                    ->middleware(['can:reports.export', 'can:delete,export'])
+                    ->name('destroy');
+            });
+
+            /*
+            |------------------------------------------------------------------
+            | Analytics
+            |------------------------------------------------------------------
+            |
+            | One request per chart rather than nine in the page: the slowest
+            | chart would otherwise decide how long everybody waits, and one
+            | that failed would take the page with it. The per-chart permission
+            | is checked inside `AnalyticsService`, because the name is a route
+            | parameter and middleware cannot read it into an ability string.
+            |
+            */
+            Route::prefix('analytics')->name('analytics.')->group(static function (): void {
+                Route::get('/', [AnalyticsController::class, 'index'])
+                    ->middleware('can:reports.view_reports')
+                    ->name('index');
+
+                Route::get('chart/{chart}', [AnalyticsController::class, 'chart'])
+                    ->middleware(['can:reports.view_reports', 'throttle:60,1'])
+                    ->name('chart');
+            });
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | The audit trail - sec 107
+        |----------------------------------------------------------------------
+        |
+        | Its own module, separate from `activity_log`, because sec 4.1 made
+        | old-and-new values a different right from the operational feed: a
+        | compliance reader may be given one without the other, in either
+        | direction.
+        |
+        | **The sec 106 viewer is NOT redeclared here.** Phase 1 already ships
+        | `admin.activity-log.index|show|export` and a filter request that
+        | covers most of sec 6.22's list; a second controller on the same path
+        | would have shadowed it, and two screens over one table is how they
+        | drift. Phase 23's `ActivityLogService` is reached instead through the
+        | `sys.activity_log` report, which is what made the log exportable
+        | through the same engine as everything else.
+        |
+        | Read-only. There is no store, no update and no destroy route here,
+        | and there must never be one (INV-23-5): a log that can be edited is a
+        | record of what somebody was willing to leave.
+        |
+        | `export` is placed before `{activity}` so the word is never read as
+        | an id.
+        |
+        */
+        Route::middleware('module:audit_trail')->prefix('audit-trail')->name('audit-trail.')->group(static function (): void {
+            Route::get('/', [AuditTrailController::class, 'index'])
+                ->middleware('can:audit_trail.view_logs')
+                ->name('index');
+
+            Route::get('export/{format}', [AuditTrailController::class, 'export'])
+                ->middleware(['can:audit_trail.export', 'throttle:10,1'])
+                ->name('export');
+
+            Route::get('{activity}', [AuditTrailController::class, 'show'])
+                ->whereNumber('activity')
+                ->middleware('can:audit_trail.view_logs')
+                ->name('show');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Global search - sec 108
+        |----------------------------------------------------------------------
+        |
+        | `suggest` is throttled at 60/minute per user: with the debounce that
+        | is fast enough to type through, and slow enough that the endpoint
+        | cannot be used to walk a table one letter at a time.
+        |
+        | Nothing here caches. Two people searching one word are running eleven
+        | differently-scoped queries, and one shared entry would hand the
+        | narrower viewer the wider answer.
+        |
+        */
+        Route::middleware('module:global_search')->prefix('search')->name('search.')->group(static function (): void {
+            Route::get('/', [GlobalSearchController::class, 'index'])
+                ->middleware('can:global_search.view_any')
+                ->name('index');
+
+            Route::get('suggest', [GlobalSearchController::class, 'suggest'])
+                ->middleware(['can:global_search.view_any', 'throttle:60,1'])
+                ->name('suggest');
+
+            Route::post('open', [GlobalSearchController::class, 'open'])
+                ->middleware(['can:global_search.view_any', 'throttle:120,1'])
+                ->name('open');
+        });
+
         $ability = 'notifications.view_any';
         require __DIR__.'/notifications.php';
 

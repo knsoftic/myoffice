@@ -114,6 +114,7 @@ use App\Models\Project\Task;
 use App\Models\Project\TaskChecklistItem;
 use App\Models\Project\TaskComment;
 use App\Models\Project\TimeEntry;
+use App\Models\Reporting\ReportExport;
 use App\Models\Role;
 use App\Models\User;
 use App\Policies\Cms\BlogCategoryPolicy;
@@ -206,6 +207,7 @@ use App\Policies\Project\TaskChecklistItemPolicy;
 use App\Policies\Project\TaskCommentPolicy;
 use App\Policies\Project\TaskPolicy;
 use App\Policies\Project\TimeEntryPolicy;
+use App\Policies\Reporting\ReportExportPolicy;
 use App\Policies\RolePolicy;
 use App\Policies\UserPolicy;
 use App\Services\Cms\CacheVersion;
@@ -400,6 +402,9 @@ class AppServiceProvider extends ServiceProvider
         CourseMaterial::class => CourseMaterialPolicy::class,
         Assignment::class => AssignmentPolicy::class,
         AssignmentSubmission::class => AssignmentSubmissionPolicy::class,
+
+        // Phase 23.
+        ReportExport::class => ReportExportPolicy::class,
     ];
 
     /**
