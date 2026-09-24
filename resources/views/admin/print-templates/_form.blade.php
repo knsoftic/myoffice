@@ -197,9 +197,9 @@
                 <div class="max-h-[34rem] space-y-4 overflow-y-auto rounded-lg border border-slate-200 p-3 dark:border-slate-700">
                     @foreach ($tokens as $group => $groupTokens)
                         <div>
-                            <h4 class="mb-1 text-2xs font-semibold uppercase tracking-wide text-slate-400">
+                            <h3 class="mb-1 text-2xs font-semibold uppercase tracking-wide text-slate-400">
                                 {{ $groups[$group] ?? $group }}
-                            </h4>
+                            </h3>
                             <div class="flex flex-wrap gap-1">
                                 @foreach ($groupTokens as $token => $spec)
                                     <button type="button"

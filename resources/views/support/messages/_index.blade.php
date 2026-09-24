@@ -83,6 +83,8 @@
                     <label class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">To</label>
 
                     <input type="search" x-model="q" x-on:input.debounce.300ms="search()" placeholder="Search by name"
+                           {{-- A placeholder is not a label: it disappears the moment somebody types. --}}
+                           aria-label="Search conversations by name"
                            class="mb-2 h-10 w-full rounded-lg border-slate-300 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200">
 
                     <select name="user_id" required size="6"

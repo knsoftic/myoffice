@@ -166,7 +166,10 @@
             </x-ui.card>
 
             <x-ui.card title="Notes" subtitle="The standing note on the record. Dated notes belong on the timeline." icon="pencil">
-                <x-ui.form.textarea name="notes" :value="$lead->notes" :rows="5" maxlength="10000" />
+                {{-- aria-label rather than a visible one: the card title above already names this box for
+                     anybody looking at it, and a second visible label would be noise. --}}
+                <x-ui.form.textarea name="notes" :value="$lead->notes" :rows="5" maxlength="10000"
+                    aria-label="Notes" />
             </x-ui.card>
         </div>
 

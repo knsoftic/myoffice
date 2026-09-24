@@ -134,7 +134,10 @@
                         </x-slot:actions>
                     @endunless
 
-                    <x-ui.table max-height="28rem" :flush="true" :dense="true" :hover="false">
+                    {{-- One table per module group, so each says which. Without a caption a reader moving
+                         through the matrix hears "table" eight times and nothing else. --}}
+                    <x-ui.table max-height="28rem" :flush="true" :dense="true" :hover="false"
+                                :caption="$group['label'].' permissions'">
                         <x-slot:head>
                             {{-- The corner cell stays put on both axes while the grid scrolls. --}}
                             <th scope="col" class="sticky left-0 z-20 min-w-[13rem] bg-slate-50/95 px-4 py-3 backdrop-blur dark:bg-slate-900/95">Module</th>
@@ -187,7 +190,7 @@
 @elseif ($readOnly)
 <td class="mx-cell">@if ($held)<span class="inline-flex" title="{{ $permission->name }}"><x-ui.icon name="check" class="mx-auto h-4 w-4 text-emerald-500" /></span>@endif</td>
 @else
-<td class="mx-cell"><input type="checkbox" class="mx-box" name="permissions[]" value="{{ $permission->name }}" @checked($held) x-model="selected['{{ $permission->name }}']" title="{{ $permission->label ?: $permission->name }}" /></td>
+<td class="mx-cell"><input type="checkbox" class="mx-box" name="permissions[]" value="{{ $permission->name }}" @checked($held) x-model="selected['{{ $permission->name }}']" {{-- `title` is the tooltip; `aria-label` is the name. HTML-AAM accepts title as a last-resort name, but it is not reliably announced and never appears on touch - so a thousand cells read as "checkbox" with nothing to tell them apart. --}} aria-label="{{ $permission->name }}" title="{{ $permission->label ?: $permission->name }}" /></td>
 @endif
 @endforeach
 </tr>

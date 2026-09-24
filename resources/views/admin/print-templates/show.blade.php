@@ -29,7 +29,7 @@
                 <pre class="mt-3 max-h-96 overflow-auto rounded-lg bg-slate-50 p-3 font-mono text-xs text-slate-700 dark:bg-slate-900 dark:text-slate-300">{{ $template->body_html }}</pre>
 
                 @if (filled($template->custom_css))
-                    <h4 class="mt-4 text-2xs font-semibold uppercase tracking-wide text-slate-400">Stylesheet</h4>
+                    <h3 class="mt-4 text-2xs font-semibold uppercase tracking-wide text-slate-400">Stylesheet</h3>
                     <pre class="mt-1 max-h-60 overflow-auto rounded-lg bg-slate-50 p-3 font-mono text-xs text-slate-700 dark:bg-slate-900 dark:text-slate-300">{{ $template->custom_css }}</pre>
                 @endif
             </x-ui.card>
@@ -43,9 +43,9 @@
                 <div class="mt-3 space-y-4">
                     @foreach ($tokens as $group => $groupTokens)
                         <div>
-                            <h4 class="mb-1 text-2xs font-semibold uppercase tracking-wide text-slate-400">
+                            <h3 class="mb-1 text-2xs font-semibold uppercase tracking-wide text-slate-400">
                                 {{ \App\Support\PrintTokenRegistry::GROUPS[$group] ?? $group }}
-                            </h4>
+                            </h3>
                             <div class="flex flex-wrap gap-1">
                                 @foreach ($groupTokens as $token => $spec)
                                     <span @class([

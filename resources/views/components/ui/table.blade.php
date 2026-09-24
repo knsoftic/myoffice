@@ -10,6 +10,7 @@
     'selectable' => false,
     'selectionName' => 'ids',
     'selectionLabel' => 'row',
+    'caption' => null,
 ])
 
 {{--
@@ -258,6 +259,13 @@
         @if ($maxHeight) style="max-height: {{ $maxHeight }}" @endif
     >
         <table class="min-w-full border-separate border-spacing-0 text-sm">
+            {{-- Screen-reader-only, and needed only where a page carries more than one table: the
+                 heading above already names it for anybody looking, but somebody moving between
+                 tables hears "table" and "table" with none of the prose in between (A11Y-09). --}}
+            @if (filled($caption))
+                <caption class="sr-only">{{ $caption }}</caption>
+            @endif
+
             @isset($head)
                 <thead>
                     <tr class="sticky top-0 z-10 bg-slate-50/95 backdrop-blur supports-[backdrop-filter]:bg-slate-50/80 dark:bg-slate-900/95 dark:supports-[backdrop-filter]:bg-slate-900/80 [&>*]:border-b [&>*]:border-slate-200 [&>*]:text-left [&>*]:text-xs [&>*]:font-semibold [&>*]:uppercase [&>*]:tracking-wider [&>*]:text-slate-500 dark:[&>*]:border-slate-800 dark:[&>*]:text-slate-400">

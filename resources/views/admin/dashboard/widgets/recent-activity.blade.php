@@ -14,7 +14,7 @@
         :compact="true"
     />
 @else
-    <x-ui.table :is-empty="empty($data['entries'])" dense :flush="true">
+    <x-ui.table :is-empty="empty($data['entries'])" dense :flush="true" caption="Recent activity">
         <x-slot:head>
             <th class="px-4 py-3">Who</th>
             <th class="px-4 py-3">What happened</th>

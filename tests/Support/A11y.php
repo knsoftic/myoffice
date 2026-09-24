@@ -330,10 +330,21 @@ final class A11y
     */
 
     /**
-     * A data table says what it is.
+     * Data tables can be told apart.
      *
-     * A `<caption>`, an `aria-label` or an `aria-labelledby`. A layout table — one with
-     * `role="presentation"` — is skipped, because it is not a table to anybody using a reader.
+     * A `<caption>`, an `aria-label` or an `aria-labelledby` names one; a `role="presentation"`
+     * table is skipped, because it is not a table to anybody using a reader.
+     *
+     * **A page is allowed exactly one unnamed table, and that is deliberate.** WCAG 1.3.1 requires
+     * a table's structure to be programmatically determinable — which `<th scope>` provides — not
+     * that every table carry a caption; the caption is technique H39, a best practice rather than a
+     * conformance requirement. A single data table under a heading that names it is identified by
+     * its context. Two are not: moving between them, a screen-reader user hears "table" and
+     * "table", and the prose around them is not read out in between.
+     *
+     * Demanding a caption on every table would have produced fifty-eight captions each repeating
+     * the heading directly above it, which is noise a reader has to listen through. Tightening this
+     * to "every table" later is one condition.
      */
     public static function assertTablesCaptioned(string $html, string $context = ''): void
     {
@@ -341,11 +352,14 @@ final class A11y
         $xpath = new DOMXPath($document);
 
         $unnamed = [];
+        $tables = 0;
 
         foreach ($xpath->query('//table') ?: [] as $table) {
             if (! $table instanceof DOMElement || self::isDecorative($table)) {
                 continue;
             }
+
+            $tables++;
 
             $hasCaption = ($xpath->query('./caption[string-length(normalize-space(text())) > 0]', $table)?->length ?? 0) > 0;
 
@@ -354,6 +368,13 @@ final class A11y
             }
 
             $unnamed[] = self::excerpt($table);
+        }
+
+        // One table on the page is named by the page. See the note above.
+        if ($tables < 2) {
+            self::pass();
+
+            return;
         }
 
         if ($unnamed !== []) {
@@ -565,10 +586,21 @@ final class A11y
     }
 
     /**
-     * Parse HTML without libxml's HTML4 complaints.
+     * Parse HTML without libxml's HTML4 complaints, and without `<template>` content.
      *
      * Blade emits HTML5 with Alpine's `x-`, `:` and `@` attributes on it; libxml knows neither, and
      * would otherwise fill the error log with warnings about a page that is perfectly fine.
+     *
+     * **Template subtrees are removed before anything is checked.** A browser does not put
+     * `<template>` content in the document, the accessibility tree or the tab order — it is inert
+     * markup waiting to be cloned. libxml has no such notion and hands it over like any other
+     * element, so an unlabelled input or a bare `<canvas>` inside one reads as a failure on a page
+     * where neither is reachable. Worse, what Alpine eventually clones has its `:aria-label` and
+     * `x-text` bindings *evaluated*, so the literal attributes in the source are not what a user
+     * meets either.
+     *
+     * The honest model is that this scanner checks the page as served. What Alpine builds on top
+     * needs a browser, and that is what the Playwright specs of §12 Q3 are for.
      */
     private static function parse(string $html): DOMDocument
     {
@@ -584,7 +616,28 @@ final class A11y
         libxml_clear_errors();
         libxml_use_internal_errors($previous);
 
+        self::stripTemplates($document);
+
         return $document;
+    }
+
+    /**
+     * Remove every `<template>` subtree. See the note on {@see self::parse()}.
+     */
+    private static function stripTemplates(DOMDocument $document): void
+    {
+        $templates = $document->getElementsByTagName('template');
+
+        // Collected first: removing from a live NodeList while iterating it skips half the matches.
+        $nodes = [];
+
+        foreach ($templates as $template) {
+            $nodes[] = $template;
+        }
+
+        foreach ($nodes as $node) {
+            $node->parentNode?->removeChild($node);
+        }
     }
 
     /**

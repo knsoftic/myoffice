@@ -31,7 +31,7 @@
     <div class="grid gap-4 lg:grid-cols-3">
         <div class="space-y-4 lg:col-span-2">
             <x-ui.card title="By partner and code">
-                <x-ui.table :is-empty="$rows->isEmpty()">
+                <x-ui.table :is-empty="$rows->isEmpty()" caption="Referral clicks by partner and code">
                     <x-slot:head>
                         <th class="px-4 py-3 text-left font-semibold">Code</th>
                         <th class="px-4 py-3 text-right font-semibold">Clicks</th>
@@ -72,7 +72,7 @@
 
             <x-ui.card title="Codes nobody owns"
                        subtitle="Clicks on a code that resolves to no partner — an old flyer, a typo on a banner, or a partner who was removed.">
-                <x-ui.table :is-empty="$deadCodes->isEmpty()">
+                <x-ui.table :is-empty="$deadCodes->isEmpty()" caption="Clicks on codes that resolve to no partner">
                     <x-slot:head>
                         <th class="px-4 py-3 text-left font-semibold">Code</th>
                         <th class="px-4 py-3 text-right font-semibold">Clicks</th>

@@ -3,6 +3,7 @@
     'title' => 'Nothing here yet',
     'message' => null,
     'compact' => false,
+    'level' => 'h2',
 ])
 
 {{--
@@ -27,7 +28,11 @@
         </span>
     </div>
 
-    <h3 class="text-sm font-semibold tracking-tight text-slate-900 dark:text-white">{{ $title }}</h3>
+    {{-- `level` defaults to h2 (phase-24-25 section 6.5). An empty state sits directly under the
+         page's h1, so a hard-coded h3 skipped a rung on every screen that had nothing to show -
+         and those are precisely the screens somebody is navigating by heading to find their way
+         off. Pass level="h3" inside a section that already has its own h2. --}}
+    <{{ $level }} class="text-sm font-semibold tracking-tight text-slate-900 dark:text-white">{{ $title }}</{{ $level }}>
 
     @if (filled($message))
         <p class="mt-1.5 max-w-sm text-sm text-slate-500 dark:text-slate-400">{{ $message }}</p>
