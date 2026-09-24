@@ -75,7 +75,19 @@ final class SidebarVisibilityTest extends TestCase
         $collaborator = $this->seededDemoUser('Collaborator');
 
         $this->switchModule('collaborators', false);
-        $this->assertSame([], Sidebar::forUser($collaborator));
+
+        // **Not empty any more, and that is the correct answer.** Phase 22 gave every portal
+        // meetings, messages, a support desk and a bell, and each of those entries is gated on its
+        // own subject module — `meetings`, `messages`, `support_tickets`, `notifications` — so that
+        // the menu agrees with the route middleware beside it. Switching `collaborators` off takes
+        // away the collaborator's own screens and leaves the four that were never about that
+        // module. Asserting an empty array here would be asserting that a support desk belongs to
+        // the collaborators module, which it does not.
+        $withoutTheModule = $this->labels(Sidebar::forUser($collaborator));
+
+        $this->assertNotContains('Dashboard', $withoutTheModule);
+        $this->assertNotContains('Wallet', $withoutTheModule);
+        $this->assertSame(['Meetings', 'Messages', 'Support', 'Notifications'], $withoutTheModule);
 
         $this->switchModule('collaborators', true);
         $this->assertContains('Dashboard', $this->labels(Sidebar::forUser($collaborator)));
@@ -399,8 +411,9 @@ final class SidebarVisibilityTest extends TestCase
             $expectedLabels = match ($panel) {
                 PanelType::Client => ['Dashboard', 'My Projects', 'Milestones', 'Tasks', 'Documents', 'Files',
                     'Invoices', 'Payments', 'Meetings', 'Messages', 'Support', 'Notifications', 'My Profile'],
+                // phase-19-23 §7.6 gives every portal the same three, plus the shared bell of §7.7.
                 PanelType::Collaborator => ['Dashboard', 'My Projects', 'Wallet', 'Commissions', 'Payouts',
-                    'Statements'],
+                    'Statements', 'Meetings', 'Messages', 'Support', 'Notifications'],
                 // phase-17 added the register and the syllabus to both panels; phase-18 added the
                 // student's own fees, which Phase 1 had reserved an entry for and never had a route to;
                 // phase-19 added the material library and assignments to both; phase-20 added exams
@@ -409,14 +422,19 @@ final class SidebarVisibilityTest extends TestCase
                     'Materials', 'Assignments', 'Exams', 'Results',
                     // phase-19-23 §7.9: their own issued certificates and their own card. Neither
                     // screen writes anything, and neither takes an id from the URL.
-                    'Certificates', 'Student card', 'Fees'],
+                    'Certificates', 'Student card', 'Fees',
+                    // phase-19-23 §7.6 and §7.7.
+                    'Meetings', 'Messages', 'Support', 'Notifications'],
                 // **The teacher panel gains nothing from Phase 21, and that is not an omission.**
                 // §7.10 gives a teacher one certificate route and it takes a batch —
                 // `teacher/batches/{batch}/certificate-candidates` — so there is no static link a
                 // sidebar could carry. It is reached from the batch, which is where somebody asking
                 // "can my students be certified?" already is.
                 PanelType::Teacher => ['Dashboard', 'My Batches', 'My Students', 'Timetable',
-                    'Demo Classes', 'Attendance', 'Materials', 'Assignments', 'Exams', 'Results'],
+                    'Demo Classes', 'Attendance', 'Materials', 'Assignments', 'Exams', 'Results',
+                    // phase-19-23 §7.6 and §7.7 — a teacher raises tickets, sits in meetings and
+                    // messages institute management like everybody else.
+                    'Meetings', 'Messages', 'Support', 'Notifications'],
                 default => ['Dashboard'],
             };
 
