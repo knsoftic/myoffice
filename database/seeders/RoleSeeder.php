@@ -225,6 +225,23 @@ class RoleSeeder extends Seeder
                     // re-render from. Creating, editing and deactivating stay with Admin; the one
                     // irreversible act is Super Admin's.
                     PermissionRegistry::permissionNamesFor('print_templates', [Ability::Delete]),
+                    // phase-24-25 4.3. `system_health.*` arrives whole through everythingExcept(),
+                    // which is correct - a health screen is something an administrator should read.
+                    // Two of `integrity_checks`'s five abilities are withheld:
+                    //
+                    //   · `create` runs a check. A run is a record with a verdict, and the verdict
+                    //     is evidence - the audit artefact behind 120. Whoever can produce evidence
+                    //     on demand can also produce it until it says what they want, so starting a
+                    //     run stays with Super Admin and with the scheduler, which cannot be asked
+                    //     twice. Reading, exporting and acting on the result is Admin's.
+                    //
+                    //   · `view_logs` reads the raw findings, which name tables and columns. That
+                    //     is a map of the database rather than a verdict about it, and `view`
+                    //     already answers the question an administrator has.
+                    PermissionRegistry::permissionNamesFor('integrity_checks', [
+                        Ability::Create,
+                        Ability::ViewLogs,
+                    ]),
                 ),
             ],
             [
@@ -319,6 +336,20 @@ class RoleSeeder extends Seeder
                         'project_payments',
                         'payment_reversals',
                         'wallet_reconciliation',
+                    ]),
+                    // phase-24-25 4.3. The wallet and constraint proof is an accounting artefact,
+                    // not an IT one: it is the evidence behind 120, and the person who has to stand
+                    // behind a commission figure is the person who should be able to pull the run
+                    // that says it reconciles - and to export it, because evidence that cannot
+                    // leave the screen is not much use in a dispute.
+                    //
+                    // Reading only. `create` is withheld for the same reason it is withheld from
+                    // Admin, and 9's policy narrows what the Accountant sees to the financial
+                    // suites, so a constraint check over HR tables is not theirs to read.
+                    PermissionRegistry::permissionNamesFor('integrity_checks', [
+                        Ability::ViewAny,
+                        Ability::View,
+                        Ability::Export,
                     ]),
                 ),
             ],

@@ -56,6 +56,23 @@ return [
             'report' => false,
         ],
 
+        /*
+        | phase-24-25 5.1 - where an archive lands.
+        |
+        | `serve` is off and `throw` is on, for the same two reasons `private` sets them: no
+        | framework route may ever hand out a database dump, and a backup write that fails must be
+        | a loud 500 rather than a silent false that gets reported as a successful run. The
+        | directory is also named in `backup.exclude_paths`, so a file backup never contains the
+        | backups - which is how an archive quietly doubles in size every week.
+        */
+        'backups' => [
+            'driver' => 'local',
+            'root' => storage_path('app/backups'),
+            'serve' => false,
+            'throw' => true,
+            'report' => false,
+        ],
+
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),

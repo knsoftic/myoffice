@@ -61,7 +61,8 @@ final class SettingsFormRoundTripTest extends TestCase
      *
      * Spelled out rather than counted: the value of the assertion is that a group cannot start
      * being round-tripped, or stop being round-tripped, without somebody deciding it should.
-     * `support` arrived with Phase 22 and `reports` with Phase 23.
+     * `support` arrived with Phase 22, `reports` with Phase 23, and `backup` and `ops` with
+     * phase-24-25 §5.1 / §5.2.
      */
     #[Test]
     public function the_registry_declares_the_groups_this_suite_walks(): void
@@ -70,7 +71,7 @@ final class SettingsFormRoundTripTest extends TestCase
             [
                 'company', 'branding', 'appearance', 'localization', 'contact', 'social', 'seo', 'mail',
                 'website', 'collaborator', 'projects', 'institute', 'support', 'finance', 'hr',
-                'security', 'crm', 'maintenance', 'reports',
+                'security', 'crm', 'maintenance', 'reports', 'backup', 'ops',
             ],
             array_keys(self::groupProvider()),
         );

@@ -223,7 +223,52 @@ final class PermissionRegistry
                 'icon' => 'server-stack',
                 'is_core' => true,
                 'sort' => 90,
-                'abilities' => self::merge(self::READ, [Ability::Create, Ability::Delete, Ability::Download]),
+                // phase-24-25 4.2 adds the two abilities Phase 1's preset did not have.
+                //
+                // `Ability::Restore` already existed for soft-delete restore, and here it carries a
+                // second meaning: restoring FROM a backup. The two can never be confused, because
+                // an ability is scoped by its module and `backups` has no soft-deletable model -
+                // `backups.restore` can only ever mean the one thing. Stated so nobody adds a
+                // `backups.restore_backup` synonym to disambiguate what is already unambiguous.
+                //
+                // `Ability::ViewLogs` reads the raw dump and prune output. It is separate from
+                // `view` because that output names tables and file paths; it never carries row data,
+                // but knowing the shape of a database is still not the same right as reading the
+                // register of what was backed up when.
+                //
+                // `delete` prunes an archive FILE early. It never removes a `backup_runs` row, and
+                // it refuses the newest usable database backup - a retention policy that can be
+                // talked into deleting the only copy is not a retention policy.
+                'abilities' => self::merge(
+                    self::READ,
+                    [Ability::Create, Ability::Delete, Ability::Download],
+                    self::RESTORE,
+                    self::LOGS,
+                ),
+            ],
+            // phase-24-25 4.1. Both are `is_core = false` on purpose, and the reason is not
+            // squeamishness: a business that has decided it does not want an operations screen in
+            // its sidebar should be able to say so. Hiding the screen hides nothing that matters,
+            // because the proofs are console commands and the scheduler keeps running them - see
+            // the note on the module gate below.
+            'system_health' => [
+                'name' => 'System Health',
+                'group' => ModuleGroup::System,
+                'icon' => 'activity',
+                'is_core' => false,
+                'sort' => 91,
+                'abilities' => self::merge(self::READ, self::LOGS, [Ability::Export]),
+            ],
+            'integrity_checks' => [
+                'name' => 'Integrity Checks',
+                'group' => ModuleGroup::System,
+                'icon' => 'shield-check',
+                'is_core' => false,
+                'sort' => 92,
+                // `create` is the right word for running a check: a run is a record that gets
+                // written, not a setting that gets changed. `view_logs` reads the raw findings,
+                // which name tables and columns; `view` is the verdict and the counts.
+                'abilities' => self::merge(self::READ, [Ability::Create, Ability::Export], self::LOGS),
             ],
             'global_search' => [
                 'name' => 'Global Search',
@@ -1666,6 +1711,15 @@ final class PermissionRegistry
      * @var array<string, list<string>>
      */
     private const DEPENDS_ON = [
+        // phase-24-25 §4.1 — both empty, and deliberately so. An integrity check proves things
+        // about modules that may themselves be switched off, and a health probe reports on a
+        // system regardless of which of its parts a business uses. A dependency edge here would
+        // mean "this screen is meaningless while that module is off", and the opposite is true:
+        // the moment a module goes dark is the moment somebody wants to know the money behind it
+        // is still intact.
+        'system_health' => [],
+        'integrity_checks' => [],
+
         // Software house — phase-05, phase-06.
         'projects' => ['clients'],
         'project_milestones' => ['projects'],

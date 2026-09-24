@@ -469,6 +469,23 @@ final class SettingsRegistry
                 'description' => 'Report defaults, export limits and retention, the global search palette, and what the audit trail treats as sensitive.',
                 'sort' => 125,
             ],
+            // phase-24-25 5.1. Before Operations, because what a backup is worth is decided here
+            // and whether anything is alive is decided there.
+            'backup' => [
+                'label' => 'Backup & Restore',
+                'icon' => 'archive',
+                'description' => 'Where archives are written, how often, how long they are kept, what is verified, and what an operator must type before a restore.',
+                'sort' => 128,
+            ],
+            // phase-24-25 5.2. Last, after Reports: the tab an operator opens and an administrator
+            // never does. Every key in it answers one of two questions - is the system alive, and
+            // would anybody find out if it were not.
+            'ops' => [
+                'label' => 'Operations',
+                'icon' => 'gauge',
+                'description' => 'Health checks, heartbeats, slow queries, error reporting, log retention and the deployed version.',
+                'sort' => 130,
+            ],
         ];
 
         $resolved = [];
@@ -712,9 +729,22 @@ final class SettingsRegistry
     }
 
     /**
-     * The one cross-field rule the per-field rules cannot express: a commission rate is a
-     * percentage — at most 100 — whenever its sibling `*_type` key says `percentage`, and an amount
-     * otherwise.
+     * The cross-field rules the per-field rules cannot express.
+     *
+     * Three of them, and each is here because a rule string genuinely cannot say it:
+     *
+     *   · a commission rate is a percentage — at most 100 — whenever its sibling `*_type` key says
+     *     `percentage`, and an amount otherwise;
+     *
+     *   · the environment file may travel only in an encrypted archive (phase-24-25 §5.1, HD-8).
+     *     `prohibited_unless` is the rule that looks right and is not: it refuses a field that is
+     *     *present*, and an unticked checkbox posts `false`, which is present — so it refused every
+     *     save of the backup form, ticked or not. What must be refused is the **value**;
+     *
+     *   · the restore scratch database may not be the live one. That comparison needs the
+     *     connection's configured database name, which no static rule string can reach, and it is
+     *     the one mistake in §6.2 that would be unrecoverable: the weekly restore proof drops the
+     *     scratch database when it finishes.
      *
      * Judged on the **effective** values (submitted where submitted, stored otherwise), and only
      * when one of the pair is being written, so `UpdateSettingsRequest` and `SettingsService`
@@ -763,6 +793,49 @@ final class SettingsRegistry
                 'The %s may not be greater than 100 while the commission type is a percentage.',
                 mb_strtolower((string) ($field['label'] ?? $rate)),
             );
+        }
+
+        if ($group === 'backup') {
+            $errors += self::backupCrossFieldErrors($effective, $submitted);
+        }
+
+        return $errors;
+    }
+
+    /**
+     * phase-24-25 §5.1's two conditions. See the note on {@see self::crossFieldErrors()}.
+     *
+     * @param  callable(string): mixed  $effective
+     * @param  list<string>  $submitted
+     * @return array<string, string>
+     */
+    private static function backupCrossFieldErrors(callable $effective, array $submitted): array
+    {
+        $errors = [];
+
+        $truthy = static fn (mixed $value): bool => filter_var($value, FILTER_VALIDATE_BOOLEAN);
+
+        // An .env holds the application key, the database password and the mail credentials. An
+        // unencrypted archive carrying one turns every copy of that archive - including the offsite
+        // copy - into the whole system.
+        if (
+            (in_array('include_env', $submitted, true) || in_array('encrypt_archives', $submitted, true))
+            && $truthy($effective('include_env'))
+            && ! $truthy($effective('encrypt_archives'))
+        ) {
+            $errors['include_env'] = 'The environment file may only be included in an encrypted archive. '
+                .'Switch on "Encrypt archives" and set an archive password first.';
+        }
+
+        // The weekly restore proof restores into the scratch database and then drops it.
+        if (in_array('restore_scratch_database', $submitted, true)) {
+            $scratch = $effective('restore_scratch_database');
+            $live = config('database.connections.'.config('database.default').'.database');
+
+            if (is_string($scratch) && is_string($live) && strcasecmp(trim($scratch), trim($live)) === 0) {
+                $errors['restore_scratch_database'] = 'The scratch database may not be the live database. '
+                    .'The restore proof drops it when it finishes.';
+            }
         }
 
         return $errors;
@@ -1449,6 +1522,8 @@ final class SettingsRegistry
             'crm' => self::crmFields(),
             'maintenance' => self::maintenanceFields(),
             'reports' => self::reportsFields(),
+            'backup' => self::backupFields(),
+            'ops' => self::opsFields(),
         ];
     }
 
@@ -5270,6 +5345,238 @@ final class SettingsRegistry
                 'span' => 6,
                 'sort' => 80,
             ],
+
+            /*
+            |------------------------------------------------------------------------------------
+            | phase-24-25 5.3 - transport, headers, rate limits, sessions, uploads, proxies.
+            |
+            | None of Phase 2 section 5's eight keys is redefined. Two pairs read as duplicates and
+            | are not:
+            |
+            |   - `session_lifetime` is the idle timeout and stays the only authority for it.
+            |     `session_absolute_lifetime_hours` is a second, independent ceiling: it ends a
+            |     session that has been active all along, which an idle timeout by definition never
+            |     does.
+            |
+            |   - `login_max_attempts` is the lockout count and stays the only authority for it.
+            |     `login_throttle_per_minute` is a rate. RateLimitServiceProvider reconciles them so
+            |     no two screens can show contradictory numbers.
+            |------------------------------------------------------------------------------------
+            */
+
+            // ------------------------------------------------------------------- transport
+            'force_https' => [
+                'label' => 'Require HTTPS',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Redirects http to https and generates https URLs. Ignored on a local '
+                    .'machine, which has no certificate and would redirect into nothing.',
+                'span' => 4,
+                'sort' => 100,
+            ],
+            'hsts_enabled' => [
+                'label' => 'Send HSTS',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                // Readonly on purpose, and it stays readonly until a person edits this line. HSTS
+                // tells every browser to refuse http for a year; switched on before the certificate
+                // works, it locks users out of a site that cannot yet serve them, and nothing on
+                // the server can take it back. That is a deployment decision, so it belongs in
+                // version control rather than behind a checkbox.
+                'readonly' => true,
+                'help' => 'Locked until HTTPS is verified in production. Once sent, browsers refuse '
+                    .'plain http for the whole max-age and no server-side change can undo it.',
+                'span' => 4,
+                'sort' => 110,
+            ],
+            'hsts_max_age' => [
+                'label' => 'HSTS max age',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:300', 'max:63072000'],
+                'default' => 31536000,
+                'suffix' => 'seconds',
+                'help' => 'One year by default. Start low when first enabling HSTS - the value is a '
+                    .'promise the browser keeps even after you change your mind.',
+                'span' => 4,
+                'sort' => 120,
+            ],
+            'hsts_include_subdomains' => [
+                'label' => 'Apply HSTS to subdomains',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Off by default: it covers subdomains that do not exist yet, including '
+                    .'ones that may never get a certificate.',
+                'span' => 12,
+                'sort' => 130,
+            ],
+
+            // ------------------------------------------------------------------- content security
+            'csp_enabled' => [
+                'label' => 'Send a content security policy',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Declares which origins may supply scripts, styles, images and frames. The '
+                    .'policy is built per response with a nonce, never from a static string.',
+                'span' => 4,
+                'sort' => 200,
+            ],
+            'csp_report_only' => [
+                'label' => 'Report violations without blocking',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                // Report-only first is not timidity: a policy that blocks before anybody has read a
+                // report breaks a working screen to protect against nothing in particular.
+                'help' => 'On by default. Run report-only until the report log is clean, then switch '
+                    .'to enforcing - the go-live checklist does exactly that.',
+                'span' => 4,
+                'sort' => 210,
+            ],
+            'frame_ancestors' => [
+                'label' => 'Who may frame this site',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string'],
+                'options' => [
+                    'none' => 'Nobody',
+                    'self' => 'This site only',
+                ],
+                'default' => 'none',
+                'help' => 'There is no third option. An admin panel inside somebody else frame is a '
+                    .'clickjacking target, and no feature here needs to be embedded.',
+                'span' => 4,
+                'sort' => 220,
+            ],
+            'csp_report_uri' => [
+                'label' => 'Send violation reports to',
+                'type' => self::TYPE_URL,
+                'rules' => ['nullable', 'url', 'max:255'],
+                'default' => null,
+                'help' => 'Left empty, violations are logged locally. The endpoint is rate-limited '
+                    .'and the body is capped, because a report endpoint is an unauthenticated one.',
+                'span' => 12,
+                'sort' => 230,
+            ],
+
+            // ------------------------------------------------------------------- rate limits
+            'login_throttle_per_minute' => [
+                'label' => 'Sign-in attempts per minute',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:30'],
+                'default' => 5,
+                'help' => 'A rate, not the lockout count above: this slows a guessing run down, '
+                    .'while Failed sign-in attempts allowed decides when the account closes.',
+                'span' => 3,
+                'sort' => 300,
+            ],
+            'global_write_throttle_per_minute' => [
+                'label' => 'Writes per minute, per user',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:30', 'max:6000'],
+                'default' => 120,
+                'help' => 'Every authenticated POST, PUT, PATCH and DELETE. High enough that no real '
+                    .'person reaches it, low enough that a script does.',
+                'span' => 3,
+                'sort' => 310,
+            ],
+            'export_throttle_per_minute' => [
+                'label' => 'Exports per minute, per user',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:120'],
+                'default' => 10,
+                'help' => 'An export reads far more rows than a screen does, so it is limited '
+                    .'separately from ordinary writes.',
+                'span' => 3,
+                'sort' => 320,
+            ],
+            'print_throttle_per_minute' => [
+                'label' => 'Print views per minute, per user',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:120'],
+                'default' => 20,
+                'span' => 3,
+                'sort' => 330,
+            ],
+
+            // ------------------------------------------------------------------- sessions
+            'session_absolute_lifetime_hours' => [
+                'label' => 'End any session after',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:720'],
+                'default' => 24,
+                'suffix' => 'hours',
+                'help' => 'Counted from sign-in and enforced however active the session has been - '
+                    .'which is the case the idle timeout above can never catch.',
+                'span' => 4,
+                'sort' => 400,
+            ],
+            'session_single_device' => [
+                'label' => 'One device at a time',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'On, a new sign-in ends every other session for that account. Off, a person '
+                    .'may stay signed in on a phone and a desktop at once.',
+                'span' => 4,
+                'sort' => 410,
+            ],
+            'password_history_count' => [
+                'label' => 'Refuse the last',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:10'],
+                'default' => 3,
+                'suffix' => 'passwords',
+                'help' => 'A forced password change that lets somebody set the same password again '
+                    .'has changed nothing. 0 turns the check off.',
+                'span' => 4,
+                'sort' => 420,
+            ],
+
+            // ------------------------------------------------------------------- uploads
+            'upload_blocked_extensions' => [
+                'label' => 'Never-accepted extensions',
+                'type' => self::TYPE_JSON,
+                'rules' => ['required', 'array', 'min:1'],
+                'item_rules' => ['*' => ['required', 'string', 'max:16', 'regex:/^[a-z0-9]+$/']],
+                // The floor is NEVER_UPLOADABLE_EXTENSIONS, a constant no setting can lower. This
+                // list adds to it: svg (it carries script), and env (it carries credentials).
+                'default' => [...self::NEVER_UPLOADABLE_EXTENSIONS, 'svg', 'env'],
+                'help' => 'Checked as well as each endpoint own allowlist, against the whole filename '
+                    .'and every dot-segment of it, so archive.php.jpg is refused. Removing an entry '
+                    .'here cannot un-block one the code blocks outright.',
+                'span' => 12,
+                'sort' => 500,
+            ],
+            'upload_require_mime_match' => [
+                'label' => 'Sniff every upload',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                // Readonly, and with no plan to change: an extension is a claim the uploader makes
+                // and finfo is the only thing that checks it. There is no legitimate reason to
+                // accept a file whose contents disagree with its name.
+                'readonly' => true,
+                'help' => 'The real content type must match what the endpoint accepts. Not editable - '
+                    .'an extension is a claim, and this is the only thing that checks it.',
+                'span' => 6,
+                'sort' => 510,
+            ],
+
+            // ------------------------------------------------------------------- network
+            'trusted_proxies' => [
+                'label' => 'Trusted proxies',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:255'],
+                'default' => null,
+                'help' => 'Comma-separated addresses or CIDR ranges, or * behind a load balancer you '
+                    .'control. Empty means none - and with none, a forwarded IP header is ignored '
+                    .'rather than believed, so a rate limit cannot be evaded by claiming an address.',
+                'span' => 6,
+                'sort' => 600,
+            ],
         ];
     }
 
@@ -6454,6 +6761,652 @@ final class SettingsRegistry
                     .'module is still logged; this decides what the trail opens on.',
                 'span' => 12,
                 'sort' => 320,
+            ],
+        ];
+    }
+
+
+    /**
+     * phase-24-25 5.1 - thirty keys about what a backup is worth.
+     *
+     * **`retention_min_copies` outranks every date.** The five retention windows below describe
+     * what a healthy history looks like; this one describes the floor. A prune job that can be
+     * talked by an unusual calendar into leaving two usable database archives is a prune job that
+     * can be talked into leaving none, so the floor is checked last and wins.
+     *
+     * **`max_storage_gb` fails loudly rather than pruning past policy.** The tempting behaviour on
+     * a full disk is to delete the oldest archive and carry on. That silently converts a storage
+     * problem into a retention problem, and nobody finds out until a restore needs the archive
+     * that was quietly dropped. The run fails, the notification goes out, and a person decides.
+     *
+     * **`include_env` is prohibited unless the archive is encrypted** (HD-8). An `.env` holds the
+     * application key, the database password and the mail credentials; an unencrypted archive
+     * carrying one turns every copy of that archive - including the offsite one, including the one
+     * on somebody laptop - into the whole system.
+     *
+     * **`jobs` and `failed_jobs` are deliberately NOT excluded.** They look like cache tables and
+     * they are not: a queued commission job is money that has been earned and not yet written.
+     * Restoring a database without them loses that work silently, which is the one failure mode a
+     * restore must not have.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private static function backupFields(): array
+    {
+        return [
+            // --------------------------------------------------------------- what and where
+            'enabled' => [
+                'label' => 'Run scheduled backups',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Off stops the scheduled jobs only. A manual backup still works, so this '
+                    .'cannot be the reason there is no archive at all.',
+                'span' => 6,
+                'sort' => 10,
+            ],
+            'disk' => [
+                'label' => 'Write archives to',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string'],
+                'options' => [self::class, 'backupDiskOptions'],
+                'default' => 'backups',
+                'help' => 'The public disk is not offered: a database dump reachable by URL is not a '
+                    .'backup, it is a breach with a schedule.',
+                'span' => 6,
+                'sort' => 20,
+            ],
+
+            // --------------------------------------------------------------- when
+            'database_schedule' => [
+                'label' => 'Database backup',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string'],
+                'options' => [
+                    'off' => 'Never',
+                    'twice_daily' => 'Twice a day',
+                    'daily' => 'Daily',
+                    'weekly' => 'Weekly',
+                ],
+                'default' => 'daily',
+                'span' => 3,
+                'sort' => 100,
+            ],
+            'database_time' => [
+                'label' => 'at',
+                'type' => self::TYPE_TIME,
+                'rules' => ['nullable', 'date_format:H:i', 'required_unless:database_schedule,off'],
+                'default' => '02:30',
+                'span' => 3,
+                'sort' => 110,
+            ],
+            'files_schedule' => [
+                'label' => 'File backup',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['required', 'string'],
+                'options' => [
+                    'off' => 'Never',
+                    'daily' => 'Daily',
+                    'weekly' => 'Weekly',
+                    'monthly' => 'Monthly',
+                ],
+                'default' => 'weekly',
+                'span' => 3,
+                'sort' => 120,
+            ],
+            'files_time' => [
+                'label' => 'at',
+                'type' => self::TYPE_TIME,
+                'rules' => ['nullable', 'date_format:H:i', 'required_unless:files_schedule,off'],
+                'default' => '03:00',
+                'span' => 3,
+                'sort' => 130,
+            ],
+
+            // --------------------------------------------------------------- what goes in
+            'include_paths' => [
+                'label' => 'Back up these paths',
+                'type' => self::TYPE_JSON,
+                'rules' => ['required', 'array', 'min:1'],
+                'item_rules' => ['*' => ['required', 'string', 'max:255', 'not_regex:/\.\./']],
+                'default' => ['storage/app/public', 'storage/app/private'],
+                'help' => 'Repo-relative. Each must exist and sit inside the application directory - '
+                    .'a path that climbs out of it is refused rather than resolved.',
+                'span' => 12,
+                'sort' => 200,
+            ],
+            'exclude_paths' => [
+                'label' => 'Skip these paths',
+                'type' => self::TYPE_JSON,
+                'rules' => ['required', 'array'],
+                'item_rules' => ['*' => ['required', 'string', 'max:255']],
+                'default' => [
+                    'storage/framework',
+                    'storage/logs',
+                    'storage/app/backups',
+                    'node_modules',
+                    'vendor',
+                    '.git',
+                ],
+                'help' => 'The backup directory is on this list on purpose: an archive that contains '
+                    .'last week archive doubles in size every week and restores nothing extra.',
+                'span' => 12,
+                'sort' => 210,
+            ],
+            'excluded_tables' => [
+                'label' => 'Skip these tables',
+                'type' => self::TYPE_JSON,
+                'rules' => ['required', 'array'],
+                'item_rules' => ['*' => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9_]+$/']],
+                'default' => ['cache', 'cache_locks', 'sessions', 'job_batches', 'telescope_entries'],
+                // jobs and failed_jobs look like they belong on this list. See the class note.
+                'help' => 'Caches and sessions only. The job tables are NOT skipped - a queued '
+                    .'commission is money already earned and not yet written.',
+                'span' => 12,
+                'sort' => 220,
+            ],
+
+            // --------------------------------------------------------------- encryption
+            'encrypt_archives' => [
+                'label' => 'Encrypt archives',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Required before an archive may carry the environment file.',
+                'span' => 4,
+                'sort' => 300,
+            ],
+            'archive_password' => [
+                'label' => 'Archive password',
+                'type' => self::TYPE_PASSWORD,
+                // `true`, not `1`. A boolean field reaches the validator as a real bool (the request
+                // casts it), and Laravel compares a dependent value strictly after converting the
+                // literals `true`/`false` - so `required_if:...,1` matches nothing and the rule
+                // would never have fired. Probed against Laravel 12's own Validator.
+                'rules' => ['nullable', 'string', 'min:16', 'max:128', 'required_if:encrypt_archives,true'],
+                'default' => null,
+                'encrypted' => true,
+                // Never echoed, never logged, never in a notification - a password that reaches an
+                // inbox has protected the archive from everyone except whoever reads that inbox.
+                'help' => 'Stored encrypted and never shown again. Losing it loses every archive '
+                    .'written while it was set - keep it where the database is not.',
+                'span' => 4,
+                'sort' => 310,
+            ],
+            'include_env' => [
+                'label' => 'Include the environment file',
+                'type' => self::TYPE_BOOLEAN,
+                // Not `prohibited_unless`: that rule refuses a field that is PRESENT, and a
+                // checkbox posts `false`, which is present - it refused the form whether the box
+                // was ticked or not. The condition is a cross-field one and lives in
+                // crossFieldErrors(), which judges the value rather than its presence.
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Only in an encrypted archive. It holds the application key, the database '
+                    .'password and the mail credentials, so an unencrypted copy is the whole system.',
+                'span' => 4,
+                'sort' => 320,
+            ],
+
+            // --------------------------------------------------------------- retention
+            'retention_keep_all_days' => [
+                'label' => 'Keep every archive for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:90'],
+                'default' => 7,
+                'suffix' => 'days',
+                'span' => 4,
+                'sort' => 400,
+            ],
+            'retention_daily_days' => [
+                'label' => 'Then one a day for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:7', 'max:365'],
+                'default' => 30,
+                'suffix' => 'days',
+                'span' => 4,
+                'sort' => 410,
+            ],
+            'retention_weekly_weeks' => [
+                'label' => 'Then one a week for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:2', 'max:260'],
+                'default' => 12,
+                'suffix' => 'weeks',
+                'span' => 4,
+                'sort' => 420,
+            ],
+            'retention_monthly_months' => [
+                'label' => 'Then one a month for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:120'],
+                'default' => 12,
+                'suffix' => 'months',
+                'span' => 4,
+                'sort' => 430,
+            ],
+            'retention_yearly_years' => [
+                'label' => 'Then one a year for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:0', 'max:25'],
+                'default' => 3,
+                'suffix' => 'years',
+                'help' => '0 means the monthly window is the end of the history.',
+                'span' => 4,
+                'sort' => 440,
+            ],
+            'retention_min_copies' => [
+                'label' => 'Never leave fewer than',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:2', 'max:100'],
+                'default' => 3,
+                'suffix' => 'usable database archives',
+                // Checked last, and it wins. See the class note.
+                'help' => 'A floor the dates above cannot argue with. Whatever the retention windows '
+                    .'work out to, the prune job stops here.',
+                'span' => 4,
+                'sort' => 450,
+            ],
+            'max_storage_gb' => [
+                'label' => 'Storage ceiling',
+                'type' => self::TYPE_DECIMAL,
+                'rules' => ['required', 'numeric', 'min:1', 'max:10000'],
+                // Two decimals, not Money's rate scale of four: this is disk space, not a rate,
+                // and 20.0000 GB reads as a number somebody measured rather than chose.
+                'scale' => 2,
+                // Declared at its scale, like every other decimal default: a seeded '20' and a
+                // saved '20.00' are the same number and different strings, and the round-trip test
+                // is right to call that a moved value.
+                'default' => '20.00',
+                'suffix' => 'GB',
+                'help' => 'On breach the backup job fails and says so. It never prunes past the '
+                    .'policy above to make room - that turns a disk problem into a lost archive.',
+                'span' => 4,
+                'sort' => 460,
+            ],
+
+            // --------------------------------------------------------------- offsite
+            'offsite_disk' => [
+                'label' => 'Copy archives offsite to',
+                'type' => self::TYPE_SELECT,
+                'rules' => ['nullable', 'string'],
+                'options' => [self::class, 'offsiteDiskOptions'],
+                'default' => null,
+                'help' => 'A second disk on different hardware. A backup that lives on the machine '
+                    .'it backs up survives everything except the thing you took it for.',
+                'span' => 6,
+                'sort' => 500,
+            ],
+            'offsite_required_for_go_live' => [
+                'label' => 'Offsite copies are required before go-live',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                // Readonly: turning this off is a written client decision, not a checkbox somebody
+                // ticks the evening before a launch to make a red item go green.
+                'readonly' => true,
+                'help' => 'Locked. Switching it off is a decision the client makes in writing, and '
+                    .'the go-live checklist records who made it.',
+                'span' => 6,
+                'sort' => 510,
+            ],
+
+            // --------------------------------------------------------------- notification
+            'notify_emails' => [
+                'label' => 'Also email',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:500'],
+                'default' => null,
+                'help' => 'Comma-separated. Empty means the in-app notification is the only one, '
+                    .'which is enough only if somebody opens the application every day.',
+                'span' => 6,
+                'sort' => 600,
+            ],
+            'notify_on_success' => [
+                'label' => 'Notify on success',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Off by default. A daily success message is a message people stop reading, '
+                    .'and then they stop reading the failure too.',
+                'span' => 3,
+                'sort' => 610,
+            ],
+            'notify_on_failure' => [
+                'label' => 'Notify on failure',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                // Not switchable. A backup nobody is told failed is a backup that does not exist,
+                // and nobody finds out on a good day.
+                'readonly' => true,
+                'help' => 'Always on, and not switchable. A failure nobody hears about is discovered '
+                    .'on the day it matters most.',
+                'span' => 3,
+                'sort' => 620,
+            ],
+
+            // --------------------------------------------------------------- verification
+            'verify_checksum_daily' => [
+                'label' => 'Check archive checksums daily',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Catches an archive that was truncated or has rotted on disk, which a file '
+                    .'listing cannot tell you.',
+                'span' => 6,
+                'sort' => 700,
+            ],
+            'verify_restore_weekly' => [
+                'label' => 'Restore into a scratch database weekly',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                // The only proof that matters: an archive that has never been restored is an
+                // archive nobody has established can be.
+                'help' => 'The only real proof. An archive that has never been restored is an '
+                    .'archive nobody has established can be.',
+                'span' => 6,
+                'sort' => 710,
+            ],
+            'restore_scratch_database' => [
+                'label' => 'Scratch database',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9_]{1,64}$/'],
+                'default' => 'my_office_restore_test',
+                'help' => 'The weekly proof restores here and drops it afterwards. It is refused if '
+                    .'it names the live database - the one mistake that would be unrecoverable.',
+                'span' => 6,
+                'sort' => 720,
+            ],
+            'restore_confirmation_phrase' => [
+                'label' => 'Restore confirmation phrase',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['required', 'string', 'max:120'],
+                'default' => 'RESTORE {database} {date}',
+                'help' => 'The operator types this, with {database} and {date} filled in, before a '
+                    .'restore runs. Compared exactly, case included - a confirmation you can click '
+                    .'through without reading is not a confirmation.',
+                'span' => 6,
+                'sort' => 730,
+            ],
+
+            // --------------------------------------------------------------- binaries
+            'mysqldump_path' => [
+                'label' => 'mysqldump',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['required', 'string', 'max:255'],
+                'default' => 'C:/xampp/mysql/bin/mysqldump.exe',
+                'help' => 'Checked to exist and to be executable before a run starts, and always '
+                    .'quoted when it is called - the default path contains no space, and the one an '
+                    .'operator types might.',
+                'span' => 6,
+                'sort' => 800,
+            ],
+            'mysql_path' => [
+                'label' => 'mysql',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['required', 'string', 'max:255'],
+                'default' => 'C:/xampp/mysql/bin/mysql.exe',
+                'help' => 'Used by the restore path and by the weekly restore proof.',
+                'span' => 6,
+                'sort' => 810,
+            ],
+        ];
+    }
+
+    /**
+     * Disks an archive may be written to: every configured disk except `public`.
+     *
+     * The exclusion is not a preference. A database dump on the public disk is reachable by URL to
+     * anybody who guesses the filename, and the filename contains a date.
+     *
+     * @return array<string, string>
+     */
+    public static function backupDiskOptions(): array
+    {
+        $options = [];
+
+        foreach (array_keys((array) config('filesystems.disks', [])) as $disk) {
+            $disk = (string) $disk;
+
+            if ($disk === 'public') {
+                continue;
+            }
+
+            $options[$disk] = $disk;
+        }
+
+        return $options;
+    }
+
+    /**
+     * The same list for the offsite copy.
+     *
+     * No explicit "nowhere" option: the field is not required, so the select already renders a
+     * blank placeholder, and an empty string stored where the contract says null is the kind of
+     * difference that only shows up in a condition somebody wrote as `=== null`.
+     *
+     * @return array<string, string>
+     */
+    public static function offsiteDiskOptions(): array
+    {
+        return self::backupDiskOptions();
+    }
+
+    /**
+     * phase-24-25 5.2 - sixteen keys about whether the system is alive.
+     *
+     * **Three are secrets and are stored encrypted** (the health token, the monitoring DSN, the
+     * maintenance bypass). `encrypted` also means never echoed back into the form that edits it,
+     * which is the one screen a secret must not appear on.
+     *
+     * **Two default to null although the contract says "generated".** A registry default is a pure
+     * literal read on every seed run; one that generated a fresh secret would rewrite the row every
+     * time `SettingSeeder` ran, invalidating the token an external monitor already holds. They are
+     * generated once, on first use, by the service that needs them - and regenerating is an act
+     * that gets logged, which a silent re-seed could never be.
+     *
+     * **`health_endpoint_enabled` off means 404, not 403.** A closed door that answers 403 confirms
+     * there is a door, and tells a scanner exactly where to come back to. 404 says nothing.
+     *
+     * **`query_budget_enforced` is declared editable here, and production safety does not depend on
+     * that.** The contract calls it readonly in production, but `readonly` in this registry is a
+     * pure literal that `SettingSeeder` mirrors into `is_readonly` on every run - it cannot vary by
+     * environment without making the seeded database environment-dependent, which D65 forbids. So
+     * the authority is the guard, not the flag: `QueryBudgetGuard` throws only in local and
+     * testing, and logs everywhere else, whatever this key says. A missed `with()` must never 500 a
+     * paying client.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private static function opsFields(): array
+    {
+        return [
+            // ------------------------------------------------------------- the health endpoint
+            'health_check_token' => [
+                'label' => 'Health check token',
+                'type' => self::TYPE_PASSWORD,
+                'rules' => ['nullable', 'string', 'min:32', 'max:128'],
+                'default' => null,
+                'encrypted' => true,
+                'help' => 'Required by /health once set. Generated on first use, 48 characters; '
+                    .'regenerating it is logged, because it is a credential a monitoring agent holds.',
+                'span' => 6,
+                'sort' => 10,
+            ],
+            'health_endpoint_enabled' => [
+                'label' => 'Answer health checks',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Off, /health returns "not found" rather than "forbidden" - a closed door '
+                    .'that announces itself is a door somebody comes back to.',
+                'span' => 6,
+                'sort' => 20,
+            ],
+
+            // ------------------------------------------------------------- heartbeats
+            'scheduler_heartbeat_max_minutes' => [
+                'label' => 'Warn if the scheduler is silent for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:2', 'max:1440'],
+                'default' => 5,
+                'suffix' => 'minutes',
+                // The scheduler is what runs the nightly proofs. One that has stopped does not fail
+                // - it goes quiet, and a sweep that never runs looks exactly like a sweep that
+                // found nothing.
+                'help' => 'The scheduler runs the nightly integrity checks. A stopped scheduler does '
+                    .'not report a failure; it stops reporting at all, which is harder to notice.',
+                'span' => 4,
+                'sort' => 100,
+            ],
+            'queue_heartbeat_max_minutes' => [
+                'label' => 'Warn if the queue is silent for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:2', 'max:1440'],
+                'default' => 10,
+                'suffix' => 'minutes',
+                'help' => 'Queued exports, digests and notifications all stop together when the '
+                    .'worker dies, and none of them raises an error while it is dead.',
+                'span' => 4,
+                'sort' => 110,
+            ],
+            'failed_jobs_alert_threshold' => [
+                'label' => 'Warn at this many failed jobs',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:10000'],
+                'default' => 10,
+                'help' => 'Counted from the failed_jobs table and reported by the health screen and '
+                    .'the daily digest.',
+                'span' => 4,
+                'sort' => 120,
+            ],
+            'uptime_ping_url' => [
+                'label' => 'Ping this after every scheduler run',
+                'type' => self::TYPE_URL,
+                'rules' => ['nullable', 'url', 'max:255'],
+                'default' => null,
+                'help' => 'An external watchdog expecting a ping that stops arriving is the only '
+                    .'thing that notices a server which has gone away entirely.',
+                'span' => 12,
+                'sort' => 130,
+            ],
+
+            // ------------------------------------------------------------- performance
+            'slow_query_ms' => [
+                'label' => 'Log a query slower than',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:20', 'max:60000'],
+                'default' => 250,
+                'suffix' => 'ms',
+                'help' => 'Logged once per request with the route name and the SQL. Bindings are '
+                    .'never logged - they are the row data the query was about.',
+                'span' => 4,
+                'sort' => 200,
+            ],
+            'query_budget_enforced' => [
+                'label' => 'Enforce query budgets',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Development only: a screen over its budget throws instead of logging, so '
+                    .'an N+1 is found before it ships. In production a breach is always logged and '
+                    .'never thrown, whatever this says.',
+                'span' => 8,
+                'sort' => 210,
+            ],
+
+            // ------------------------------------------------------------- retention
+            'log_retention_days' => [
+                'label' => 'Keep log files for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:1', 'max:365'],
+                'default' => 14,
+                'suffix' => 'days',
+                'help' => 'Mirrored into the daily log channel, so changing it here is what changes '
+                    .'how long a log file survives.',
+                'span' => 4,
+                'sort' => 300,
+            ],
+            'integrity_run_retention_days' => [
+                'label' => 'Keep integrity findings for',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:7', 'max:3650'],
+                'default' => 180,
+                'suffix' => 'days',
+                // The run row is never deleted (D19). Only the findings blob is released.
+                'help' => 'Only the detailed findings are released. The verdict and the counts are '
+                    .'kept for ever, and a run that failed keeps its findings for three years.',
+                'span' => 8,
+                'sort' => 310,
+            ],
+
+            // ------------------------------------------------------------- error reporting
+            'error_digest_enabled' => [
+                'label' => 'Send a daily error digest',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => true,
+                'help' => 'Errors by class, failed jobs, backup status, the last reconciliation, '
+                    .'lazy-load violations, slow queries and rate-limit hits, in one message.',
+                'span' => 6,
+                'sort' => 400,
+            ],
+            'error_digest_time' => [
+                'label' => 'Send the digest at',
+                'type' => self::TYPE_TIME,
+                'rules' => ['required', 'date_format:H:i'],
+                'default' => '07:00',
+                'span' => 6,
+                'sort' => 410,
+            ],
+            'error_monitoring_enabled' => [
+                'label' => 'Send errors to an external monitor',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Off, the daily digest is the whole error story. On, exceptions are also '
+                    .'reported as they happen.',
+                'span' => 6,
+                'sort' => 420,
+            ],
+            'error_monitoring_dsn' => [
+                'label' => 'Monitoring DSN',
+                'type' => self::TYPE_PASSWORD,
+                'rules' => ['nullable', 'url', 'max:255'],
+                'default' => null,
+                'encrypted' => true,
+                'help' => 'A DSN carries a project key, so it is stored encrypted and never echoed '
+                    .'back into this form.',
+                'span' => 6,
+                'sort' => 430,
+            ],
+
+            // ------------------------------------------------------------- deployment
+            'maintenance_secret' => [
+                'label' => 'Maintenance bypass token',
+                'type' => self::TYPE_PASSWORD,
+                'rules' => ['nullable', 'string', 'min:16', 'max:128'],
+                'default' => null,
+                'encrypted' => true,
+                'help' => 'Lets an operator open the site from behind the maintenance page and check '
+                    .'a deploy before letting anybody else in. Generated on first use.',
+                'span' => 6,
+                'sort' => 500,
+            ],
+            'app_version' => [
+                'label' => 'Deployed version',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:32'],
+                'default' => null,
+                // Written by the deploy script, never by a person: a version somebody types is a
+                // version that is wrong the first time somebody forgets to.
+                'readonly' => true,
+                'help' => 'Stamped by the deploy script, shown on the health screen and copied onto '
+                    .'every backup, so a restored archive says which release made it.',
+                'span' => 6,
+                'sort' => 510,
             ],
         ];
     }
