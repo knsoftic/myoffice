@@ -9,6 +9,7 @@ use App\DataObjects\Files\FileTarget;
 use App\DataObjects\Files\StoredFile;
 use App\DataObjects\Files\StreamOptions;
 use App\DataObjects\Institute\AssignmentStats;
+use App\DataObjects\Support\AudienceInput;
 use App\Enums\AssignmentStatus;
 use App\Enums\BatchStatus;
 use App\Enums\SubmissionStatus;
@@ -21,6 +22,7 @@ use App\Models\User;
 use App\Services\Core\Concerns\WritesAuditTrail;
 use App\Services\Files\SecureFileService;
 use App\Services\Institute\Exceptions\CourseRuleException;
+use App\Services\Support\NotificationService;
 use App\Support\Money;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
@@ -55,6 +57,7 @@ final class AssignmentService
     public function __construct(
         private readonly SecureFileService $files,
         private readonly BatchEnrollmentService $enrollments,
+        private readonly NotificationService $notifications,
     ) {}
 
     /**
@@ -306,7 +309,7 @@ final class AssignmentService
      */
     public function publish(Assignment $assignment, ?User $actor = null): Assignment
     {
-        return DB::transaction(function () use ($assignment): Assignment {
+        $published = DB::transaction(function () use ($assignment): Assignment {
             $locked = $this->lock($assignment);
 
             if ($locked->deadline_at->isPast()) {
@@ -341,6 +344,34 @@ final class AssignmentService
 
             return $locked->refresh();
         });
+
+        // The batch's students, resolved to logins. `student_portal.assignments` is the event's
+        // `requiredPermission`, so anybody whose portal cannot show assignments is dropped rather
+        // than given a row that links nowhere.
+        $userIds = DB::table('student_batch_enrollments')
+            ->join('students', 'students.id', '=', 'student_batch_enrollments.student_id')
+            ->where('student_batch_enrollments.batch_id', $published->getAttribute('batch_id'))
+            ->whereNull('student_batch_enrollments.deleted_at')
+            ->whereNull('students.deleted_at')
+            ->whereNotNull('students.user_id')
+            ->pluck('students.user_id')
+            ->map(static fn ($id): int => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($userIds !== []) {
+            $this->notifications->dispatch('assignment.published', AudienceInput::of($userIds), [
+                'title' => 'New assignment: '.$published->getAttribute('title'),
+                'body' => $published->getAttribute('deadline_at') === null
+                    ? 'No deadline set.'
+                    : 'Due '.Carbon::parse($published->getAttribute('deadline_at'))->format('j M Y, H:i'),
+                'url' => '/student/assignments/'.$published->getKey(),
+                'assignment_id' => (int) $published->getKey(),
+            ], $actor);
+        }
+
+        return $published;
     }
 
     /**

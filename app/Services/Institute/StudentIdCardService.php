@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Institute;
 
+use App\DataObjects\Support\AudienceInput;
 use App\Enums\IdCardStatus;
 use App\Enums\PrintTemplateType;
 use App\Models\Institute\PrintTemplate;
@@ -14,6 +15,7 @@ use App\Models\User;
 use App\Services\Core\Concerns\WritesAuditTrail;
 use App\Services\Finance\DocumentNumberService;
 use App\Services\Institute\Exceptions\CourseRuleException;
+use App\Services\Support\NotificationService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -51,6 +53,7 @@ final class StudentIdCardService
         private readonly DocumentNumberService $numbers,
         private readonly PrintTemplateService $templates,
         private readonly DocumentPdfRenderer $renderer,
+        private readonly NotificationService $notifications,
     ) {}
 
     /**
@@ -81,7 +84,7 @@ final class StudentIdCardService
             );
         }
 
-        return $this->numbers->assign(
+        $card = $this->numbers->assign(
             'institute.id_card_prefix',
             'institute.id_card_next_number',
             '%05d',
@@ -119,6 +122,22 @@ final class StudentIdCardService
             },
             'uq_sic_number',
         );
+
+        // After the numbering transaction, never inside it: a notification queued in a nested
+        // transaction loses its after-commit callback when the savepoint commits.
+        $studentUser = $card->student?->user;
+
+        if ($studentUser !== null) {
+            $this->notifications->dispatch('idcard.issued', AudienceInput::of($studentUser), [
+                'title' => 'Your student ID card is ready',
+                'body' => sprintf('Card %s. Collect it from the office.', $card->getAttribute('card_number')),
+                'url' => '/student/id-card',
+                'student_id_card_id' => (int) $card->getKey(),
+                'card_number' => $card->getAttribute('card_number'),
+            ], $actor);
+        }
+
+        return $card;
     }
 
     /**

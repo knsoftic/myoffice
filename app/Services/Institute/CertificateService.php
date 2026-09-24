@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Institute;
 
+use App\DataObjects\Support\AudienceInput;
 use App\Enums\CertificateStatus;
 use App\Enums\PrintTemplateType;
 use App\Models\Institute\Certificate;
@@ -13,6 +14,7 @@ use App\Models\User;
 use App\Services\Core\Concerns\WritesAuditTrail;
 use App\Services\Finance\DocumentNumberService;
 use App\Services\Institute\Exceptions\CourseRuleException;
+use App\Services\Support\NotificationService;
 use App\Support\Money;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -56,6 +58,7 @@ final class CertificateService
         private readonly DocumentNumberService $numbers,
         private readonly PrintTemplateService $templates,
         private readonly DocumentPdfRenderer $renderer,
+        private readonly NotificationService $notifications,
     ) {}
 
     /**
@@ -203,7 +206,7 @@ final class CertificateService
 
         $stored = $report;
 
-        return $this->numbers->assign(
+        $issued = $this->numbers->assign(
             'institute.certificate_prefix',
             'institute.certificate_next_number',
             '%05d',
@@ -233,6 +236,56 @@ final class CertificateService
             },
             'uq_ce_number',
         );
+
+        // **After the numbering transaction, not inside it** (INV-22-8, and the nested-transaction
+        // trap `FeeReminderService` fell into): a notification queued inside a nested transaction
+        // loses its after-commit callback when the savepoint commits, so the student would never
+        // have been told and nothing would have said so.
+        //
+        // A certificate with no student login reaches nobody, which `NotificationService` counts
+        // and moves past — a student who has never been given an account is reached in person.
+        $this->announce($issued, 'certificate.generated', [
+            'title' => 'Your certificate is ready',
+            'body' => sprintf(
+                '%s — verify it at any time with the code on the certificate.',
+                $issued->getAttribute('certificate_number'),
+            ),
+            'certificate_id' => (int) $issued->getKey(),
+            'certificate_number' => $issued->getAttribute('certificate_number'),
+        ], $actor);
+
+        return $issued;
+    }
+
+    /**
+     * Tell the student a certificate of theirs has changed hands.
+     *
+     * One method for both events because the audience question is identical — the student the
+     * certificate belongs to — and only the wording differs. Holders of `certificates.view_any` are
+     * added for a revocation, because §10.3 says so and because a revoked certificate is something
+     * the office needs to know has happened, not only the person holding it.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function announce(Certificate $certificate, string $eventKey, array $payload, ?User $actor): void
+    {
+        $studentUser = $certificate->student?->user;
+
+        $audience = $eventKey === 'certificate.revoked'
+            ? AudienceInput::permission('certificates.view_any')
+            : AudienceInput::none();
+
+        if ($studentUser !== null) {
+            $audience = $audience->plus($studentUser);
+        }
+
+        if ($audience->isEmpty()) {
+            return;
+        }
+
+        $this->notifications->dispatch($eventKey, $audience, $payload + [
+            'url' => '/student/certificates',
+        ], $actor);
     }
 
     /**
@@ -256,7 +309,7 @@ final class CertificateService
 
         $actor ??= Auth::user();
 
-        return DB::transaction(function () use ($certificate, $reason, $actor): Certificate {
+        $revoked = DB::transaction(function () use ($certificate, $reason, $actor): Certificate {
             $locked = Certificate::query()->whereKey($certificate->getKey())->lockForUpdate()->firstOrFail();
 
             $locked->forceFill([
@@ -273,6 +326,15 @@ final class CertificateService
 
             return $locked->refresh();
         });
+
+        $this->announce($revoked, 'certificate.revoked', [
+            'title' => 'A certificate has been revoked',
+            'body' => $reason,
+            'certificate_id' => (int) $revoked->getKey(),
+            'certificate_number' => $revoked->getAttribute('certificate_number'),
+        ], $actor);
+
+        return $revoked;
     }
 
     /**

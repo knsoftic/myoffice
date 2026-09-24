@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Institute;
 
 use App\DataObjects\Institute\SheetResult;
+use App\DataObjects\Support\AudienceInput;
 use App\Enums\ExamAttendanceStatus;
 use App\Enums\ExamStatus;
 use App\Models\Institute\Exam;
@@ -14,6 +15,7 @@ use App\Models\Institute\StudentBatchEnrollment;
 use App\Models\User;
 use App\Services\Core\Concerns\WritesAuditTrail;
 use App\Services\Institute\Exceptions\CourseRuleException;
+use App\Services\Support\NotificationService;
 use App\Support\Money;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -52,6 +54,7 @@ final class ExamResultService
         private readonly GradeScaleService $scales,
         private readonly BatchEnrollmentService $enrollments,
         private readonly ExamService $exams,
+        private readonly NotificationService $notifications,
     ) {}
 
     /**
@@ -317,7 +320,7 @@ final class ExamResultService
     {
         $actor ??= Auth::user();
 
-        return DB::transaction(function () use ($exam, $actor): Exam {
+        $published = DB::transaction(function () use ($exam, $actor): Exam {
             $locked = $this->lock($exam);
 
             $roster = $this->roster($locked);
@@ -375,6 +378,35 @@ final class ExamResultService
 
             return $locked->refresh();
         });
+
+        // **Each student with a row, and nobody else** (§10.3). A published result is personal:
+        // telling the whole batch that results are out would be telling each of them something
+        // about everybody else. `student_portal.results` is the event's `requiredPermission`, so a
+        // student whose portal cannot show results is dropped by the service rather than given a
+        // row that links to a 403.
+        //
+        // After the transaction, never inside it.
+        $userIds = DB::table('exam_results')
+            ->join('students', 'students.id', '=', 'exam_results.student_id')
+            ->where('exam_results.exam_id', $published->getKey())
+            ->whereNull('students.deleted_at')
+            ->whereNotNull('students.user_id')
+            ->pluck('students.user_id')
+            ->map(static fn ($id): int => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($userIds !== []) {
+            $this->notifications->dispatch('result.published', AudienceInput::of($userIds), [
+                'title' => 'Your result is out',
+                'body' => (string) $published->getAttribute('name'),
+                'url' => '/student/results',
+                'exam_id' => (int) $published->getKey(),
+            ], $actor);
+        }
+
+        return $published;
     }
 
     /**

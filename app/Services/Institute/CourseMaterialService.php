@@ -7,6 +7,7 @@ namespace App\Services\Institute;
 use App\DataObjects\Files\FileRules;
 use App\DataObjects\Files\FileTarget;
 use App\DataObjects\Institute\TargetResult;
+use App\DataObjects\Support\AudienceInput;
 use App\Enums\CourseResourceType;
 use App\Enums\MaterialAccessAction;
 use App\Enums\MaterialStatus;
@@ -20,6 +21,7 @@ use App\Models\User;
 use App\Services\Core\Concerns\WritesAuditTrail;
 use App\Services\Files\SecureFileService;
 use App\Services\Institute\Exceptions\CourseRuleException;
+use App\Services\Support\NotificationService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -48,6 +50,7 @@ final class CourseMaterialService
 
     public function __construct(
         private readonly SecureFileService $files,
+        private readonly NotificationService $notifications,
     ) {}
 
     /**
@@ -280,7 +283,7 @@ final class CourseMaterialService
     /** §2.28.1. Publishing stamps the date once and never re-stamps it on a later republish. */
     public function publish(CourseMaterial $material, ?User $actor = null): CourseMaterial
     {
-        return DB::transaction(function () use ($material): CourseMaterial {
+        $published = DB::transaction(function () use ($material): CourseMaterial {
             $locked = $this->lock($material);
 
             if ($locked->targets()->doesntExist()) {
@@ -305,6 +308,91 @@ final class CourseMaterialService
 
             return $locked->refresh();
         });
+
+        // **Sharing something nobody is told about is not sharing it** (§79). The audience is the
+        // material's own targets resolved to students with a login; `course_material_targets` is
+        // what the student's library reads, so telling exactly those people is telling exactly the
+        // people who can open it.
+        //
+        // Dispatched after the transaction, like every other notification in this system.
+        $this->announcePublication($published, $actor);
+
+        return $published;
+    }
+
+    /**
+     * Tell the students this material was shared with.
+     *
+     * A re-publish tells them again, and that is deliberate for now: `notified_at` on
+     * `course_material_targets` is the column that would stop it, and stamping it belongs with the
+     * engagement screen that reads it — §10.2 assigns both to `NotifyMaterialAudience`. Until that
+     * listener exists, a second publish is a second announcement, which is the safer of the two
+     * wrong answers: the other one is a material nobody hears about because it was published once
+     * before anybody was targeted.
+     */
+    private function announcePublication(CourseMaterial $material, ?User $actor): void
+    {
+        // **A target is a student, a batch or a course**, so the audience is the union of the three
+        // — a material shared with a batch reaches that batch's students, and reading only
+        // `target_student_id` would tell almost nobody.
+        $targets = DB::table('course_material_targets')
+            ->where('course_material_id', $material->getKey())
+            ->get(['target_type', 'target_student_id', 'target_batch_id', 'target_course_id']);
+
+        if ($targets->isEmpty()) {
+            return;
+        }
+
+        $studentIds = $targets->pluck('target_student_id')->filter()->map(static fn ($id): int => (int) $id)->all();
+        $batchIds = $targets->pluck('target_batch_id')->filter()->map(static fn ($id): int => (int) $id)->all();
+        $courseIds = $targets->pluck('target_course_id')->filter()->map(static fn ($id): int => (int) $id)->all();
+
+        $enrolled = DB::table('student_batch_enrollments')
+            ->whereNull('deleted_at')
+            ->where(function ($query) use ($batchIds, $courseIds): void {
+                $query->whereRaw('1 = 0');
+
+                if ($batchIds !== []) {
+                    $query->orWhereIn('batch_id', $batchIds);
+                }
+
+                if ($courseIds !== []) {
+                    $query->orWhereIn('batch_id', DB::table('batches')
+                        ->whereIn('course_id', $courseIds)
+                        ->whereNull('deleted_at')
+                        ->select('id'));
+                }
+            })
+            ->pluck('student_id')
+            ->map(static fn ($id): int => (int) $id)
+            ->all();
+
+        $studentIds = array_values(array_unique(array_merge($studentIds, $enrolled)));
+
+        if ($studentIds === []) {
+            return;
+        }
+
+        $userIds = DB::table('students')
+            ->whereIn('id', $studentIds)
+            ->whereNull('deleted_at')
+            ->whereNotNull('user_id')
+            ->pluck('user_id')
+            ->map(static fn ($id): int => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($userIds === []) {
+            return;
+        }
+
+        $this->notifications->dispatch('material.published', AudienceInput::of($userIds), [
+            'title' => 'New material: '.$material->getAttribute('title'),
+            'body' => 'It is in your library now.',
+            'url' => '/student/materials/'.$material->getKey(),
+            'course_material_id' => (int) $material->getKey(),
+        ], $actor);
     }
 
     /** Off the students' list. A reason is mandatory — somebody will ask where it went. */
