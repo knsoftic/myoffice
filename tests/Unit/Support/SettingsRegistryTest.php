@@ -28,10 +28,17 @@ use PHPUnit\Framework\TestCase;
  */
 final class SettingsRegistryTest extends TestCase
 {
+    /**
+     * In declaration order, which is also the order the tab rail renders in.
+     *
+     * `support` arrived with Phase 22 and `reports` with Phase 23; both are listed here rather than
+     * the test being relaxed to a count, because the point of asserting the whole array is that a
+     * group cannot appear without somebody deciding it should.
+     */
     private const GROUPS = [
         'company', 'branding', 'appearance', 'localization', 'contact', 'social', 'seo',
-        'mail', 'website', 'collaborator', 'projects', 'institute', 'finance', 'hr', 'security', 'crm',
-        'maintenance',
+        'mail', 'website', 'collaborator', 'projects', 'institute', 'support', 'finance', 'hr',
+        'security', 'crm', 'maintenance', 'reports',
     ];
 
     private const DEFINITION_KEYS = [
@@ -62,7 +69,7 @@ final class SettingsRegistryTest extends TestCase
     }
 
     #[Test]
-    public function the_seventeen_groups_are_declared_with_their_metadata(): void
+    public function every_group_is_declared_with_its_metadata(): void
     {
         $this->assertSame(self::GROUPS, array_keys(SettingsRegistry::groups()));
 

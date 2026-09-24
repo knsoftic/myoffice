@@ -11,7 +11,7 @@
 | **Database** | `my_office` (utf8mb4_unicode_ci) |
 | **Created** | 2026-09-12 |
 | **Last updated** | 2026-09-23 |
-| **Current phase** | PHASE 22 in progress — schema, enums and models in; registries, services and screens ahead |
+| **Current phase** | PHASE 23 done — 33 reports, analytics, the audit trail, global search and exports all shipped and probed. PHASE 24 next |
 
 ---
 
@@ -265,6 +265,11 @@ Queue + scheduler: `php artisan queue:work`, `php artisan schedule:work`.
 | D150 | **A sweep is idempotent at its source or it is not idempotent.** | `withoutOverlapping` stops two runs of a command overlapping; it does nothing about a second run ten minutes later doing the work again. Every Phase 22 sweep therefore carries its guard on the row: `first_response_breached` and `resolution_breached` on a ticket, `reminder_sent_at` on a meeting, `emailed_at` on a notification — each stamped **inside** the transaction that selects the row, with the notification dispatched **after** it commits. That order is the whole thing: stamping after the dispatch re-sends everything on the next run, and dispatching inside the transaction tells somebody about a row a rollback removed. A crash between the two loses one message and never sends two, which is the right way round. The probe is built the same way, and this is the part worth copying: it runs each sweep, asserts what moved, then **runs it again and asserts nothing moved**. Without that second run a sweep that notified on "is it past the target" would pass every test and page the assignee 144 times a day. |
 | D151 | **A screen probe's own plumbing can hide two real defects, and the way to tell is that the symptom moves when you reorder the list.** | The portal screen probe reported the *first* screen of each panel redirecting to `/login`. It was not a permissions bug: `$kernel->handle()` re-resolves the auth guard against that request's fresh session and discards a login made just before it, so whichever screen happened to be first was the one that failed. Reordering the list moved the failure, which is what identified it. A warm-up request per panel fixed it — **and with that noise gone, two genuine 403s were sitting underneath**: `SupportTicketPolicy::viewAny()` had never accounted for portal users, so every portal's ticket list refused while the create form and the detail page beside it worked; and `collaborator_portal.support_tickets` had never been declared at all, though §9.4 gives collaborators tickets in the same breath as meetings and messages. Two rules. **A probe failure that is uniform across a dimension is usually the probe** — four panels failing on the same *position* rather than the same *screen* is not four bugs. And **a policy's `viewAny` and `create` must ask one question in one place**: those two had separate lists of who counts as a portal user, which is exactly how they came to disagree. |
 | D152 | **A notification queued inside a *nested* transaction is silently lost, so every dispatch happens after its transaction returns.** | `NotificationService` now marks every notification `afterCommit` itself rather than trusting each caller to dispatch outside a transaction — `config('queue.connections.*.after_commit')` is false here, so INV-22-8 had been resting entirely on discipline, which is an invariant in name only. Making it real immediately broke the fee reminder, and the reason generalises: **when a savepoint commits, Laravel neither runs that level's after-commit callbacks nor hands them up to the parent — it drops them.** `FeeReminderService` dispatched from inside its own `DB::transaction()`. In production that is the outermost transaction and it would have worked; under any caller that already had one open — a command wrapping a batch, a test, a probe — the student would never have been told, with nothing logged and the reminder row sitting there saying they had been. Every dispatch in the system now happens **after** its service's transaction returns, which is what `TicketService` and `MeetingService` already did and what the six Phase 19-21 triggers were written to do from the start. The rule is not "be careful about nesting": it is **do not dispatch from inside a transaction at all**, because whether you are nested is a property of your caller and you cannot see it. The probes' drain helpers had to learn the same shape — a listener that calls `dispatch()` registers another callback while it runs, so a single drain pass delivers the listener and leaves the notification unsent, which looks exactly like a listener that did nothing. They now drain in passes until nothing new appears. |
+| D153 | **A magnitude column and a signed column are two different questions, and the docblock warning you wrote does not stop you using the wrong one.** | `collaborator_commission_ledger_entries.amount` is always positive; the sign lives in the generated `signed_amount` (`CASE WHEN entry_type = 'credit' THEN amount ELSE -amount END`). I wrote the trait note explaining this and then used `amount` in four reports, so `co.commission_reversals` printed a 2,500 clawback as **+2,500** — reading as earnings — and `co.student_commission` overstated a 14,000 ledger by 5,000, because counting a reversal as a credit swings a total by twice its value. **The fix that generalises is not "be careful": it is a named accessor with the rule in it.** `signedAmount()` exists so the decision has one place to be made and one place to be got wrong, and the sweep asserts the reconciliation — both commission reports together, `co.performance`'s earned column, `SUM(wallet.lifetime_earned)` and `SUM(ledger.signed_amount)` all agreeing — rather than my having checked once. CLAUDE.md §5 already required that wallets be re-derivable by summing the ledger; this is that invariant asserted through the report layer, where it can actually be seen. |
+| D154 | **A filter that answers a financial question by making rows appear and disappear hands back what the withheld column took away.** | §99 lists "has outstanding" as an ungated filter on `sh.clients`. Left that way, somebody without `clients.view_financial` — for whom INV-23-2 has already removed the Invoiced, Paid and Outstanding columns — could set it to Yes, watch the row count, and learn precisely which clients owe money. The same shape appears on `in.courses` (a fee band lets you binary-search the price) and `in.pending_fees`. **The rule: a filter is gated with the column it filters on.** More generally, whenever a control's *effect* is observable, the control needs the permission its output would have needed — hiding a value while leaving the question askable is not hiding it. |
+| D155 | **Reaching an `admin.*` route is about which panel your roles are on, not which permission you hold.** | A student holds `students.view` so the portal can show them their own record. `SearchProvider::urlFor()` checked that ability and generated `/admin/students/…` links for them: the palette looked correct and every result would have 403'd. A permission can be granted to a portal role for portal reasons, so a permission check is the wrong question when the thing being decided is whether somebody can reach a panel at all. `urlFor()` now asks `User::panels()` first. The same reasoning is why a hit the viewer cannot open is rendered **without a link rather than dropped** — filtering it out would make the count disagree with the rows, and somebody searching for a record they know exists would be told there are none, which reads as "no such record" rather than "not for you". |
+| D156 | **An audit trail withholds values; it never withholds rows.** | The obvious implementation of "this reader may not see financial values" hides the row, and the result is not an audit trail: somebody looking at a gap cannot tell whether nothing happened or whether they were not allowed to see what did, and the absence itself is unauditable. §107's rule is that every qualifying row is listed for anybody who may open the trail, with a `financial` row's figures replaced by a marker naming the permission that would lift it. Three consequences worth keeping. **The marker travels into the export**, because a CSV is the one document where an omission is invisible — nobody reading it can tell which cells were filtered. **An encrypted value is `[encrypted]` for everybody**, Super Admin included; the probe asserts the actual secret string appears nowhere. **The module scope is applied in the SQL, not to a page afterwards** — filtering a page makes pagination lie, so the probe asserts the *total* is zero rather than merely that the row is missing. |
+| D157 | **Two concurrent test runs against one database destroy it, and the recovery is not `migrate:fresh`.** | The full suite exceeds ten minutes (D142), so two runs ended up in flight at once; killing them left `my_office_test` with tables that existed and a `migrations` table that disagreed. `migrate:fresh` could not fix it — MariaDB DDL is not transactional (D70), so a half-applied `add_crm_deferred_foreign_keys` had already created `leads_service_id_foreign`, and every retry hit errno 121. `DROP DATABASE` then failed to remove the directory because an orphaned `#sql-*` temp table from an interrupted `ALTER` was still in it. **What worked: drop every table through SQL** (which clears InnoDB's dictionary entries properly, unlike deleting files), **then load a schema-only dump of the dev database and write the `migrations` table from the file list.** Two rules. **Never start a second run against a shared test database** — and because the harness backgrounds anything over ten minutes, that means running the suite one testsuite at a time rather than whole. **A known-good schema dump is a faster recovery than a replay**, because a replay re-runs every non-transactional migration that failed halfway the first time. |
 ---
 
 ## 5. Phase Tracker
@@ -734,13 +739,111 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 | [x] | Portal sidebar entries, re-gated on their subject module so the menu and the route give the same answer |
 | [x] | The six trigger call sites Phases 19-21 owed, each dispatching after its own transaction returns (D152) |
 
-### [ ] PHASE 23 — Reports, analytics, activity log, audit trail, global search, exports
+### [x] PHASE 23 — Reports, analytics, activity log, audit trail, global search, exports
+
+| Done | Deliverable |
+|---|---|
+| [x] | Enums — `ReportGroup`, `ExportStatus`, `SearchEntityType`, `AuditSensitivity`, `ReportColumnType`, `ReportFilterType`, `ChartType`; `ExportFormat` gains `excel` behind `isAvailable()` |
+| [x] | `report_exports` (§2.26) — no soft delete, no blameable, `uuid` the only id in a URL |
+| [x] | Five composite `activity_log` indexes (§2.27) — indexes only, INV-23-5 |
+| [x] | The `attachments` assertion migration — changes nothing, fails loudly if §96's one file table drifts |
+| [x] | The `reports` settings group, 15 keys ([D-23-1]) |
+| [x] | `ReportExport` model — append-only, `expire()` not `delete()` |
+| [x] | `ReportRegistry` (the fourth registry) + `ReportDefinition` + the `Report` base |
+| [x] | `ReportEngine` — §9.5's six steps, in that order |
+| [x] | `ReportExportService`, `ReportExporter`'s excel branch, `BuildReportExport` |
+| [x] | **All 31 §99 reports**, plus `sys.activity_log` and `sys.audit_trail` |
+| [x] | `AnalyticsService` — nine charts, each a delegation |
+| [x] | `ActivityLogService` (§106) and `AuditTrailService` (§107) |
+| [x] | `GlobalSearchRegistry` + eleven providers + `GlobalSearchService` ([D-23-3]) |
+| [x] | `audit_trail` module, `activity_log.print`, the D62 and §4.3 corrections |
+| [x] | 16 routes, 5 controllers, `ReportExportPolicy`, 9 Blade screens, 4 sidebar entries |
+| [x] | `reports:prune-exports`, `reports:warm-caches`, `activity-log:prune`, all scheduled |
+| [x] | Ten read methods added to the services that own them (§6.22's sources) |
+
 ### [ ] PHASE 24 — Security, financial integrity, responsive and performance testing
 ### [ ] PHASE 25 — Deployment preparation (install guide, backups, queue/scheduler, production notes)
 
 ---
 
 ## 6. Change Log
+
+### 2026-09-24 — Phase 23: everything that reads the system, and the sign that would have lied
+
+**33 reports, and every one of them delegates.** `ReportRegistry` is the fourth registry and takes
+the same shape as `DashboardRegistry`: a report is one class dropped into `app/Reports/`, with no
+route, controller or view to edit. `ReportEngine` is §9.5's six steps written out in order, and the
+step that could not live in the engine is step 4 — the engine does not know that a project is scoped
+by membership and a student by branch and course, so the source module's own isolation stays with
+the delegate. Step 6 does live there, and the surviving column keys are passed **into** `run()`
+rather than filtered out of its result: filtering afterwards would still have queried the withheld
+value, cached it, and written it into the file the export job built from that cache.
+
+**The bug that mattered most was a sign convention.** In `collaborator_commission_ledger_entries`,
+`amount` is a magnitude and `signed_amount` is the figure — a 2,500 clawback is stored as
+`amount = 2500.00, entry_type = debit`. I wrote the trait docblock warning about exactly this and
+then used `amount` in four reports anyway. `co.commission_reversals` printed a clawback as
+**+2,500**, reading as earnings, and `co.student_commission` overstated a 14,000 ledger by 5,000,
+because a reversal counted as a credit swings a total by twice its value. The reports now read
+`signedAmount()` and the sweep asserts the reconciliation rather than my having checked once: both
+commission reports together, `co.performance`'s earned column, `SUM(wallet.lifetime_earned)` and
+`SUM(ledger.signed_amount)` all agree. That is CLAUDE.md §5's "wallet balances must always be
+re-derivable by summing the ledger" holding through the report layer.
+
+**`in.pending_fees` was showing nothing while 40,000 was outstanding.** It scoped on
+`due_date BETWEEN`, and every fee in the system has a null due date — so the entire collection desk
+was empty. A balance that is invisible because nobody set a date is exactly the balance nobody
+chases. Undated charges are now always in scope, and when a student has no dated charge at all the
+amount to quote is the whole balance rather than zero, which was the same bug one level down.
+
+**§107 withholds values, never rows.** The obvious implementation hides the row, and an audit trail
+with holes in it is not an audit trail — somebody looking at a gap cannot tell whether nothing
+happened or whether they were not allowed to see what did. A financial row's figures become a marker
+naming the permission that would open them; the row stays, and the marker travels into the exported
+file, where the omission would otherwise be invisible. The probe asserts both halves separately,
+because passing one while failing the other is the plausible failure.
+
+**§108 needed two students with one name to be testable at all.** With a single student in the
+database the rule looks right either way, so the probe creates two inside a rolled-back transaction:
+the student finds exactly themselves, while a Super Admin on the same term finds both. That second
+assertion carries as much weight as the first — without it the test would pass on a search that was
+simply broken. It caught a real leak: a student holds `students.view` so they can read their own
+record in the portal, and that ability alone was enough to generate an `/admin/students/…` link.
+The palette looked correct and every result would have 403'd. Reaching an `admin.*` route is about
+which panel your roles are on, not which permission you hold.
+
+**Three permission defects, two of them pre-existing.** §4.3 says Admin is everything except
+`print_templates.delete`; the seeder's exclusion list never carried it, so every install had it —
+and deleting a template destroys the only record of how already-issued certificates looked. D62 says
+a document counter is advanced by `DocumentNumberService` and nothing else;
+`support.ticket_next_number` was not `readonly`, so an administrator who opened the settings screen
+before a busy hour and saved it afterwards would roll the counter back and hand the next few tickets
+numbers that already exist. Both are corrected in the seeder and, where a seeder cannot revoke (D65),
+by a dated migration.
+
+**Ten read methods were added to the services that own them** rather than built inside the reports:
+`ExamStatisticsService::forBatch/forCourse`, `CourseMaterialService::engagement`,
+`CertificateService::register`, `TicketService::queue`, `TicketSlaService::breaches`,
+`AssignmentService::compliance`, plus `Student::enrollments`, `Course::batches`,
+`Course::enrollments` and `CollaboratorReferral::student`. Four of them turn on a date choice that
+decides whether the figure is honest — certificates count issued and revoked on different dates,
+tickets count created and resolved on different dates, and breaches are counted where the ticket was
+resolved so the rate sits over the tickets it is a rate of.
+
+**Files.** `app/Enums/{ReportColumnType,ReportFilterType,ChartType}.php`,
+`app/DataObjects/{Reporting,Search}/*`, `app/Reports/**` (36 classes),
+`app/Support/{ReportRegistry,GlobalSearchRegistry}.php`,
+`app/Services/{Reporting,Audit,Search}/**`, `app/Search/**` (13 classes),
+`app/Jobs/Reporting/BuildReportExport.php`, `app/Models/Reporting/ReportExport.php`,
+`app/Policies/Reporting/ReportExportPolicy.php`, `app/Http/Controllers/Admin/Reporting/**`,
+`app/Console/Commands/Reporting/**`, `resources/views/admin/{reports,report-exports,analytics,audit-trail,search}/**`,
+`routes/admin.php`, `routes/console.php`, `app/Support/{Sidebar,SettingsRegistry,PermissionRegistry}.php`.
+
+**Migrations.** `2026_09_24_100001_create_report_exports_table`,
+`2026_09_24_100002_add_reporting_indexes_to_activity_log_table`,
+`2026_09_24_100003_assert_attachment_morphs_for_support_tables`,
+`2026_09_24_100004_withdraw_print_template_delete_from_admin`.
+
 
 ### 2026-09-24 — The six triggers, and an invariant that was resting on discipline
 
@@ -2888,6 +2991,16 @@ The two HIGH findings are both real and are being fixed now:
 
 | Date | What was tested | Command / method | Result |
 |---|---|---|---|
+| 2026-09-24 | Phase 23 schema — `report_exports` and the reporting indexes | probe over `information_schema`, both databases | PASS — **107/107** on each: every column type, nullability and default, the four keys and their exact column order, `chk_rx_counts`, the FK's RESTRICT, the five log indexes, and that `activity_log` gained no column. Rollback verified non-destructive first: its 1,649 rows survived, which is what INV-23-5 means in practice |
+| 2026-09-24 | The `reports` settings group | registry probe + HTTP screen probe, rolled back | PASS — **86/86** and **41/41**: fifteen keys with their declared types and defaults, both list defaults checked against their sources rather than a copy, the seeder idempotent and refusing to overwrite a value somebody set, and the tab rendering last in the rail with a save that writes and an invalid payload that is refused without writing |
+| 2026-09-24 | `ReportExport` | behavioural probe, rolled back | PASS — **54/54**: casts, the uuid hook, the guarded columns (a forged payload cannot point the row at somebody else's file), the four self-answers, the three scopes, the delete refusal, and the database's own half — `chk_rx_counts` against a negative count, `uq_rx_uuid` against a duplicate, and the FK refusing to hard-delete a user who has exports |
+| 2026-09-24 | Phase 23 permissions | probe over §4.1/§4.2/§4.3/§4.4, rolled back | PASS — **52/52**: `audit_trail` declared non-core with its dependency, `activity_log.print` added, Admin holding the trail and **not** `print_templates.delete`, §9.4 still holding after a re-seed, and `Gate::before` denying a disabled module's ability to an Admin who holds it while leaving `activity_log` alone |
+| 2026-09-24 | `ReportRegistry` + `ReportEngine` | probe with three throwaway reports, rolled back | PASS — **68/68**: the duplicate-key throw, the derived permission stack, the meta stamp, the cache keyed per viewer, the column strip (a money column **absent** from the row, not blank), the filter strip recorded in meta, `describe()` narrowing with it, the unavailable path, §9.5 steps 1–3, and the three ways an export ends |
+| 2026-09-24 | **All 33 reports** | sweep: plain, every filter set, every alternative date column, `describe()` | PASS — **589/589**. Each report is run three ways because a filter or a date column only executes when somebody uses it, and until then one naming a renamed column is invisible. Includes the money reconciliation: the two commission reports together, `co.performance`, `SUM(wallet.lifetime_earned)` and `SUM(ledger.signed_amount)` all agree |
+| 2026-09-24 | §106 and §107 | probe over hand-written fixtures, rolled back | PASS — **88/88**: a `created` row excluded from the trail, only changed fields in the diff, an encrypted value never printed (the secret string appears nowhere, Super Admin included), a withheld figure marked and named while **the row stays**, the marker reaching the exported file, the module scope applied in SQL so the total is zero rather than the row merely missing, and INV-23-5 asserted by reflection — neither service has a write method |
+| 2026-09-24 | §108 global search | probe with two identically-named students, rolled back | PASS — **98/98**: the student finds exactly themselves while a Super Admin finds both, pasting another student's code finds nothing, the entities setting narrows and never widens, a disabled module drops its provider, a deliberately broken provider is named as unavailable while the other ten answer, and a hit the viewer cannot open is shown **without a link** rather than dropped |
+| 2026-09-24 | Every Phase 23 screen | 16 routes through the HTTP kernel, rolled back | PASS — **97/97**, after two real finds: the base `Controller` in Laravel 12 has no `authorize()` (each controller brings `AuthorizesRequests` itself), and a Phase 1 `ActivityLogController` already owned `/admin/activity-log`, so mine would have shadowed it and was deleted. All 33 report screens render, the CSV export streams with its own headers and its explaining block, and an unknown report key 404s |
+| 2026-09-24 | Unit suite after Phase 23 | `DB_DATABASE=my_office_test php artisan test --testsuite=Unit` | PASS — **1,620 tests / 39,209 assertions**, after three real fixes: `audit_trail` is the first System module deliberately declared switchable (the invariant now names its exceptions rather than being relaxed), the settings-group list had not been updated since Phase 22, and **`support.ticket_next_number` was not `readonly`** — a D62 violation that would let an administrator roll the ticket counter back and hand the next few tickets numbers that already exist |
 | 2026-09-24 | The six Phase 19-21 triggers | probe over the audiences, rolled back | PASS — **16/16**: a targeted student is told and an untargeted one is not, the row names its module and its material, all six keys resolve in the registry, all five owning services still construct, and a dispatch with no audience is a no-op rather than a throw |
 | 2026-09-24 | Institute suite after the triggers | `DB_DATABASE=my_office_test php artisan test tests/Feature/Institute/` | PASS — **600 tests / 20,560 assertions**, 411 s, after injecting `NotificationService` into five Phase 19-21 services |
 | 2026-09-24 | The seven scheduled sweeps | probe with fixtures built to be swept, rolled back | PASS — **41/41**, and every section runs its sweep twice: the second run must move nothing. Covers the SLA booleans, a ticket parked on the customer being left alone, auto-close skipping one the requester answered, the department recount, reminders skipping a decliner, `close-past` leaving a meeting that ended fifteen minutes ago, and a retention of `0` meaning keep-for-ever |

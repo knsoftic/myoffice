@@ -304,14 +304,31 @@ final class PermissionRegistryTest extends TestCase
      * Core means "can never be disabled", so an accidental `is_core` on a business module would
      * make it undisableable for ever. Exactly two families are core:
      *
-     *  1. the System group (phase-01 §4);
+     *  1. the System group (phase-01 §4), **minus the deliberate exceptions below**;
      *  2. the four `*_portal` namespaces. Those are permission *prefixes* for the four non-admin
      *     panels, not feature areas — a single toggle on one of them would make
      *     `student_portal.dashboard` (and the rest) return false for everyone, Super Admin
      *     included, locking every student, teacher, client or collaborator out of their own
      *     panel with a bare 403. The collaborator panel is gated on the real business module
      *     `collaborators` (routes/collaborator.php) instead.
+     *
+     * ## The switchable System modules
+     *
+     * Phase 1 had no System module that anybody would want to turn off, so "System" and "core"
+     * meant the same thing and this test asserted the identity. Phase 23 introduces the first
+     * exception on purpose, and {@see self::SWITCHABLE_SYSTEM_MODULES} is where each one is named
+     * with its reason — a list rather than a relaxed rule, so a *new* System module still has to
+     * be argued for rather than quietly shipping disableable.
      */
+    private const SWITCHABLE_SYSTEM_MODULES = [
+        // phase-19-23 §4.1: "every one `is_core = false`". §107's audit trail is a compliance
+        // feature, and an installation with no compliance reader should be able to switch the
+        // screen off entirely — which a core module can never be. It is also the only System
+        // module with a `depends_on` edge (§4.4: `activity_log`), and a dependency on a module that
+        // can never be disabled would be a declaration with nothing to declare.
+        'audit_trail',
+    ];
+
     #[Test]
     public function exactly_the_system_modules_and_the_portal_namespaces_are_core(): void
     {
@@ -325,14 +342,39 @@ final class PermissionRegistryTest extends TestCase
         );
 
         foreach (PermissionRegistry::modules() as $slug => $definition) {
-            $mustBeCore = $definition['group'] === ModuleGroup::System
+            $mustBeCore = ($definition['group'] === ModuleGroup::System
+                    && ! in_array($slug, self::SWITCHABLE_SYSTEM_MODULES, true))
                 || str_ends_with($slug, '_portal');
 
             $this->assertSame(
                 $mustBeCore,
                 $definition['is_core'],
-                sprintf('%s: is_core must be true exactly for the System group and the *_portal namespaces.', $slug)
+                sprintf(
+                    '%s: is_core must be true for the System group and the *_portal namespaces, '
+                    .'except the modules named in SWITCHABLE_SYSTEM_MODULES.',
+                    $slug
+                )
             );
+        }
+    }
+
+    /**
+     * Every switchable System module must actually be switchable, and must be in the System group.
+     *
+     * The list above is an exception register, and an exception register that drifts from what it
+     * describes is worse than no register: a slug left in it after the module moved group would
+     * quietly excuse the next System module from the rule.
+     */
+    #[Test]
+    public function every_switchable_system_module_is_a_real_non_core_system_module(): void
+    {
+        $modules = PermissionRegistry::modules();
+
+        foreach (self::SWITCHABLE_SYSTEM_MODULES as $slug) {
+            $this->assertArrayHasKey($slug, $modules, sprintf('%s is listed as switchable but is not registered.', $slug));
+            $this->assertSame(ModuleGroup::System, $modules[$slug]['group'], sprintf('%s is listed as a switchable *System* module.', $slug));
+            $this->assertFalse($modules[$slug]['is_core'], sprintf('%s is listed as switchable, so it must not be core.', $slug));
+            $this->assertNotContains($slug, PermissionRegistry::coreSlugs());
         }
     }
 

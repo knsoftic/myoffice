@@ -3158,8 +3158,16 @@ final class SettingsRegistry
                 'type' => self::TYPE_NUMBER,
                 'rules' => ['required', 'integer', 'min:1'],
                 'default' => 1,
-                'help' => 'Locked inside the transaction that issues it, so two tickets raised at the '
-                    .'same moment can never take the same number.',
+                'help' => 'Advanced automatically when a ticket is raised; a number is assigned once '
+                    .'and never reused. Locked inside the transaction that issues it, so two tickets '
+                    .'raised at the same moment can never take the same number. Shown for information only.',
+                // D62: a document counter is advanced by `DocumentNumberService` under a row lock and
+                // by nothing else. Without this the field renders as an editable input, and an
+                // administrator who opened the settings screen before a busy hour and saved it
+                // afterwards would roll the counter backwards - handing the next few tickets numbers
+                // that already exist. The unique index would then refuse them, and raising a ticket
+                // would simply fail for reasons nobody could see.
+                'readonly' => true,
                 'span' => 3,
                 'sort' => 20,
             ],
