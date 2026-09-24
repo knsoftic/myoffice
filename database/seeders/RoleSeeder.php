@@ -216,6 +216,15 @@ class RoleSeeder extends Seeder
                     // decision cosmetic. Grant it deliberately, to a named person, when somebody
                     // actually needs to audit a thread.
                     PermissionRegistry::permissionNamesFor('messages', [Ability::ViewAny]),
+                    // phase-19-23 4.3: Admin is "everything except `print_templates.delete`". A
+                    // print template is the layout every certificate and every ID card is rendered
+                    // through, and `body_html` is powerful enough that 4.1 made it separately
+                    // grantable and separately audited. Deleting one does not just remove a design:
+                    // every certificate issued against it loses the only record of how it looked,
+                    // and a verification page that re-renders from the template has nothing to
+                    // re-render from. Creating, editing and deactivating stay with Admin; the one
+                    // irreversible act is Super Admin's.
+                    PermissionRegistry::permissionNamesFor('print_templates', [Ability::Delete]),
                 ),
             ],
             [

@@ -186,7 +186,28 @@ final class PermissionRegistry
                 'icon' => 'clipboard-document-list',
                 'is_core' => true,
                 'sort' => 70,
-                'abilities' => self::merge(self::READ, self::LOGS, [Ability::Export]),
+                // phase-19-23 4.2: `print` joins the set for the 106 viewer, which is printed as
+                // often as it is exported - an auditor asking what happened on a date wants a page,
+                // not a spreadsheet.
+                'abilities' => self::merge(self::READ, self::LOGS, [Ability::Export, Ability::Print]),
+            ],
+            // phase-19-23 4.1, requirement 107. **A different right from `activity_log`, on the
+            // same table.** The activity log answers "who did what, when"; the audit trail answers
+            // "what was it before, and what is it now" - a commission rate, a collaborator re-link,
+            // a published mark. Those are the rows that matter in a dispute, and somebody may be
+            // given them without being handed the whole operational log, or the other way round.
+            // Keeping them as one permission would mean the compliance reader who needs old/new
+            // values also gets every login and every list view, and the operator who needs the
+            // activity feed also gets everyone's salary history.
+            'audit_trail' => [
+                'name' => 'Audit Trail',
+                'group' => ModuleGroup::System,
+                'icon' => 'finger-print',
+                // Not core: an installation that does not need a compliance reader should be able
+                // to switch the screen off entirely, which a core module can never be.
+                'is_core' => false,
+                'sort' => 75,
+                'abilities' => self::merge(self::READ, self::LOGS, [Ability::Export, Ability::Print]),
             ],
             'login_history' => [
                 'name' => 'Login History',
@@ -1737,6 +1758,16 @@ final class PermissionRegistry
         'meetings' => [],
         'messages' => [],
         'notifications' => [],
+
+        // Reporting - phase-19-23 4.4. The audit trail reads `activity_log`'s table and nothing
+        // else, so switching that module off leaves it with no source; the edge makes the module
+        // screen say so rather than leaving somebody with an empty trail and no explanation.
+        // `reports` deliberately has no edge: each of the 31 reports stacks its own source module's
+        // gate (INV-23-2), and a hub that disappeared because one source was off would take the
+        // other thirty with it. `global_search` likewise - every provider self-gates.
+        'audit_trail' => ['activity_log'],
+        'reports' => [],
+        'global_search' => [],
 
         // Website — phase-03, phase-04. Phase 3 adds no edge: faqs.faq_category_id is nullable (the
         // uncategorised bucket is supported), and a section's menu, CTA block and images are optional
