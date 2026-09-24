@@ -15,6 +15,7 @@ declare(strict_types=1);
 use App\Models\User;
 use App\Support\Format;
 use App\Support\Money;
+use App\Support\Ops\CspBuilder;
 use App\Support\SettingsRepository;
 use App\Support\Sidebar;
 use App\Support\SiteSettings;
@@ -207,5 +208,23 @@ if (! function_exists('sidebar_items')) {
         }
 
         return Sidebar::forUser($user);
+    }
+}
+
+if (! function_exists('csp_nonce')) {
+    /**
+     * This request's Content-Security-Policy nonce (phase-24-25 §6.3).
+     *
+     * Every inline `<script>` in a Blade layout carries `nonce="{{ csp_nonce() }}"`. Without it the
+     * browser refuses to run the script, which is the whole point: a policy that allowed every
+     * inline script would allow an injected one too. SEC-08 scans the views and fails on an inline
+     * script that has no nonce.
+     *
+     * Resolved from the container so the value is the same one the header carries — a second
+     * generator would produce a second nonce and block every script on the page.
+     */
+    function csp_nonce(): string
+    {
+        return app(CspBuilder::class)->nonce();
     }
 }

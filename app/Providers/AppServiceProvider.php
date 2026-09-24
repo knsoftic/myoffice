@@ -221,6 +221,8 @@ use App\Services\Support\NotificationPreferenceService;
 use App\Services\Support\NotificationService;
 use App\Support\ClientPortalRegistry;
 use App\Support\Cms\PublicFormRateLimits;
+use App\Support\Ops\CspBuilder;
+use Illuminate\Support\Facades\View;
 use App\Support\Cms\SectionRegistry;
 use App\Support\Cms\Sections\MarketingSectionTypes;
 use App\Support\Cms\Sitemap\BlogCategorySitemapProvider;
@@ -418,6 +420,12 @@ class AppServiceProvider extends ServiceProvider
         // phase-03 (D22): one cache version stamp and one bump batch per request or queued job.
         $this->app->scoped(CacheVersion::class);
 
+        // phase-24-25 6.3: one CSP nonce per request, and it must be ONE. The header carries the
+        // nonce and every inline script in the layouts stamps it; a fresh builder per resolve would
+        // hand the views a different value from the one the browser was told to accept, and every
+        // inline script on every page would be refused.
+        $this->app->scoped(CspBuilder::class);
+
         // phase-07 §6.1: one calendar per request. WorkCalendarService caches holidays so that resolving a
         // month is one query rather than fifteen hundred; a fresh instance per resolve would give each
         // service its own cache, and a holiday edited mid-request would be stale in one of them.
@@ -528,6 +536,48 @@ class AppServiceProvider extends ServiceProvider
     private function registerPhase04(): void
     {
         PublicFormRateLimits::register();
+
+        /*
+        | phase-24-25 6.3 - the three values every error page needs, shared before any of them
+        | renders.
+        |
+        | A composer rather than the layout's own @php block, because Blade captures a child
+        | template's sections BEFORE the layout runs: errors/419 needs `$errorBack` inside its
+        | @section('actions'), and a variable the layout defines would not exist yet. Computing it
+        | in both places would be two copies of the same-origin guard, and one of them would
+        | eventually be the one somebody forgot.
+        |
+        | Everything here is best-effort. This runs while rendering the page that reports a
+        | failure, and a settings read that throws would replace an error page with a blank one.
+        */
+        View::composer('errors.*', static function ($view): void {
+            try {
+                $name = (string) (setting('company.name') ?: config('app.name', 'My Office'));
+            } catch (Throwable) {
+                $name = (string) config('app.name', 'My Office');
+            }
+
+            try {
+                $brand = (string) (setting('branding.brand_color') ?: '#2563eb');
+            } catch (Throwable) {
+                $brand = '#2563eb';
+            }
+
+            // Same origin only, and never the current URL: `url()->previous()` echoes the Referer
+            // header, which the client chooses. A "go back" button that follows it is an open
+            // redirect on every error page in the application, and one that points at the page you
+            // are already on is a loop.
+            $back = url()->previous();
+            $back = is_string($back) && str_starts_with($back, url('/')) && $back !== url()->current()
+                ? $back
+                : url('/');
+
+            $view->with([
+                'errorAppName' => $name,
+                'errorBrand' => preg_match('/^#[0-9a-fA-F]{6}$/', $brand) === 1 ? $brand : '#2563eb',
+                'errorBack' => $back,
+            ]);
+        });
 
         try {
             DashboardRegistry::registerMany([

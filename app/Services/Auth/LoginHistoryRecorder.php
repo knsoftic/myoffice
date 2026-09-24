@@ -117,8 +117,18 @@ final class LoginHistoryRecorder
 
     /**
      * The user signed out — or was signed out because the account may no longer log in.
+     *
+     * **`$reason` is recorded in the activity entry, not on the history row.** phase-24-25 §2.5
+     * [D-P24-1] gives Phase 24 exactly one migration against tables it does not own, and that
+     * migration may add indexes only — never a column. `login_histories` belongs to Phase 1, so a
+     * `logout_reason` column here would be a Phase 1 request (§13), not something this phase may
+     * take. The reason is still recorded, still greppable and still on the same timeline; it sits
+     * in `activity_log.properties` beside the IP and the account status.
+     *
+     * Today's one caller with a reason is `EnforceSessionLifetime`, which passes
+     * `absolute_timeout`.
      */
-    public function logout(?User $user): ?LoginHistory
+    public function logout(?User $user, ?string $reason = null): ?LoginHistory
     {
         if (! $user instanceof User) {
             return null;
@@ -142,6 +152,7 @@ final class LoginHistoryRecorder
             [
                 'ip' => $context['ip_address'],
                 'status' => $user->status instanceof UserStatus ? $user->status->value : null,
+                'reason' => $this->clamp($reason, 64),
             ],
         );
 

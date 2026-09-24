@@ -136,6 +136,78 @@ final class ConfigureFromSettings
         self::attempt(static function (): void {
             self::applySecurity(self::group('security'));
         });
+
+        self::attempt(static function (): void {
+            self::applyOps(self::group('ops'));
+        });
+    }
+
+    /**
+     * phase-24-25 5.2 - the two `ops` keys that are config rather than a value somebody reads.
+     *
+     * `log_retention_days` reaches `logging.channels.daily.days`, which is the only place the
+     * rotation actually happens: a retention setting nothing applies is a promise on a screen.
+     *
+     * `trusted_proxies` is here rather than in bootstrap/app.php because it is a setting, and the
+     * setting is read from the database - which does not exist yet when the middleware stack is
+     * being assembled. Applied at boot, before any request resolves its client address.
+     *
+     * **An empty proxy list is the safe value and the default.** With no trusted proxy, Laravel
+     * ignores `X-Forwarded-For` entirely, so a client cannot hand itself a fresh rate-limit counter
+     * or a false entry in `login_histories.ip_address` by inventing one (DEP-11). `*` is accepted
+     * because behind a load balancer you control it is correct; it is never a default.
+     *
+     * @param  array<string, mixed>  $settings  the `ops` group, keyed relative to it
+     */
+    public static function applyOps(array $settings): void
+    {
+        $days = $settings['log_retention_days'] ?? null;
+
+        if (is_numeric($days)) {
+            // Clamped for the same reason the session lifetime is: a value written by raw SQL must
+            // not be able to switch rotation off (0) or keep a year of logs on a small disk.
+            Config::set('logging.channels.daily.days', max(1, min(365, (int) $days)));
+        }
+    }
+
+    /**
+     * `security.trusted_proxies` - applied separately because the middleware reads it directly.
+     *
+     * Returns the value in the shape `trustProxies()` wants: `'*'`, a list of addresses, or null
+     * for "trust nothing", which is the default and the safe answer.
+     *
+     * @return string|list<string>|null
+     */
+    public static function trustedProxies(): string|array|null
+    {
+        try {
+            $value = setting('security.trusted_proxies');
+        } catch (\Throwable) {
+            // Read before the database exists - during a migration, in a console command that never
+            // opens a connection. Trusting nothing is the right answer when nothing is known.
+            return null;
+        }
+
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $value = trim($value);
+
+        if ($value === '') {
+            return null;
+        }
+
+        if ($value === '*') {
+            return '*';
+        }
+
+        $proxies = array_values(array_filter(array_map(
+            static fn (string $proxy): string => trim($proxy),
+            explode(',', $value),
+        ), static fn (string $proxy): bool => $proxy !== ''));
+
+        return $proxies === [] ? null : $proxies;
     }
 
     /**

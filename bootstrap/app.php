@@ -3,6 +3,7 @@
 use App\Http\Middleware\CachePublicResponse;
 use App\Http\Middleware\CaptureReferral;
 use App\Http\Middleware\EnsureAdmissionFormOpen;
+use App\Http\Middleware\EnforceSessionLifetime;
 use App\Http\Middleware\EnsureClientContext;
 use App\Http\Middleware\EnsureInvoicePublicLinkEnabled;
 use App\Http\Middleware\EnsureModuleEnabled;
@@ -10,13 +11,23 @@ use App\Http\Middleware\EnsurePanelAccess;
 use App\Http\Middleware\EnsurePublicSiteAvailable;
 use App\Http\Middleware\EnsureSiteModuleEnabled;
 use App\Http\Middleware\EnsureUserIsActive;
+use App\Http\Middleware\ForceHttps;
+use App\Http\Middleware\NoStoreForAuthenticated;
 use App\Http\Middleware\ResolvePreviewMode;
+use App\Http\Middleware\SecurityHeaders;
 use App\Support\Cms\PublicOrigin;
+use App\Support\ConfigureFromSettings;
+use App\Services\Collaborator\Exceptions\DirectLedgerWriteException;
+use App\Services\Collaborator\Exceptions\ImmutableLedgerAttributeException;
+use App\Services\Finance\Exceptions\DirectPaymentWriteException;
+use App\Services\Finance\Exceptions\ImmutablePaymentAttributeException;
 use App\Support\SettingsRegistry;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Database\LazyLoadingViolationException;
 use Illuminate\Session\Middleware\AuthenticateSession;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use Spatie\Permission\Middleware\PermissionMiddleware;
 use Spatie\Permission\Middleware\RoleMiddleware;
@@ -81,6 +92,44 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [AuthenticateSession::class]);
 
         /*
+        | phase-24-25 6.3 - the three global middleware.
+        |
+        | Global rather than per route group, and that is the whole argument for them: a header set
+        | on a group is a header some later phase registers a route outside. Twenty-five phases of
+        | routes is more than anybody can audit by reading, so the default is "every response" and
+        | the exceptions are the ones that have to justify themselves.
+        |
+        | Order matters. ForceHttps is first because a request that should not have been made over
+        | plain HTTP should be refused before anything reads its body. SecurityHeaders and
+        | NoStoreForAuthenticated both decorate the response on the way back out, so they sit
+        | outside everything that produces one - including the error handler, which means a 500
+        | page carries the same headers a 200 does.
+        */
+        $middleware->prepend([
+            ForceHttps::class,
+            SecurityHeaders::class,
+            NoStoreForAuthenticated::class,
+        ]);
+
+        /*
+        | phase-24-25 6.3 - the absolute session ceiling.
+        |
+        | Appended to `web`, immediately after AuthenticateSession, and **never** to `auth`.
+        |
+        | `auth` in this application is a middleware ALIAS, not a group: it resolves to
+        | Illuminate\Auth\Middleware\Authenticate. `appendToGroup('auth', ...)` does not add to
+        | that alias - it CREATES a group of that name, and a group takes precedence over an alias
+        | of the same name when a route's middleware is resolved. Every route declaring
+        | `->middleware(['auth', ...])` would then run this class instead of Authenticate, and
+        | nothing would check whether anybody was signed in at all. It fails silently and
+        | it fails open: the screens still render, for everyone.
+        |
+        | Appending to `web` costs a guest nothing - the middleware returns on its first line when
+        | there is no authenticated user - and it runs after StartSession, which it needs.
+        */
+        $middleware->web(append: [EnforceSessionLifetime::class]);
+
+        /*
         | Review round 2 (phase-03 §6.5, §6.7): the `Host` header is client-chosen, and absolute URLs built
         | from it would otherwise reach pages and feeds that are cached for every visitor. Outside `local`
         | and the test runner, only the application URL's host (and its subdomains) and the host of
@@ -90,8 +139,25 @@ return Application::configure(basePath: dirname(__DIR__))
         */
         $middleware->trustHosts(at: static fn (): array => PublicOrigin::trustedHostPatterns());
 
+        /*
+        | phase-24-25 5.3 / 6.3. `security.trusted_proxies`, resolved lazily so the database is
+        | only asked once a request is being handled.
+        |
+        | **Empty is the default and it is the safe value.** With no trusted proxy Laravel ignores
+        | `X-Forwarded-For` entirely, so a client cannot invent a client address - which would hand
+        | it a fresh rate-limit counter on every request and write a chosen IP into
+        | `login_histories`. Behind a load balancer the header must be believed, and then and only
+        | then this is set (DEP-11 asserts both directions).
+        */
+        $middleware->trustProxies(
+            at: ConfigureFromSettings::trustedProxies(),
+        );
+
         $middleware->alias([
             'active' => EnsureUserIsActive::class,
+            // phase-24-25 6.3. Available by name for a route that needs the ceiling without the
+            // rest of the `auth` stack; the stack itself carries it already.
+            'session.lifetime' => EnforceSessionLifetime::class,
             'module' => EnsureModuleEnabled::class,
             'panel' => EnsurePanelAccess::class,
             // phase-05 §6.9 / D31: every /client route. 403 with an explanatory page when the portal is off,
@@ -136,4 +202,56 @@ return Application::configure(basePath: dirname(__DIR__))
         | registry, never listed by hand.
         */
         $exceptions->dontFlash(SettingsRegistry::secretInputNames());
+
+        /*
+        | phase-24-25 6.3 - the programmer errors that must never look like user errors.
+        |
+        | Each of these is thrown by a model hook that exists to stop a specific mistake: writing a
+        | ledger row outside the service that owns it, editing an amount that has already been paid
+        | against. Reaching one means code somewhere took a shortcut the spine forbids - so it is a
+        | 500 and a loud log line, never a validation message and never a 403. A 403 would read as
+        | "you lack a permission", and no permission exists that would have allowed it.
+        |
+        | They are reported at ERROR with the route attached, because the route is the one thing the
+        | stack trace does not make obvious and the first thing whoever reads the log needs.
+        */
+        $exceptions->report(static function (Throwable $exception): bool {
+            $programmerErrors = [
+                DirectLedgerWriteException::class,
+                ImmutableLedgerAttributeException::class,
+                DirectPaymentWriteException::class,
+                ImmutablePaymentAttributeException::class,
+            ];
+
+            foreach ($programmerErrors as $class) {
+                if ($exception instanceof $class) {
+                    Log::error('Immutability guard tripped: '.$class, [
+                        'route' => Route::currentRouteName() ?? request()->path(),
+                        'message' => $exception->getMessage(),
+                    ]);
+
+                    // Keep the framework's own reporting as well: this line is a summary, not a
+                    // replacement for the trace.
+                    return true;
+                }
+            }
+
+            /*
+            | phase-24-25 6.4. A lazy-load violation is an N+1 that got past review. Model::preventLazyLoading
+            | throws it in local and testing (where it should stop a pull request) and only reports it in
+            | production (where it must never 500 a paying client) - so here it is logged with the route and
+            | the relation, which is exactly what `perf:budget` needs to find the screen that caused it.
+            */
+            if ($exception instanceof LazyLoadingViolationException) {
+                Log::warning('Lazy loading violation', [
+                    'route' => Route::currentRouteName() ?? request()->path(),
+                    'model' => $exception->model,
+                    'relation' => $exception->relation,
+                ]);
+
+                return false;
+            }
+
+            return true;
+        });
     })->create();

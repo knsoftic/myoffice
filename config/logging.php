@@ -1,5 +1,6 @@
 <?php
 
+use App\Logging\RedactSensitive;
 use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\SyslogUdpHandler;
@@ -60,6 +61,7 @@ return [
 
         'single' => [
             'driver' => 'single',
+            'tap' => [RedactSensitive::class],
             'path' => storage_path('logs/laravel.log'),
             'level' => env('LOG_LEVEL', 'debug'),
             'replace_placeholders' => true,
@@ -67,14 +69,20 @@ return [
 
         'daily' => [
             'driver' => 'daily',
+            'tap' => [RedactSensitive::class],
             'path' => storage_path('logs/laravel.log'),
             'level' => env('LOG_LEVEL', 'debug'),
+            // phase-24-25 5.2: `ops.log_retention_days` is the authority at runtime and is
+            // applied by ConfigureFromSettings. This stays as the value used before a
+            // database connection exists - during a migration, or in a command that never
+            // opens one - because a log channel must be configurable without one.
             'days' => env('LOG_DAILY_DAYS', 14),
             'replace_placeholders' => true,
         ],
 
         'slack' => [
             'driver' => 'slack',
+            'tap' => [RedactSensitive::class],
             'url' => env('LOG_SLACK_WEBHOOK_URL'),
             'username' => env('LOG_SLACK_USERNAME', env('APP_NAME', 'Laravel')),
             'emoji' => env('LOG_SLACK_EMOJI', ':boom:'),
@@ -91,11 +99,13 @@ return [
                 'port' => env('PAPERTRAIL_PORT'),
                 'connectionString' => 'tls://'.env('PAPERTRAIL_URL').':'.env('PAPERTRAIL_PORT'),
             ],
+            'tap' => [RedactSensitive::class],
             'processors' => [PsrLogMessageProcessor::class],
         ],
 
         'stderr' => [
             'driver' => 'monolog',
+            'tap' => [RedactSensitive::class],
             'level' => env('LOG_LEVEL', 'debug'),
             'handler' => StreamHandler::class,
             'handler_with' => [
