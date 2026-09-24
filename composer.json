@@ -3,7 +3,10 @@
     "name": "laravel/laravel",
     "type": "project",
     "description": "The skeleton application for the Laravel framework.",
-    "keywords": ["laravel", "framework"],
+    "keywords": [
+        "laravel",
+        "framework"
+    ],
     "license": "MIT",
     "require": {
         "php": "^8.2",
@@ -74,6 +77,17 @@
         ],
         "pre-package-uninstall": [
             "Illuminate\\Foundation\\ComposerScripts::prePackageUninstall"
+        ],
+        "harden": [
+            "@php artisan audit:manifest --check",
+            "@php artisan security:audit",
+            "@php artisan integrity:verify --suite=all",
+            "@php artisan perf:budget --all",
+            "@php artisan a11y:scan",
+            "@php artisan test --stop-on-failure"
+        ],
+        "golive": [
+            "@php artisan golive:check"
         ]
     },
     "extra": {
@@ -91,5 +105,9 @@
         }
     },
     "minimum-stability": "stable",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "scripts-descriptions": {
+        "harden": "The whole Phase 24 gate in one command: manifest drift, the security audit, every integrity suite, the query budgets, the accessibility scan, then the test suite. Ordered cheapest first - composer stops at the first failure, so a drifted manifest costs a second rather than four minutes.",
+        "golive": "Runs every machine-checkable item of the go-live checklist and prints the rest as manual rows. Exits 2 while any blocker is open."
+    }
 }
