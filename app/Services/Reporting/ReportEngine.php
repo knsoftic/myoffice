@@ -279,7 +279,7 @@ final class ReportEngine
         $ttl = (int) setting('reports.cache_ttl_seconds', 300);
 
         if ($ttl <= 0) {
-            return $definition->run($request, $keys);
+            return $definition->run($request, $keys, $user);
         }
 
         $cacheKey = $this->cacheKey($definition, $request, $user);
@@ -291,10 +291,10 @@ final class ReportEngine
                 return $hit->with(['cached' => true]);
             }
         } catch (Throwable) {
-            return $definition->run($request, $keys);
+            return $definition->run($request, $keys, $user);
         }
 
-        $result = $definition->run($request, $keys);
+        $result = $definition->run($request, $keys, $user);
 
         try {
             Cache::put($cacheKey, $result, $ttl);

@@ -23,6 +23,7 @@ use App\Services\Core\Concerns\WritesAuditTrail;
 use App\Services\Files\SecureFileService;
 use App\Services\Institute\Exceptions\CourseRuleException;
 use App\Services\Support\NotificationService;
+use App\Support\DateRange;
 use App\Support\Money;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
@@ -616,6 +617,97 @@ final class AssignmentService
     }
 
     /** The one definition of an assignment's numbers — the teacher screen and Phase 23 both read it. */
+    /**
+     * Submitted / late / missed per batch (phase-19-23 6.22 `assignmentCompliance`).
+     *
+     * **Summed from the counters `recountCaches()` maintains on each assignment**, not recounted
+     * from `assignment_submissions`. Those counters are written whenever a submission arrives, is
+     * graded or is swept as missed, so they are the same numbers the assignment's own page shows -
+     * and recounting would produce a second answer that differs exactly when somebody had amended
+     * a mark or a resubmission had superseded an earlier attempt.
+     *
+     * **"On time" is submitted minus late**, because `submitted_count` includes the late ones: a
+     * student who handed work in after the deadline did submit it. Charting the raw counter as
+     * "on time" would flatter every batch by exactly its late count.
+     *
+     * **Draft assignments are excluded.** An assignment nobody has been given cannot have been
+     * missed, and counting its expected students would invent a compliance problem out of a
+     * teacher's unfinished draft.
+     *
+     * @param  array<string, mixed>  $filters  `course_id`, `batch_id`, `teacher_id`
+     * @return array{rows: list<array<string, mixed>>, totals: array<string, mixed>}
+     */
+    public function compliance(DateRange $range, array $filters = []): array
+    {
+        $query = DB::table('assignments as a')
+            ->leftJoin('batches as b', 'b.id', '=', 'a.batch_id')
+            ->leftJoin('courses as c', 'c.id', '=', 'a.course_id')
+            ->whereNull('a.deleted_at')
+            ->whereNotNull('a.published_at')
+            ->whereBetween('a.assigned_on', [$range->start()->toDateString(), $range->end()->toDateString()]);
+
+        foreach (['course_id' => 'a.course_id', 'batch_id' => 'a.batch_id', 'teacher_id' => 'a.teacher_id'] as $key => $column) {
+            if (! empty($filters[$key])) {
+                $query->where($column, $filters[$key]);
+            }
+        }
+
+        $bucket = 'COALESCE(b.name, c.name, CONCAT("Assignment #", a.id))';
+
+        $rows = [];
+        $totals = ['assignments' => 0, 'expected' => 0, 'submitted' => 0, 'late' => 0, 'missed' => 0, 'graded' => 0];
+
+        $results = $query
+            ->selectRaw($bucket.' as bucket')
+            ->selectRaw(
+                'COUNT(*) as assignments, '
+                .'COALESCE(SUM(a.expected_count), 0) as expected, '
+                .'COALESCE(SUM(a.submitted_count), 0) as submitted_total, '
+                .'COALESCE(SUM(a.late_count), 0) as late, '
+                .'COALESCE(SUM(a.missed_count), 0) as missed, '
+                .'COALESCE(SUM(a.graded_count), 0) as graded'
+            )
+            ->groupByRaw($bucket)
+            ->orderByRaw($bucket)
+            ->get();
+
+        foreach ($results as $row) {
+            $late = (int) $row->late;
+            // On time = submitted - late. See the class note.
+            $onTime = max(0, (int) $row->submitted_total - $late);
+
+            $rows[] = [
+                'bucket' => (string) $row->bucket,
+                'assignments' => (int) $row->assignments,
+                'expected' => (int) $row->expected,
+                'submitted' => $onTime,
+                'late' => $late,
+                'missed' => (int) $row->missed,
+                'graded' => (int) $row->graded,
+            ];
+
+            $totals['assignments'] += (int) $row->assignments;
+            $totals['expected'] += (int) $row->expected;
+            $totals['submitted'] += $onTime;
+            $totals['late'] += $late;
+            $totals['missed'] += (int) $row->missed;
+            $totals['graded'] += (int) $row->graded;
+        }
+
+        // Of those who were expected to hand something in.
+        $totals['compliance_rate'] = $totals['expected'] > 0
+            ? Money::round(
+                Money::mul(
+                    Money::div((string) ($totals['submitted'] + $totals['late']), (string) $totals['expected']),
+                    '100',
+                ),
+                2,
+            )
+            : null;
+
+        return ['rows' => $rows, 'totals' => $totals];
+    }
+
     public function statistics(Assignment $assignment): AssignmentStats
     {
         $this->recountCaches($assignment);
