@@ -171,6 +171,19 @@ return new class extends Migration
             RawSchema::index(self::TABLE, 'idx_me_ends', ['ends_at']);
         }
 
+        // **The plain index comes first, and it is not redundant.** `uq_me_resched` below is unique
+        // on the same column, so MariaDB will happily let the foreign key lean on it - and then
+        // refuse to drop it with error 1553, because a foreign key must always have an index. That
+        // makes `down()` impossible: the rollback drops the unique index and MariaDB says no.
+        //
+        // Giving the column an index of its own leaves the FK something to fall back to, so the
+        // unique one becomes droppable. Ensured on every `up()` rather than only inside `create()`,
+        // so a database migrated before this fix heals itself instead of needing a hand-written
+        // repair (D70: the CREATE is guarded, the constraints are ensured).
+        if (! RawSchema::indexExists(self::TABLE, 'idx_me_resched')) {
+            RawSchema::index(self::TABLE, 'idx_me_resched', ['rescheduled_from_id']);
+        }
+
         if (! RawSchema::indexExists(self::TABLE, 'uq_me_resched', true)) {
             RawSchema::uniqueIndex(self::TABLE, 'uq_me_resched', ['rescheduled_from_id']);
         }
