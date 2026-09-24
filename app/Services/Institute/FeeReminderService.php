@@ -297,8 +297,8 @@ final class FeeReminderService
             ? Money::sub(Money::sub((string) $line->amount, (string) $line->paid_amount), (string) $line->waived_amount)
             : (string) $fee->balance_amount;
 
-        return $this->db->transaction(function () use (
-            $fee, $line, $student, $recipient, $type, $dueDate, $offset, $runUuid, $actor, $outstanding
+        $saved = $this->db->transaction(function () use (
+            $fee, $line, $student, $type, $dueDate, $offset, $runUuid, $actor, $outstanding
         ): StudentFeeReminder {
             $reminder = new StudentFeeReminder;
 
@@ -323,37 +323,45 @@ final class FeeReminderService
                 'created_at' => Carbon::now(),
             ])->save();
 
-            // Phase 22 shipped a registry rather than the two classes §13.3 named, so the reminder
-            // goes out through `NotificationService` — the only thing that reads the student's
-            // preferences, the module gate and the mail master switch (INV-22-7).
-            //
             // The row is written first and unconditionally, because "we decided to chase them" is
             // worth recording on a night nobody could be reached — and the dedupe guard has to hold
-            // across that gap, or the next run chases them twice.
-            $saved = $reminder->refresh();
-
-            if ($recipient !== null) {
-                $this->notifications->dispatch(
-                    $type->notificationEventKey(),
-                    AudienceInput::of($recipient),
-                    [
-                        'title' => $type->isLate() ? 'A fee payment is overdue' : 'A fee payment is due',
-                        'body' => sprintf(
-                            '%s is outstanding, due %s.',
-                            Format::money($outstanding),
-                            $dueDate->format('j M Y'),
-                        ),
-                        'student_fee_id' => (int) $fee->getKey(),
-                        'installment_id' => $line?->getKey(),
-                        'reminder_id' => (int) $saved->getKey(),
-                        'amount_due' => (string) $outstanding,
-                        'due_date' => $dueDate->toDateString(),
-                    ],
-                    $actor,
-                );
-            }
-
-            return $saved;
+            // across that gap, or the next run chases them twice. The notification goes out after
+            // this transaction returns; see the note below the closure.
+            return $reminder->refresh();
         });
+
+        // **Dispatched after the transaction returns, not inside it** (INV-22-7, INV-22-8).
+        //
+        // `NotificationService` marks every notification `afterCommit`, and a notification queued
+        // inside a *nested* transaction loses that callback entirely when the savepoint commits —
+        // it is neither run nor handed up to the parent. In production this path is the outermost
+        // transaction and it would have worked; under any caller that already had one open — a
+        // command wrapping a batch, a test, a probe — the student would simply never have been
+        // told, with nothing logged and the reminder row sitting there saying they had been.
+        //
+        // Sending from out here removes the nesting question altogether, and matches what
+        // `TicketService` and `MeetingService` already do.
+        if ($recipient !== null) {
+            $this->notifications->dispatch(
+                $type->notificationEventKey(),
+                AudienceInput::of($recipient),
+                [
+                    'title' => $type->isLate() ? 'A fee payment is overdue' : 'A fee payment is due',
+                    'body' => sprintf(
+                        '%s is outstanding, due %s.',
+                        Format::money($outstanding),
+                        $dueDate->format('j M Y'),
+                    ),
+                    'student_fee_id' => (int) $fee->getKey(),
+                    'installment_id' => $line?->getKey(),
+                    'reminder_id' => (int) $saved->getKey(),
+                    'amount_due' => (string) $outstanding,
+                    'due_date' => $dueDate->toDateString(),
+                ],
+                $actor,
+            );
+        }
+
+        return $saved;
     }
 }

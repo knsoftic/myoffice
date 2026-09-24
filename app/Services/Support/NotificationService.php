@@ -39,9 +39,11 @@ use Illuminate\Support\Facades\Notification as Notifier;
  * and returns, because a business write must never roll back because the bell was unavailable
  * (§4.4).
  *
- * **Nothing is sent inside the transaction that caused it** (INV-22-8). Everything is queued and
- * `afterCommit`: a receipt emailed for a payment a later failure rolled back is worse than a receipt
- * that arrives a second late.
+ * **Nothing is sent inside the transaction that caused it** (INV-22-8). Everything is queued, and
+ * every notification is marked `afterCommit` **by this class** rather than trusted to the caller or
+ * to `config('queue.connections.*.after_commit')`, which is false here: a receipt emailed for a
+ * payment a later failure rolled back is worse than a receipt that arrives a second late, and an
+ * invariant that depended on every caller remembering would be an invariant in name only.
  *
  * **`mandatory` beats every preference, and the list is three or four events long.** Money leaving a
  * wallet, a revoked certificate, a breached target: the cases where "I was never told" is a dispute.
@@ -121,7 +123,17 @@ final class NotificationService
 
             $notification = $this->build($event, $payload, $actor, $channels);
 
-            // afterCommit, always. `Notification::sendNow()` is never used here (INV-22-8).
+            // **afterCommit, enforced here rather than assumed of the caller** (INV-22-8).
+            // `config('queue.connections.*.after_commit')` is false in this installation, so a
+            // queued job dispatched inside a transaction can be picked up by a worker before that
+            // transaction commits — and a notification about a fee payment a later failure rolled
+            // back is exactly the thing the invariant exists to prevent. Marking the notification
+            // itself makes the guarantee hold for every caller, including one that forgets.
+            if (method_exists($notification, 'afterCommit')) {
+                $notification->afterCommit();
+            }
+
+            // `Notification::sendNow()` is never used: everything goes on the queue.
             Notifier::send([$recipient], $notification);
 
             $sent[] = (int) $recipient->getKey();
