@@ -56,6 +56,16 @@ enum ChartType: string
         };
     }
 
+    public function color(): string
+    {
+        return match ($this) {
+            self::Line, self::Area => 'sky',
+            self::Bar, self::StackedBar => 'indigo',
+            self::Combo => 'violet',
+            self::Pie, self::Doughnut => 'emerald',
+        };
+    }
+
     /** Does this type need a second, right-hand axis? */
     public function hasSecondaryAxis(): bool
     {

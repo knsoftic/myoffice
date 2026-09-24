@@ -83,6 +83,24 @@ class ReportExport extends Model
     ];
 
     /**
+     * The same defaults the columns carry.
+     *
+     * Without these a row straight out of `create()` has a **null** status in memory until somebody
+     * refreshes it, because the insert never named the column and the default was applied by the
+     * database. A caller that checked `$export->status` on the object it was just handed would read
+     * null and conclude the export had no state at all. Restating them here keeps the model and the
+     * schema saying the same thing, which is also what makes `new ReportExport` usable in a test
+     * without a round trip.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'status' => 'queued',
+        'storage_disk' => 'private',
+        'download_count' => 0,
+    ];
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array

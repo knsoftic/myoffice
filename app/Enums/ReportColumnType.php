@@ -56,6 +56,25 @@ enum ReportColumnType: string
     }
 
     /**
+     * The badge tint a column-picker chip is drawn in.
+     *
+     * Money is rose and a percentage is amber, and the difference is not cosmetic: on a picker
+     * listing twenty columns, the ones that carry money are the ones somebody has to think about
+     * before sharing the file, so they are the ones that have to be findable at a glance.
+     */
+    public function color(): string
+    {
+        return match ($this) {
+            self::Text, self::Link => 'slate',
+            self::Number => 'sky',
+            self::Money => 'rose',
+            self::Percent => 'amber',
+            self::Date, self::DateTime => 'violet',
+            self::Badge => 'emerald',
+        };
+    }
+
+    /**
      * Does this column need the source module's `view_financial`?
      *
      * Only `Money`. A percentage is not money — a pass rate and an attendance percentage are both

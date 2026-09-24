@@ -60,6 +60,18 @@ enum ReportFilterType: string
         };
     }
 
+    public function color(): string
+    {
+        return match ($this) {
+            self::Select, self::Multiselect => 'sky',
+            self::Date, self::DateRange => 'violet',
+            self::NumberRange => 'amber',
+            self::Text => 'slate',
+            self::Boolean => 'emerald',
+            self::Entity => 'indigo',
+        };
+    }
+
     /** Does the control need a list of options to render? */
     public function needsOptions(): bool
     {

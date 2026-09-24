@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Reporting;
 
 use App\Enums\ExportFormat;
+use App\Services\Reporting\Exceptions\ExportFormatUnavailableException;
 use App\Support\CsvWriter;
 use App\Support\ReportResult;
 use Illuminate\Contracts\View\Factory as ViewFactory;
@@ -44,6 +45,10 @@ final class ReportExporter
     ): StreamedResponse {
         return match ($format) {
             ExportFormat::Csv => $this->csv($result, $name),
+            // phase-19-23 3.5: Phase 23 added the `excel` case to the enum, so this match has to
+            // answer for it or the first Excel request becomes an UnhandledMatchError. It is the
+            // same column set through the same generator - see self::excel().
+            ExportFormat::Excel => $this->excel($result, $name),
             // `print` and `pdf` render the same Blade. A PDF that had drifted from the printed page
             // would be a second document claiming to be the first.
             ExportFormat::Print, ExportFormat::Pdf => $this->rendered($result, $format, $name, $printView, $context),
@@ -84,6 +89,75 @@ final class ReportExporter
 
                 yield from $this->metaRows($result);
             },
+        );
+    }
+
+    /**
+     * A single-sheet workbook (phase-19-23 6.21).
+     *
+     * **Deliberately the same column set and the same generator as the CSV.** Two export paths that
+     * built their own row lists would drift, and the first thing to drift would be whether a
+     * withheld money column is absent or blank - which is the one difference INV-23-2 says must
+     * never appear.
+     *
+     * **A missing package is refused by name, not by a 500.** The screen never offers this format
+     * unless `reports.excel_enabled` is on *and* a writer is installed
+     * ({@see ExportFormat::isAvailable()}), so arriving here without one means a hand-built URL or a
+     * queued export whose package was removed while it waited. Either way the person deserves a
+     * sentence rather than a stack trace.
+     */
+    private function excel(ReportResult $result, string $name): StreamedResponse
+    {
+        if (! ExportFormat::Excel->isAvailable()) {
+            throw ExportFormatUnavailableException::for(ExportFormat::Excel);
+        }
+
+        // The writer is resolved by name rather than imported: importing a class an installation may
+        // not have is how an optional dependency becomes a required one at autoload time.
+        $writer = 'OpenSpout' . chr(92) . 'Writer' . chr(92) . 'XLSX' . chr(92) . 'Writer';
+
+        if (! class_exists($writer)) {
+            // `isAvailable()` also accepts maatwebsite/excel, which wraps this one; if neither
+            // concrete writer is present the switch was on without the package behind it.
+            throw ExportFormatUnavailableException::for(ExportFormat::Excel);
+        }
+
+        $columns = $result->columns();
+        $filename = $this->filename($result, ExportFormat::Excel, $name);
+
+        return new StreamedResponse(
+            function () use ($result, $columns, $writer): void {
+                $sheet = new $writer();
+                $sheet->openToFile('php://output');
+
+                $row = 'OpenSpout' . chr(92) . 'Common' . chr(92) . 'Entity' . chr(92) . 'Row';
+
+                $sheet->addRow($row::fromValues(
+                    array_map(static fn (string $c): string => ucfirst(str_replace('_', ' ', $c)), $columns),
+                ));
+
+                foreach ($result->rows as $line) {
+                    $sheet->addRow($row::fromValues(array_map(
+                        static fn ($value): string => is_bool($value) ? ($value ? 'yes' : 'no') : (string) $value,
+                        array_intersect_key($line, array_flip($columns)),
+                    )));
+                }
+
+                // The same explaining block the CSV carries, so a workbook read six months later
+                // says what it covered and what it left out.
+                foreach ($this->metaRows($result) as $meta) {
+                    $sheet->addRow($row::fromValues(array_map('strval', $meta)));
+                }
+
+                $sheet->close();
+            },
+            200,
+            [
+                'Content-Type' => ExportFormat::Excel->mime(),
+                'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+                'X-Content-Type-Options' => 'nosniff',
+                'Cache-Control' => 'private, no-store',
+            ],
         );
     }
 
