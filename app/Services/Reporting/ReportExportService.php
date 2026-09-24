@@ -181,7 +181,7 @@ final class ReportExportService
             ->orderBy('id')
             ->chunkById(200, function ($exports) use (&$removed): void {
                 foreach ($exports as $export) {
-                    if ($this->forget($export)) {
+                    if ($this->expire($export)) {
                         $removed++;
                     }
                 }
@@ -191,13 +191,18 @@ final class ReportExportService
     }
 
     /**
-     * Drop one export's bytes and mark the row.
+     * Drop one export's bytes and mark the row expired.
+     *
+     * Public because it is also what "delete this export" means on the register: §2.26 keeps the
+     * row for ever, so the only thing a person can actually remove is the file. Naming the method
+     * `expire` rather than `delete` is the point — a caller reaching for `delete()` and finding
+     * this instead learns the rule from the signature.
      *
      * The row is updated **whether or not** the file was there: a file already gone still means the
      * export has expired, and leaving the row `completed` would have the sweep pick it up again
      * every night for ever.
      */
-    private function forget(ReportExport $export): bool
+    public function expire(ReportExport $export): bool
     {
         $deleted = false;
 
