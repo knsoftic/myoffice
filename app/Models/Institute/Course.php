@@ -184,6 +184,15 @@ class Course extends Model
      *
      * @return list<string>
      */
+    /**
+     * The one gap `CourseService::publishWithoutOutline()` is allowed to waive.
+     *
+     * Named rather than typed twice: the waiver matches on this exact string, and a gap message
+     * reworded here while the waiver still looked for the old wording would silently stop waiving
+     * anything — the import would refuse every course and the reason would be a spelling change.
+     */
+    public const GAP_OUTLINE = 'at least one module';
+
     public function publishingGaps(): array
     {
         $gaps = [];
@@ -209,7 +218,7 @@ class Course extends Model
         // Counted live, never from `modules_count`: the cache is the thing most likely to be stale on
         // a course somebody is about to publish for the first time.
         if ($this->modules()->count() === 0) {
-            $gaps[] = 'at least one module';
+            $gaps[] = self::GAP_OUTLINE;
         }
 
         return $gaps;

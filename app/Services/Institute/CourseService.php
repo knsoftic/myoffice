@@ -174,6 +174,43 @@ final class CourseService
         return $this->transition($course, CourseStatus::Published, null, $actor);
     }
 
+    /**
+     * Publish a course that satisfies every gate **except** the outline.
+     *
+     * **The waiver is one gap wide, and the name says which.** Every other condition still holds:
+     * no name, no slug, no category or a zero fee still refuses, because each of those makes a page
+     * that is actually wrong rather than merely thin.
+     *
+     * The outline is different, and the templates say so. `site/courses/index` never mentions a
+     * module — the listing is name, duration, fee and category. `site/courses/show` wraps the whole
+     * syllabus block in `@if ($payload->hasOutline())`, so a course without one renders a clean page
+     * with that section simply absent. **The guard is stricter than the page it protects.**
+     *
+     * That gap matters for a six-month diploma nobody can evaluate without a syllabus. It matters
+     * much less for "Adobe Photoshop, one month, Rs 8,000", where somebody searching for exactly
+     * that is better served by a real page than by no page at all.
+     *
+     * So this exists for a catalogue import, is never called by the admin screens — which keep the
+     * full gate — and has to be asked for by name. `publish()` remains the default and the honest
+     * one; this is the deliberate exception, and a deliberate exception should be hard to take by
+     * accident.
+     *
+     * @throws CourseRuleException
+     */
+    public function publishWithoutOutline(Course $course, ?User $actor = null): Course
+    {
+        $gaps = array_values(array_diff($course->publishingGaps(), [Course::GAP_OUTLINE]));
+
+        if ($gaps !== []) {
+            throw CourseRuleException::refuse('status', sprintf(
+                'This course still needs: %s. The outline may be added later; these cannot.',
+                implode(', ', $gaps),
+            ));
+        }
+
+        return $this->transition($course, CourseStatus::Published, null, $actor);
+    }
+
     public function unpublish(Course $course, ?User $actor = null): Course
     {
         return $this->transition($course, CourseStatus::Draft, null, $actor);
