@@ -284,11 +284,47 @@ Add paths to `open_basedir`; do not empty it.
 ### 4.0 Why MariaDB 10.4 and not MySQL 8
 
 The schema is not portable. It uses generated columns, `CHECK` constraints and **nine `BEFORE
-DELETE` triggers** through `App\Support\RawSchema`, and those triggers are the last line under the
-append-only rule (decisions **D16** and **D19**): a ledger row cannot be deleted by any code path,
-*including a `DELETE` typed straight into the database*. Install MariaDB 10.4. If
+DELETE` triggers** through `App\Support\Schema\RawSchema`, and those triggers are the last line
+under the append-only rule (decisions **D16** and **D19**): a ledger row cannot be deleted by any
+code path, *including a `DELETE` typed straight into the database*. Install MariaDB 10.4. If
 `integrity:verify --suite=constraints` later reports missing triggers, GL-20 blocks go-live — and
 it is right to.
+
+> ### The aaPanel App Store item is called "MySQL", and its default is MySQL
+>
+> This is the single most likely way to get the wrong database on this panel. The installer lists
+> MySQL 5.7 / 8.0 **and** MariaDB versions under one "MySQL" entry; if you accept the default you
+> get MySQL, and nothing complains until migration 22 of 190-odd.
+>
+> **Check before you migrate — one query:**
+>
+> ```bash
+> mysql -u root -p -e "SELECT VERSION();"
+> ```
+>
+> | Output looks like | Verdict |
+> |---|---|
+> | `10.4.34-MariaDB` | correct |
+> | `8.0.36` or `5.7.x` | **wrong — stop here**, see below |
+>
+> **The failure signature if you do not check.** Migrations run happily for twenty-one files and
+> then `2026_09_12_070100_create_media_assets_table` dies with:
+>
+> ```
+> SQLSTATE[42S22]: Column not found: 1054 Unknown column 'TABLE_NAME' in 'where clause'
+> SQL: SELECT 1 FROM information_schema.CHECK_CONSTRAINTS
+>      WHERE CONSTRAINT_SCHEMA = ... AND TABLE_NAME = ... AND CONSTRAINT_NAME = ...
+> ```
+>
+> `information_schema.CHECK_CONSTRAINTS` carries a **`TABLE_NAME`** column in MariaDB (since
+> 10.2.22) and **does not** in MySQL 8, where the table has only `CONSTRAINT_CATALOG`,
+> `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME` and `CHECK_CLAUSE`. That error *is* the version check,
+> arriving late. Do not patch the query — the CHECK probe is the small visible part of a schema
+> that assumes MariaDB throughout.
+>
+> **Recovering from it** is in [4.3](#43-if-you-already-migrated-against-mysql). The half-built
+> schema cannot be migrated forward, because MariaDB DDL is not transactional (**D70**) — the
+> twenty-one tables that succeeded are still there and the failed one is partly built.
 
 One more property to know before you migrate: **MariaDB DDL is not transactional** (decision
 **D70**). A migration that fails halfway leaves the tables it already created. It does not roll
@@ -367,6 +403,65 @@ going further.
 
 ---
 
+### 4.3 If you already migrated against MySQL
+
+You will have twenty-one tables, a `migrations` table that lists them, and a twenty-second that is
+partly built. **This cannot be migrated forward.** MariaDB DDL is not transactional (**D70**), so
+the failed migration left behind whatever it had already created, and re-running it collides with
+its own leftovers. If `db:seed` also ran, you additionally have branches, modules, permissions,
+roles, settings and a seeded Super Admin sitting on an incomplete schema.
+
+Nothing here is worth keeping — it is minutes old and contains no real data. Rebuild.
+
+**1. Confirm what you are actually running.**
+
+```bash
+mysql -u root -p -e "SELECT VERSION();"
+```
+
+**2. Install MariaDB 10.4.** In aaPanel → **App Store** → MySQL → uninstall the MySQL build, then
+install **MariaDB 10.4**.
+
+> **This destroys every database on the server, not just this one.** aaPanel replaces the data
+> directory. If anything else lives on this box — another site, a staging schema — dump it first:
+> `mysqldump --all-databases > /root/pre-mariadb.sql`. On a server provisioned for this
+> application alone there is nothing to save.
+
+**3. Recreate the database and the three users** — re-run the whole SQL block from
+[4.1](#41-create-the-database-and-the-three-users). The old users are gone with the old data
+directory.
+
+**4. Replay.**
+
+```bash
+cd /www/wwwroot/knsoftic.com
+sudo -u www /www/server/php/82/bin/php artisan migrate --database=mysql_migration --force
+sudo -u www /www/server/php/82/bin/php artisan db:seed --force
+```
+
+#### If the engine was right and the schema is still half-built
+
+A different situation with the same shape — a migration that failed for its own reason. **Do not
+reach for `migrate:fresh`**: decision **D157** records it failing repeatedly here, because a
+half-applied migration had already created a foreign key and every retry hit errno 121, and
+`DROP DATABASE` then failed on an orphaned `#sql-*` temp table from the interrupted `ALTER`.
+
+What works is dropping every table **through SQL**, which clears InnoDB's data dictionary properly
+rather than leaving files behind:
+
+```sql
+SET FOREIGN_KEY_CHECKS = 0;
+-- generate and run the DROPs:
+SELECT GROUP_CONCAT(CONCAT('DROP TABLE IF EXISTS `', TABLE_NAME, '`') SEPARATOR '; ')
+  FROM information_schema.TABLES WHERE TABLE_SCHEMA = 'knsoftic_erp';
+SET FOREIGN_KEY_CHECKS = 1;
+```
+
+Then replay as in step 4. On a database that already holds real data, this is a restore
+([`RESTORE.md`](RESTORE.md)), not a rebuild.
+
+---
+
 ## 5. Code and configuration
 
 ### 5.1 Get the code
@@ -418,7 +513,23 @@ SESSION_LIFETIME=120
 SESSION_SECURE_COOKIE=true
 QUEUE_CONNECTION=database
 CACHE_STORE=database
+
+# Set these BEFORE db:seed — see the note below.
+SUPERADMIN_EMAIL=<a real address that can receive mail>
+SUPERADMIN_NAME="<real name>"
 ```
+
+> **Set `SUPERADMIN_EMAIL` before you seed, not after.** `SuperAdminSeeder` runs as part of
+> `db:seed` — including in production — and defaults to **`superadmin@myoffice.test`**, generating
+> a 16-character password and printing it once. `.test` is a reserved domain that can never receive
+> mail, so that account has **no password-reset route**: if the printed password is lost, the only
+> account that can do anything is unreachable. The seeder is idempotent and **never resets a live
+> credential**, so you cannot fix this later by re-seeding — you would have to change the address on
+> the row by hand.
+>
+> A password printed to a console also ends up in shell scrollback, in `~/.bash_history` if it was
+> echoed, and in any terminal recording or support thread it gets pasted into. Treat one that has
+> been printed as already disclosed: sign in and change it immediately, or rebuild before go-live.
 
 > **`DB_MIGRATION_*` and `DB_BACKUP_*` are absent from `.env.example`.** `config/database.php`
 > defines the `mysql_migration` and `mysql_backup` connections to **fall back to `DB_USERNAME`**
@@ -550,6 +661,39 @@ fails on any writable one outside `storage/` and `bootstrap/cache/`, and on a wo
 `storage/logs/laravel.log`, an upload that 500s, a view cache that will not write — re-grant on
 those two directories only. `chmod -R 777 .` makes the symptom vanish and undoes this entire
 section; a `.php` uploaded into a writable directory then becomes executable code.
+
+> ### Never run `artisan` as root
+>
+> This is how that permission error almost always happens, and it is worth stating on its own
+> because the cause is not where the symptom appears.
+>
+> The first `php artisan` you run creates `storage/logs/laravel.log` **owned by whoever ran it**.
+> Run it as `root` once — a `key:generate`, a `config:cache` — and the log file is root-owned with
+> `640`. Every later command run properly as `www` then fails to append to it, and because the
+> failure is *in the logger*, it surfaces as a `StreamHandler` exception that **buries the real
+> error underneath it**:
+>
+> ```
+> The stream or file ".../storage/logs/laravel.log" could not be opened in append mode: Permission denied
+> The exception occurred while attempting to log: <-- the actual problem is on this line
+> ```
+>
+> Always read the second line. The first one is the logger complaining; the second is what actually
+> went wrong.
+>
+> The same applies to `bootstrap/cache`, `framework/views` and `framework/cache` — a root-owned
+> compiled view is a 500 the next time `www` tries to rewrite it.
+>
+> **Fix and prevention:**
+>
+> ```bash
+> cd /www/wwwroot/knsoftic.com
+> chown -R www:www storage bootstrap/cache
+> chmod -R ug+rwX storage bootstrap/cache
+> ```
+>
+> Then prefix **every** artisan command with `sudo -u www`, including the ones you run once. It is
+> in every command in this document for exactly this reason.
 
 ---
 
@@ -1057,7 +1201,10 @@ Paths under `/www/server/php/82` assume PHP 8.2; confirm with `ls /www/server/ph
 | Payment recorded, no commission appears | the worker is not running — **or it is running without the `financial` queue**, which is what every other doc's command does. [Section 10](#10-queue-worker). Check with `SELECT queue, COUNT(*) FROM jobs GROUP BY queue;` |
 | A role saves with permissions missing | `max_input_vars` is below 5000 — [3.1](#31-settings) |
 | `open_basedir restriction in effect` | [3.4](#34-the-userini-that-cannot-be-deleted) |
-| Permission denied writing logs/cache | [section 7](#7-file-permissions) — grant on `storage` and `bootstrap/cache` only, never `777` on the tree |
+| Permission denied writing logs/cache | an `artisan` command was run as **root** and left root-owned files — [section 7](#7-file-permissions). Grant on `storage` and `bootstrap/cache` only, never `777` on the tree |
+| `could not be opened in append mode`, then a second error | the second line is the real error; the first is only the logger failing — [section 7](#7-file-permissions) |
+| `Unknown column 'TABLE_NAME' in 'where clause'` at migration 22 | **the server is MySQL, not MariaDB** — [4.0](#40-why-mariadb-104-and-not-mysql-8), recover with [4.3](#43-if-you-already-migrated-against-mysql) |
+| `Table '….menus' doesn't exist` while seeding | migrations did not finish; seeding an incomplete schema. Fix the migration failure first — [4.3](#43-if-you-already-migrated-against-mysql) |
 | A `.env` change did nothing | `php artisan config:cache` was not re-run — [6.5](#65-storage-link-and-caches) |
 | New code deployed, behaviour unchanged | php-fpm was not reloaded — [15.2](#152-reload-the-sapi-or-the-deploy-did-not-happen) |
 | Migration failed halfway, tables half-created | MariaDB DDL is not transactional (**D70**) — [15.1](#151-rehearse-the-migration) |
