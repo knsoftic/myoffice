@@ -782,6 +782,33 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-09-25 — Seven services, and the line a seeder does not cross
+
+The seven service names are the client's own — they were given as the "software house" pages the
+site needed. The descriptions say what each service **is**, in the general case, and nothing about
+who has delivered it, how often or how well. That line is the whole design of this file:
+*"e-commerce stores with a catalogue, a cart and a payment gateway"* describes a category;
+*"over 200 stores delivered"* would be a claim about a company, and a seeder is not in a position
+to make one.
+
+**No price is written.** `starting_price` stays null and `price_visible` false, because a rate is a
+commercial decision this file cannot make and a wrong one on a live page is worse than none — a
+visitor who reads it treats it as a quote.
+
+Unlike courses there is no completeness gate: `Service::scopePublic()` asks only for
+`status = published`, so these are published on creation with no outline owed. The seeder then
+enables the **Services** nav item that `WebsiteCmsSeeder` created and left off for exactly this
+moment, places a services section on the home page, and republishes the shell — the menu tree is
+baked into the header and footer snapshots, so a link enabled without that republish reaches nobody.
+
+**Portfolio was asked for in the same breath and is deliberately not here.** A catalogue entry
+describes a service that is on offer; a portfolio entry describes *work that was done, for a named
+client*. Inventing those means a prospective client hiring on the strength of projects that do not
+exist — which is a different kind of wrong from a placeholder, and not one a later edit undoes for
+the people who already read it. The module, the section type and the nav item are all in place and
+wait for real work.
+
+
 ### 2026-09-25 — The footer's emptiest column now does something
 
 Three changes, all to the same symptom: a footer that was structurally fine and read as mostly air.
