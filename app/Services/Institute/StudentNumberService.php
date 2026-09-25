@@ -125,6 +125,18 @@ final class StudentNumberService
         return $this->numbers->next('institute.teacher_code_prefix', 'institute.teacher_code_next_number', '%04d');
     }
 
+    /**
+     * The fallback code for a course saved without one.
+     *
+     * `%04d` rather than the `%05d` the funnel uses: a catalogue holds courses in the dozens, and a
+     * code is read aloud, written on a certificate and typed into a search box. `CRS-0007` is a
+     * course; `CRS-00007` is a transaction.
+     */
+    public function nextCourseCode(): string
+    {
+        return $this->numbers->next('institute.course_code_prefix', 'institute.course_code_next_number', '%04d');
+    }
+
     /*
     |--------------------------------------------------------------------------
     | The token expander

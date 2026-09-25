@@ -782,6 +782,30 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-09-25 — A course code generates itself, and only on the way in
+
+`CourseService::codeFor()` refused an empty code outright, so "what shall we call it?" was a
+question that had to be answered before a new course could be saved at all. It now mints
+`institute.course_code_prefix` + the next number when the field arrives blank, through the same
+`DocumentNumberService::next()` seam that already produces inquiry, application, admission and
+teacher numbers — a fifth generator, not a fifth mechanism.
+
+**A typed code still wins and is kept exactly as entered.** The generator is a fallback, not a
+policy: `WEB-101` reads better on a certificate than `CRS-0007`, and nothing here should argue with
+somebody who has a better answer. `%04d` rather than the funnel's `%05d` for the same reason — a
+catalogue holds courses in dozens, and `CRS-0007` is a course where `CRS-00007` is a transaction.
+
+**Blank still refuses on update, and that asymmetry is the point.** An existing course has a code
+that timetables, fee slips and printed certificates already point at; generating a new one there
+would renumber it behind the back of everything referring to it. `$existing === null` is the whole
+difference between a convenience and a data-loss bug. It is refused in three places, deliberately:
+`UpdateCourseRequest` puts `required` back (so the editor sees it against the field they emptied),
+the service refuses it again (the floor under the form), and the unique index refuses a duplicate
+however it arrived — a generated code is unique by construction, but "by construction" is an
+argument and the index is a guarantee.
+
+Probed in a rolled-back transaction: `CRS-0001`, `CRS-0002`, `CRS-0003`.
+
 ### 2026-09-25 — Six public pages, the events module, and a role that exists to hold one button
 
 A 33-page sitemap was specified. **Most of it already existed**, and saying so was the useful part of

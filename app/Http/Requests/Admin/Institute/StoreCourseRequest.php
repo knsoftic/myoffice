@@ -58,7 +58,18 @@ class StoreCourseRequest extends FormRequest
             'course_category_id' => ['required', 'integer', 'exists:course_categories,id'],
             'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
 
-            'code' => ['required', 'string', 'max:32', 'regex:/^[A-Za-z0-9\-_]+$/',
+            /*
+            | **Nullable on create: blank means "generate one".** `CourseService::codeFor()` mints
+            | `institute.course_code_prefix` + the next number when this arrives empty, so a new
+            | course does not have to answer "what shall we call it?" before it can be saved at all.
+            | A typed code still wins and is kept exactly as entered — `WEB-101` reads better on a
+            | certificate than `CRS-0007`.
+            |
+            | `UpdateCourseRequest` puts `required` back. An existing course already has a code that
+            | timetables, certificates and fee slips point at, and emptying the field there must be
+            | a validation error the editor sees on the form, not a silent renumber.
+            */
+            'code' => ['nullable', 'string', 'max:32', 'regex:/^[A-Za-z0-9\-_]+$/',
                 Rule::unique('courses', 'code')->ignore($this->courseId())->withoutTrashed()],
             'name' => ['required', 'string', 'max:180'],
             'slug' => ['nullable', 'string', 'max:200', 'regex:'.SlugGenerator::PATTERN,

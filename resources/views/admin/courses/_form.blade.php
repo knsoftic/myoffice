@@ -58,9 +58,25 @@
                                      :value="$value('name')" placeholder="Full-stack Web Development" />
                 </div>
 
-                <x-ui.form.input name="code" label="Course code" required maxlength="32"
+                {{--
+                    Optional while creating, required once the course exists.
+
+                    Left blank on a new course, the service mints one from
+                    `institute.course_code_prefix` — so "what shall we call it?" stops being a
+                    question that has to be answered before anything can be saved. Typed, it is
+                    kept exactly as entered, because `WEB-101` reads better on a certificate than
+                    `CRS-0007`.
+
+                    On edit it is required: the code is already on timetables, fee slips and
+                    printed certificates, and emptying the field there would renumber a course
+                    behind the back of everything pointing at it.
+                --}}
+                <x-ui.form.input name="code" label="Course code" maxlength="32"
+                                 :required="$course !== null"
                                  :value="$value('code')" placeholder="WEB-101"
-                                 help="What staff call it. It has to be unique." />
+                                 :help="$course === null
+                                     ? 'What staff call it, and it has to be unique. Leave it blank and one is generated for you.'
+                                     : 'What staff call it. It has to be unique, and an existing course cannot have it emptied.'" />
 
                 <x-ui.form.input name="slug" label="Web address" maxlength="200"
                                  :value="$value('slug')"

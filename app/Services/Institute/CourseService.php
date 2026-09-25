@@ -69,6 +69,7 @@ final class CourseService
         private readonly CourseCategoryService $categories,
         private readonly FaqService $faqs,
         private readonly CacheVersion $cache,
+        private readonly StudentNumberService $numbers,
     ) {}
 
     /*
@@ -598,8 +599,30 @@ final class CourseService
     {
         $code = strtoupper(trim((string) ($data['code'] ?? '')));
 
+        /*
+        | **Blank means "generate one", and only on create.**
+        |
+        | A course still needs a code — it is what staff call it, what goes on the certificate and
+        | what somebody types into a search box — but making a person invent one before they can
+        | save is a question with no good answer at the moment it is asked. So an empty field mints
+        | `institute.course_code_prefix` + the next number, and a typed field is kept exactly as
+        | entered: `WEB-101` reads better than `CRS-0007` and nothing here should argue with that.
+        |
+        | **On update, blank still refuses.** An existing course already has a code that timetables,
+        | certificates and fee slips refer to; silently minting a new one there would renumber a
+        | course behind the back of everything pointing at it. `$existing === null` is the whole
+        | difference, and it is the difference between a convenience and a data-loss bug.
+        |
+        | The uniqueness check below runs either way. A generated code is unique by construction —
+        | the counter only goes forwards — but "by construction" is an argument, and a unique index
+        | sits under this column because arguments are not guarantees.
+        */
         if ($code === '') {
-            throw CourseRuleException::refuse('code', 'A course needs a code — it is what staff call it.');
+            if ($existing !== null) {
+                throw CourseRuleException::refuse('code', 'A course that already has a code cannot have it emptied — timetables, certificates and fee slips refer to it.');
+            }
+
+            $code = strtoupper($this->numbers->nextCourseCode());
         }
 
         $clash = Course::query()

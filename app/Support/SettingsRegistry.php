@@ -3902,6 +3902,34 @@ final class SettingsRegistry
                 'span' => 4,
                 'sort' => 50,
             ],
+            /*
+            | A course code is generated when the form leaves it blank, and typed when somebody
+            | wants a particular one — `WEB-101` reads better on a certificate than `CRS-0007`.
+            |
+            | So this is a **fallback, not a policy**: it exists to stop "what shall I call it?"
+            | being the first question a new course asks, and it steps aside the moment anyone has
+            | a better answer. The counter is `readonly` for the same reason every other counter
+            | here is — editing it backwards mints a code that already belongs to something.
+            */
+            'course_code_prefix' => [
+                'label' => 'Course code prefix',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:16', 'regex:/^[A-Za-z0-9\-\/]*$/'],
+                'default' => 'CRS-',
+                'help' => 'Used only when a course is saved with an empty code. Type a code on the '
+                    .'form and it is kept exactly as entered.',
+                'span' => 4,
+                'sort' => 53,
+            ],
+            'course_code_next_number' => [
+                'label' => 'Next course number',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['nullable', 'integer', 'min:1'],
+                'default' => 1,
+                'readonly' => true,
+                'span' => 4,
+                'sort' => 54,
+            ],
             'teacher_code_prefix' => [
                 'label' => 'Teacher code prefix',
                 'type' => self::TYPE_TEXT,

@@ -28,7 +28,23 @@ final class UpdateCourseRequest extends StoreCourseRequest
      */
     public function rules(): array
     {
-        return array_merge(parent::rules(), [
+        $rules = parent::rules();
+
+        /*
+        | **`code` is required again here, and the parent deliberately is not.**
+        |
+        | Blank on create means "generate one". Blank on *update* would mean renumbering a course
+        | that timetables, certificates, fee slips and every printed reference already point at —
+        | so it is refused, and refused here rather than deeper down, because the editor should see
+        | it against the field they emptied instead of as an error about a service they have never
+        | heard of. `CourseService::codeFor()` refuses it too; this is the message, that is the floor.
+        */
+        $rules['code'] = array_merge(['required'], array_values(array_filter(
+            (array) $rules['code'],
+            static fn (mixed $rule): bool => $rule !== 'nullable',
+        )));
+
+        return array_merge($rules, [
             'slug_change_reason' => ['nullable', 'string', 'min:5', 'max:255'],
         ]);
     }
