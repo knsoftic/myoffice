@@ -221,10 +221,59 @@ Check what you actually have:
 application needs. Nothing warns you: the features fail quietly, mostly at 2am when the scheduler
 runs them.
 
-Read what your box actually has — do not assume, the list has changed across aaPanel versions:
+> ### Check php-fpm, not the CLI — they do not share a configuration
+>
+> **This is the trap inside the trap, and it costs an afternoon.** The obvious check is wrong:
+>
+> ```bash
+> /www/server/php/82/bin/php -i | grep disable_functions      # ← the CLI. NOT what the site runs.
+> ```
+>
+> That can print `disable_functions => no value` on a box where php-fpm disables a dozen functions.
+> Confirmed on knsoftic.com: the CLI reported nothing disabled while the site threw
+> `Call to undefined function readlink()` from a dashboard widget and
+> `Unable to guess the MIME type as no guessers are available` from the branding settings screen —
+> both because php-fpm, and only php-fpm, had them disabled.
+>
+> Artisan runs on the CLI, so **every migration, seeder and console command can pass while the
+> website fails**. The CLI check is worse than no check: it produces a clean result that is about
+> the wrong SAPI.
+>
+> **Read the configuration files instead** — this covers the pool overrides the panel writes:
+>
+> ```bash
+> grep -rn "disable_functions" /www/server/php/82/etc/
+> /www/server/php/82/bin/php --ini
+> ```
+>
+> **Or ask php-fpm itself**, which is definitive. Write a diagnostic into the document root,
+> request it once, and delete it in the same breath — the box is being scanned for `.env` within
+> minutes of DNS resolving, so this file does not get to live:
+>
+> ```bash
+> cat > /www/wwwroot/knsoftic.com/public/_diag.php <<'PHP'
+> <?php
+> header('Content-Type: text/plain');
+> echo 'ini: '.php_ini_loaded_file()."\n";
+> echo 'disable_functions: '.ini_get('disable_functions')."\n";
+> foreach (['readlink','symlink','finfo_open','proc_open','putenv','escapeshellarg'] as $f) {
+>     printf("%-16s %s\n", $f, function_exists($f) ? 'OK' : 'MISSING');
+> }
+> echo 'fileinfo: '.(extension_loaded('fileinfo') ? 'loaded' : 'NOT loaded')."\n";
+> PHP
+> chown www:www /www/wwwroot/knsoftic.com/public/_diag.php
+> # visit https://knsoftic.com/_diag.php, then IMMEDIATELY:
+> rm -f /www/wwwroot/knsoftic.com/public/_diag.php
+> ```
+>
+> The panel's own **PHP 8.2 → Settings → Disabled functions** field is what feeds php-fpm, and is
+> where the fix goes.
+
+Read what your box actually has — do not assume, the list has changed across aaPanel versions, and
+read it for **php-fpm** per the box above:
 
 ```bash
-/www/server/php/82/bin/php -i | grep disable_functions
+grep -rn "disable_functions" /www/server/php/82/etc/
 ```
 
 Then, in PHP 8.2 → **Settings** → **Disabled functions**, **remove** each of these if present:
@@ -233,7 +282,8 @@ Then, in PHP 8.2 → **Settings** → **Disabled functions**, **remove** each of
 |---|---|
 | `proc_open`, `proc_get_status` | **Backups.** `mysqldump` is shelled out to. Also `npm run build` if you build on the server |
 | `putenv` | Laravel and Composer both use it; symptoms are scattered and confusing |
-| `symlink`, `readlink` | `php artisan storage:link` — uploaded public files 404 |
+| `symlink`, `readlink` | `php artisan storage:link`, and **any screen whose widget resolves a path** — on knsoftic.com a disabled `readlink` 500'd the admin dashboard with `Call to undefined function readlink()` from `SystemHealthWidget` |
+| `finfo_open`, `finfo_file`, `finfo_buffer` | **Every upload and every screen that renders one.** Symfony guesses MIME types through `finfo`, and with it gone throws *"Unable to guess the MIME type as no guessers are available"* — which 500'd the branding settings screen on knsoftic.com. `extension_loaded('fileinfo')` can be true while these are disabled, so check the functions, not the extension |
 | `pcntl_signal`, `pcntl_alarm`, `pcntl_fork`, `pcntl_waitpid`, `pcntl_signal_dispatch` | **The queue worker's graceful restart.** Without these `queue:restart` does not stop a worker cleanly, so a worker keeps serving *old code* after a deploy |
 | `escapeshellarg`, `escapeshellcmd` | argument escaping for the dump — removing these while `proc_open` is on is worse than leaving both off |
 
@@ -1207,6 +1257,9 @@ Paths under `/www/server/php/82` assume PHP 8.2; confirm with `ls /www/server/ph
 | Payment recorded, no commission appears | the worker is not running — **or it is running without the `financial` queue**, which is what every other doc's command does. [Section 10](#10-queue-worker). Check with `SELECT queue, COUNT(*) FROM jobs GROUP BY queue;` |
 | A role saves with permissions missing | `max_input_vars` is below 5000 — [3.1](#31-settings) |
 | `open_basedir restriction in effect` | [3.4](#34-the-userini-that-cannot-be-deleted) |
+| `Call to undefined function …readlink()` | php-fpm disables it; the CLI check does not show this — [3.3](#33-disable_functions--the-big-one) |
+| `Unable to guess the MIME type as no guessers are available` | `finfo_open` disabled in php-fpm — [3.3](#33-disable_functions--the-big-one) |
+| Artisan works but the website 500s | CLI and php-fpm have different `disable_functions` — [3.3](#33-disable_functions--the-big-one) |
 | Permission denied writing logs/cache | an `artisan` command was run as **root** and left root-owned files — [section 7](#7-file-permissions). Grant on `storage` and `bootstrap/cache` only, never `777` on the tree |
 | `could not be opened in append mode`, then a second error | the second line is the real error; the first is only the logger failing — [section 7](#7-file-permissions) |
 | `Unknown column 'TABLE_NAME' in 'where clause'` at migration 22 | **the server is MySQL, not MariaDB** — [4.0](#40-why-mariadb-104-and-not-mysql-8), recover with [4.3](#43-if-you-already-migrated-against-mysql) |
