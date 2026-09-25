@@ -20592,4 +20592,162 @@ return [
         'rationale' => 'Unauthenticated by design (phase-24-25 section 7.3, DEP-22). A monitoring agent has no account, so the gate is a token rather than a permission: it arrives in an X-Health-Token header or a signed URL, never a query string, and is compared with hash_equals(). A wrong token, a missing token and ops.health_endpoint_enabled = false all answer 404 rather than 403 - a 403 confirms the endpoint exists and is merely closed, which tells a scanner exactly where to come back to. The body carries only counts, ages, booleans and versions: no row, no name, no email, no balance, no path above the base directory. Rate-limited by the health limiter at 30/min/IP.',
         'owner_phase' => 25,
     ],
+
+    /*
+    |----------------------------------------------------------------------
+    | phase-24-25 §7.2 — system health and integrity checks.
+    |
+    | Merged by the main session, which owns routes/admin.php. Both blocks carry `module:`, and
+    | both modules are `is_core = false` (§4.1) — so a disabled module 403s every route here for
+    | everyone, Super Admin included, while `integrity:verify` and the scheduler keep running and
+    | keep writing rows. Proof that the money is intact does not stop because a screen was hidden.
+    |
+    | `integrity-checks.store` is the only state-changing route, and `create` is withheld from
+    | Admin and the Accountant by §4.3: whoever can produce evidence on demand can produce it until
+    | it says what they want.
+    |----------------------------------------------------------------------
+    */
+    [
+        'route' => 'admin.integrity-checks.export',
+        'methods' => [
+                'GET',
+            ],
+        'middleware' => [
+                'web',
+                'auth',
+                'active',
+                'panel:admin',
+                'module:integrity_checks',
+                'can:integrity_checks.export',
+                'throttle:export',
+            ],
+        'permission' => 'integrity_checks.export',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'policy' => null,
+        'rationale' => null,
+        'owner_phase' => 24,
+    ],
+    [
+        'route' => 'admin.integrity-checks.index',
+        'methods' => [
+                'GET',
+            ],
+        'middleware' => [
+                'web',
+                'auth',
+                'active',
+                'panel:admin',
+                'module:integrity_checks',
+                'can:integrity_checks.view_any',
+            ],
+        'permission' => 'integrity_checks.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'policy' => null,
+        'rationale' => null,
+        'owner_phase' => 24,
+    ],
+    [
+        'route' => 'admin.integrity-checks.show',
+        'methods' => [
+                'GET',
+            ],
+        'middleware' => [
+                'web',
+                'auth',
+                'active',
+                'panel:admin',
+                'module:integrity_checks',
+                'can:integrity_checks.view',
+            ],
+        'permission' => 'integrity_checks.view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'policy' => null,
+        'rationale' => null,
+        'owner_phase' => 24,
+    ],
+    [
+        'route' => 'admin.integrity-checks.store',
+        'methods' => [
+                'POST',
+            ],
+        'middleware' => [
+                'web',
+                'auth',
+                'active',
+                'panel:admin',
+                'module:integrity_checks',
+                'can:integrity_checks.create',
+                'throttle:integrity-run',
+            ],
+        'permission' => 'integrity_checks.create',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'policy' => null,
+        'rationale' => null,
+        'owner_phase' => 24,
+    ],
+    [
+        'route' => 'admin.system-health.export',
+        'methods' => [
+                'GET',
+            ],
+        'middleware' => [
+                'web',
+                'auth',
+                'active',
+                'panel:admin',
+                'module:system_health',
+                'can:system_health.export',
+                'throttle:export',
+            ],
+        'permission' => 'system_health.export',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'policy' => null,
+        'rationale' => null,
+        'owner_phase' => 24,
+    ],
+    [
+        'route' => 'admin.system-health.index',
+        'methods' => [
+                'GET',
+            ],
+        'middleware' => [
+                'web',
+                'auth',
+                'active',
+                'panel:admin',
+                'module:system_health',
+                'can:system_health.view_any',
+            ],
+        'permission' => 'system_health.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'policy' => null,
+        'rationale' => null,
+        'owner_phase' => 24,
+    ],
+    [
+        'route' => 'admin.system-health.probe',
+        'methods' => [
+                'GET',
+            ],
+        'middleware' => [
+                'web',
+                'auth',
+                'active',
+                'panel:admin',
+                'module:system_health',
+                'can:system_health.view',
+            ],
+        'permission' => 'system_health.view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'policy' => null,
+        'rationale' => null,
+        'owner_phase' => 24,
+    ],
 ];

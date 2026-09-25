@@ -9113,4 +9113,111 @@ return [
             ],
         'response' => 'html',
     ],
+
+    /*
+    |----------------------------------------------------------------------
+    | phase-24-25 §7.2 / §7.3 — the operations screens and the health endpoint.
+    |
+    | `query_budget` is null on all five: unmeasured, not unlimited. PRF-01 SKIPS a null budget and
+    | reports how many it skipped, so an unmeasured screen never reads as a covered one. They get
+    | their numbers from `perf:budget --write-baseline`, which measures rather than guesses — a
+    | guessed budget passes, so nobody looks at it again.
+    |----------------------------------------------------------------------
+    */
+    [
+        'route' => 'admin.integrity-checks.index',
+        'panel' => 'admin',
+        'kind' => 'index',
+        'params' => null,
+        'permissions' => [
+                'integrity_checks.view_any',
+            ],
+        'module' => 'integrity_checks',
+        'owner_phase' => 24,
+        'query_budget' => null,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => [
+                'owner' => null,
+            ],
+        'response' => 'html',
+    ],
+    [
+        'route' => 'admin.integrity-checks.show',
+        'panel' => 'admin',
+        'kind' => 'show',
+        'params' => static fn (): array => [
+                // The newest recorded run. A fixture that CREATES one would be writing to an
+                // append-only evidence table to satisfy a screen test (D19).
+                'run' => \App\Models\Ops\IntegrityCheckRun::query()->latest('id')->value('id') ?? 1,
+            ],
+        'permissions' => [
+                'integrity_checks.view',
+            ],
+        'module' => 'integrity_checks',
+        'owner_phase' => 24,
+        'query_budget' => null,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => [
+                'owner' => null,
+            ],
+        'response' => 'html',
+    ],
+    [
+        'route' => 'admin.system-health.index',
+        'panel' => 'admin',
+        'kind' => 'index',
+        'params' => null,
+        'permissions' => [
+                'system_health.view_any',
+            ],
+        'module' => 'system_health',
+        'owner_phase' => 24,
+        'query_budget' => null,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => [
+                'owner' => null,
+            ],
+        'response' => 'html',
+    ],
+    [
+        'route' => 'admin.system-health.probe',
+        'panel' => 'admin',
+        'kind' => 'show',
+        'params' => static fn (): array => [
+                // The service's own first probe key, so the fixture cannot drift from the
+                // catalogue the screen renders.
+                'probe' => array_key_first(app(\App\Services\Ops\SystemHealthService::class)->probes()) ?? 'database',
+            ],
+        'permissions' => [
+                'system_health.view',
+            ],
+        'module' => 'system_health',
+        'owner_phase' => 24,
+        'query_budget' => null,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => [
+                'owner' => null,
+            ],
+        'response' => 'html',
+    ],
+    [
+        'route' => 'ops.health',
+        'panel' => 'public',
+        'kind' => 'public',
+        'params' => null,
+        'permissions' => [],
+        'module' => null,
+        'owner_phase' => 24,
+        'query_budget' => null,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => [
+                'owner' => null,
+            ],
+        'response' => 'html',
+    ],
 ];
