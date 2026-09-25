@@ -296,16 +296,22 @@ it is right to.
 > MySQL 5.7 / 8.0 **and** MariaDB versions under one "MySQL" entry; if you accept the default you
 > get MySQL, and nothing complains until migration 22 of 190-odd.
 >
-> **Check before you migrate — one query:**
+> **Check before you migrate. This needs no credentials** — ask the client binary, not the server,
+> so it works before you have found the root password (and aaPanel does not put one in
+> `/root/.my.cnf`, so `mysql` on its own gets `Access denied … using password: NO`):
 >
 > ```bash
-> mysql -u root -p -e "SELECT VERSION();"
+> mysql --version; cat /www/server/mysql/version.pl 2>/dev/null
 > ```
 >
-> | Output looks like | Verdict |
+> | Output contains | Verdict |
 > |---|---|
-> | `10.4.34-MariaDB` | correct |
-> | `8.0.36` or `5.7.x` | **wrong — stop here**, see below |
+> | `Distrib 10.4.x-MariaDB` | correct |
+> | `Ver 8.0.x … MySQL Community Server` | **wrong — stop here**, see below |
+>
+> `SELECT VERSION();` answers the same question but needs a login, which is a detour when the
+> answer decides whether you are about to reinstall the server anyway. If it says MySQL, do not go
+> hunting for the root password: installing MariaDB regenerates it.
 >
 > **The failure signature if you do not check.** Migrations run happily for twenty-one files and
 > then `2026_09_12_070100_create_media_assets_table` dies with:
