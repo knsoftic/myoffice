@@ -226,6 +226,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\View;
 use App\Support\Cms\SectionRegistry;
 use App\Support\Cms\Sections\MarketingSectionTypes;
@@ -548,21 +549,55 @@ class AppServiceProvider extends ServiceProvider
      */
     private function logSlowQueries(): void
     {
+        // Resolved ONCE, here, and captured by the closure below. See the two notes in that
+        // closure for why it is never read again inside it.
+        $threshold = $this->slowQueryThreshold();
+
+        /*
+        | **The handler must not be able to fire itself.** Everything inside it can issue a query:
+        | `getQueryLog()` is cheap, but `Log::warning()` reaches whatever the channel is configured
+        | to do, and the threshold used to be re-read from settings — which is a query, and a slow
+        | one re-enters the handler, which reads it again.
+        |
+        | On a fresh database it does not even need to be slow. During `migrate` the `settings`
+        | table does not exist, so the read throws, the throw is reported, and the reporting path
+        | queries again. The migration died with 2 GB exhausted on the third table.
+        |
+        | A static flag rather than a lock: this guards one closure against itself inside one
+        | process, and a slow query that happens while we are already reporting a slow query is the
+        | same slow query.
+        */
+        $reporting = false;
+
         // Registered in every environment, including production: this is a report, not a guard,
         // and production is where a slow query actually matters.
-        DB::whenQueryingForLongerThan($this->slowQueryThreshold(), static function ($connection): void {
-            Log::warning('Slow query threshold exceeded', [
-                'connection' => $connection->getName(),
-                'route' => Route::currentRouteName() ?? (request()?->path() ?? 'console'),
-                'threshold_ms' => (int) setting('ops.slow_query_ms', 250),
-                // The statements, shapes only. `getQueryLog()` is empty unless logging is on, which
-                // it is in local and testing; in production this is the route and the threshold,
-                // which is what a digest needs.
-                'queries' => array_map(
-                    static fn (array $entry): string => (string) ($entry['query'] ?? ''),
-                    array_slice($connection->getQueryLog(), -5),
-                ),
-            ]);
+        DB::whenQueryingForLongerThan($threshold, static function ($connection) use ($threshold, &$reporting): void {
+            if ($reporting) {
+                return;
+            }
+
+            $reporting = true;
+
+            try {
+                Log::warning('Slow query threshold exceeded', [
+                    'connection' => $connection->getName(),
+                    'route' => Route::currentRouteName() ?? (request()?->path() ?? 'console'),
+                    // The captured value, never a fresh read. See the note above.
+                    'threshold_ms' => $threshold,
+                    // The statements, shapes only. `getQueryLog()` is empty unless logging is on,
+                    // which it is in local and testing; in production this is the route and the
+                    // threshold, which is what a digest needs.
+                    'queries' => array_map(
+                        static fn (array $entry): string => (string) ($entry['query'] ?? ''),
+                        array_slice($connection->getQueryLog(), -5),
+                    ),
+                ]);
+            } catch (Throwable) {
+                // A report that cannot be written is not worth taking the request down for. The
+                // query still ran; only the note about it is lost.
+            } finally {
+                $reporting = false;
+            }
         });
     }
 
@@ -575,7 +610,19 @@ class AppServiceProvider extends ServiceProvider
      */
     private function slowQueryThreshold(): int
     {
+        /*
+        | Read once, at boot, and wrapped twice over.
+        |
+        | This runs before a migration has necessarily created the `settings` table, so the read can
+        | throw for a completely ordinary reason. It can also succeed and return nonsense written by
+        | a raw SQL edit, which is what the clamp is for — a threshold of 0 would report every query
+        | in the system as slow, and a report that fires on everything reports nothing.
+        */
         try {
+            if (! Schema::hasTable('settings')) {
+                return 250;
+            }
+
             $value = setting('ops.slow_query_ms', 250);
         } catch (Throwable) {
             return 250;
