@@ -1185,6 +1185,7 @@ sudo -u www /www/server/php/82/bin/php artisan event:cache
 
 /etc/init.d/php-fpm-82 reload            # see 15.2 — not optional
 # start the queue worker again in Supervisor Manager
+sudo -u www /www/server/php/82/bin/php artisan cache:clear        # see 15.3 - not optional
 sudo -u www /www/server/php/82/bin/php artisan queue:restart
 sudo -u www /www/server/php/82/bin/php artisan up
 ```
@@ -1205,7 +1206,36 @@ is old — and every one is one reload away. Put the reload in the script, not i
 Never expose a web-reachable `opcache_reset()` route to do this. That is an unauthenticated
 denial-of-service lever.
 
-### 15.3 Rolling back
+### 15.3 Clear the page cache, or the old HTML outlives the deploy
+
+**A code deploy does not invalidate the public page cache, and nothing tells you.**
+
+`CachePublicResponse` stores rendered public pages under a version stamp that a **publish** bumps —
+an editor saving a section, a page going live. A `git pull` bumps nothing, because from the cache's
+point of view nothing was published. So the new code is loaded, php-fpm has been reloaded, the route
+resolves to the new controller, and visitors keep getting HTML rendered by the old one until
+something in the CMS happens to be published.
+
+Observed on knsoftic.com, and it is worth spelling out because the symptom argues convincingly for
+the wrong cause. `/trainers` was shipped without its settings guard and answered **200** on a site
+that had never switched it on. The guard was added, deployed, `route:cache` and `view:cache` rebuilt,
+php-fpm reloaded — and `/trainers` still answered 200. Every instinct says the fix did not deploy.
+It had: the page was simply being served from a cache entry minted before it existed.
+`php artisan cache:clear` and the same URL answered 404 on the next request.
+
+The failure mode to recognise: **a public page whose behaviour did not change after a deploy that
+definitely landed.** Check the cache before re-reading the code.
+
+```bash
+sudo -u www /www/server/php/82/bin/php artisan cache:clear
+```
+
+It clears the whole default store, which on this installation is the `database` driver holding the
+page cache, the settings cache and the module cache together. That is heavier than the page cache
+alone and it is the right trade on a deploy: all three are derived data that rebuild on first use,
+and a deploy is exactly the moment none of them should be trusted.
+
+### 15.4 Rolling back
 
 [`ROLLBACK.md`](ROLLBACK.md) has the ladder, from the module kill switch upward. Read its own
 warning first: the DEP-19 and DEP-20 tests that were meant to verify the per-phase rollback table
@@ -1275,6 +1305,7 @@ Paths under `/www/server/php/82` assume PHP 8.2; confirm with `ls /www/server/ph
 | `Table '….menus' doesn't exist` while seeding | migrations did not finish; seeding an incomplete schema. Fix the migration failure first — [4.3](#43-if-you-already-migrated-against-mysql) |
 | A `.env` change did nothing | `php artisan config:cache` was not re-run — [6.5](#65-storage-link-and-caches) |
 | New code deployed, behaviour unchanged | php-fpm was not reloaded — [15.2](#152-reload-the-sapi-or-the-deploy-did-not-happen) |
+| A **public page** behaves as it did before a deploy that definitely landed | the page cache is serving HTML minted by the old code; a deploy does not invalidate it — [15.3](#153-clear-the-page-cache-or-the-old-html-outlives-the-deploy) |
 | Migration failed halfway, tables half-created | MariaDB DDL is not transactional (**D70**) — [15.1](#151-rehearse-the-migration) |
 | `Unknown suite [all]`, exit 2 | omit `--suite` entirely — [14.1](#141-the-gates-that-exist) |
 | `composer harden` fails on step 3 | same cause; run the five non-test checks individually — [14.1](#141-the-gates-that-exist) |
