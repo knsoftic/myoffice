@@ -39,6 +39,24 @@ final class TrainerController extends Controller
 
     public function index(): Response
     {
+        /*
+        | **The page is off until somebody switches it on, and this line is the whole of that.**
+        |
+        | It was missing when the page first shipped, so `/trainers` answered 200 on a server whose
+        | operator had never opted in — publishing names, qualifications and biographies of teaching
+        | staff, with no way to take the page down short of disabling the `teachers` module and its
+        | admin screens with it. Every sibling page (`fee_structure`, `timetable`, `reviews`,
+        | `quote`, `events`) carries the same guard; this one alone did not, and a 200 on a page
+        | nobody enabled is the failure that does not announce itself.
+        |
+        | `false` is passed explicitly because `siteFlag()` defaults to **true** for an unset key,
+        | and the registry default here is false — relying on the helper's default would invert the
+        | intent on any installation where the row had not been seeded yet.
+        */
+        if (! $this->siteFlag('website.trainers_page_enabled', false)) {
+            return $this->notFound();
+        }
+
         $trainers = Teacher::query()
             ->public()
             ->teaching()
