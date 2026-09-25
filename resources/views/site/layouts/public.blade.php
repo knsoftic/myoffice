@@ -85,6 +85,7 @@
     <noscript><link rel="stylesheet" href="{{ $fontsHref }}"></noscript>
 
     @include('site.partials.theme-script')
+    @include('site.partials.fx-script')
 
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 

@@ -22,8 +22,8 @@
                 <div class="absolute inset-0 bg-gradient-to-r from-slate-950/90 via-slate-950/75 to-slate-950/40"></div>
             </div>
         @elseif ($color === null)
-            <div class="pointer-events-none absolute -left-40 top-0 -z-10 h-96 w-96 rounded-full bg-brand-600/30 blur-3xl" aria-hidden="true"></div>
-            <div class="pointer-events-none absolute -bottom-40 right-0 -z-10 h-96 w-[40rem] rounded-full bg-brand-500/20 blur-3xl" aria-hidden="true"></div>
+            <div class="pointer-events-none absolute -left-40 top-0 -z-10 h-96 w-96 rounded-full bg-brand-600/30 blur-3xl" aria-hidden="true" data-fx-parallax style="--fx-far: 60px"></div>
+            <div class="pointer-events-none absolute -bottom-40 right-0 -z-10 h-96 w-[40rem] rounded-full bg-brand-500/20 blur-3xl" aria-hidden="true" data-fx-parallax style="--fx-far: -90px"></div>
         @endif
 
         <div class="mx-auto flex max-w-screen-xl flex-col gap-10 px-4 py-16 sm:px-6 sm:py-20 lg:flex-row lg:items-center lg:justify-between lg:px-8 lg:py-24">
@@ -40,7 +40,7 @@
             </div>
 
             @if ($buttons !== [])
-                <div class="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center">
+                <div data-fx="rise" data-fx-delay="2" class="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center">
                     @foreach ($buttons as $button)
                         <x-site.button :link="$button" size="lg" />
                     @endforeach

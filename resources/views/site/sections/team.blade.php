@@ -35,12 +35,12 @@
 @if ($members->isNotEmpty())
     <x-site.section :anchor="data_get($section ?? null, 'anchor')" background="surface" :label="$heading">
         <div class="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
-            <x-site.heading :title="$heading" :subtitle="$description !== '' ? $description : null" align="left" />
+            <x-site.heading data-fx="rise" :title="$heading" :subtitle="$description !== '' ? $description : null" align="left" />
 
             @if (is_array($viewAll) && filled($viewAll['label'] ?? null) && filled($viewAll['url'] ?? null))
-                <x-site.button :link="$viewAll" icon="arrow-right" class="shrink-0" />
+                <x-site.button data-fx="rise" data-fx-delay="1" :link="$viewAll" icon="arrow-right" class="shrink-0" />
             @elseif ($teamUrl)
-                <x-site.button label="Meet everyone" :url="$teamUrl" style="outline" icon="arrow-right" class="shrink-0" />
+                <x-site.button data-fx="rise" data-fx-delay="1" label="Meet everyone" :url="$teamUrl" style="outline" icon="arrow-right" class="shrink-0" />
             @endif
         </div>
 
@@ -50,7 +50,7 @@
                     $photo = data_get($member, 'photo');
                     $memberUrl = $teamUrl && filled(data_get($member, 'slug')) ? $teamUrl.'#'.data_get($member, 'slug') : null;
                 @endphp
-                <li class="group relative text-center">
+                <li data-fx="rise" data-fx-delay="{{ ($loop->index % 4) + 1 }}" class="group relative text-center">
                     <div class="mx-auto aspect-square w-full max-w-[12rem] overflow-hidden rounded-2xl bg-slate-100 dark:bg-slate-800">
                         @if (filled(data_get($photo, 'url')))
                             <x-site.image :media="$photo" profile="thumbnail" :alt="data_get($member, 'name')" ratio="1/1" class="h-full w-full transition duration-300 group-hover:scale-[1.03]" />

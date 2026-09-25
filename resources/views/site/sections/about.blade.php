@@ -91,10 +91,12 @@
                 'lg:col-span-7' => $images->isNotEmpty(),
                 'lg:col-span-12 lg:max-w-4xl' => $images->isEmpty(),
             ])>
-                <x-site.heading :title="$heading" align="left" />
+                <x-site.heading data-fx="rise" :title="$heading" align="left" />
 
                 @if ($useTabs)
                     <div
+                        data-fx="rise"
+                        data-fx-delay="1"
                         class="mt-8"
                         x-data="{
                             tab: 0,
@@ -149,7 +151,7 @@
                         @endforeach
                     </div>
                 @elseif ($intros->isNotEmpty())
-                    <div class="mt-8 space-y-8">
+                    <div data-fx="rise" data-fx-delay="1" class="mt-8 space-y-8">
                         @foreach ($intros as $intro)
                             <div>
                                 @if ($intros->count() > 1)
@@ -163,7 +165,7 @@
             </div>
 
             @if ($images->isNotEmpty())
-                <div class="lg:col-span-5">
+                <div data-fx="right" class="lg:col-span-5">
                     @if ($images->count() > 1)
                         <div class="relative pb-16 pl-10 sm:pl-16">
                             <div class="aspect-[4/5] overflow-hidden rounded-2xl bg-slate-100 shadow-xl ring-1 ring-slate-900/5 dark:bg-slate-800 dark:ring-white/10">
@@ -191,7 +193,7 @@
             'md:grid-cols-2' => $pillars->count() > 1,
         ])>
             @foreach ($pillars as $pillar)
-                <div class="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70 p-8 dark:border-white/10 dark:bg-white/[0.03]">
+                <div data-fx="tilt" data-fx-delay="{{ ($loop->index % 4) + 1 }}" class="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70 p-8 dark:border-white/10 dark:bg-white/[0.03]">
                     <div class="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-brand-500/10 blur-2xl" aria-hidden="true"></div>
                     <div class="relative flex items-center gap-3">
                         <span class="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm dark:bg-brand-500">
@@ -206,13 +208,13 @@
     @endif
 
     @if ($statistics !== [])
-        <x-site.stats :items="$statistics" class="mt-16 lg:mt-20" />
+        <x-site.stats data-fx="rise" :items="$statistics" class="mt-16 lg:mt-20" />
     @endif
 
     @if ($reasons->isNotEmpty())
         <div class="mt-20 lg:mt-28">
             @if ($whyHeading !== '')
-                <h3 class="max-w-2xl text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl dark:text-white">{{ $whyHeading }}</h3>
+                <h3 data-fx="rise" class="max-w-2xl text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl dark:text-white">{{ $whyHeading }}</h3>
             @endif
 
             <ul role="list" @class([
@@ -220,7 +222,7 @@
                 'mt-10' => $whyHeading !== '',
             ])>
                 @foreach ($reasons as $reason)
-                    <li class="group rounded-2xl border border-slate-200 bg-white p-6 shadow-card transition duration-200 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-card-hover dark:border-white/10 dark:bg-slate-900/60 dark:hover:border-brand-500/40">
+                    <li data-fx="tilt" data-fx-delay="{{ ($loop->index % 4) + 1 }}" class="group rounded-2xl border border-slate-200 bg-white p-6 shadow-card transition duration-200 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-card-hover dark:border-white/10 dark:bg-slate-900/60 dark:hover:border-brand-500/40">
                         <span class="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600 ring-1 ring-inset ring-brand-100 dark:bg-brand-500/10 dark:text-brand-300 dark:ring-brand-500/20">
                             <x-ui.icon :name="data_get($reason, 'content.icon') ?: 'check-badge'" class="h-5 w-5" />
                         </span>
@@ -237,16 +239,16 @@
     @if ($milestones->isNotEmpty() || $filledHtml($historyIntro))
         <div class="mt-20 grid gap-12 lg:mt-28 lg:grid-cols-12 lg:gap-16">
             <div class="lg:col-span-5">
-                <h3 class="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl dark:text-white">{{ $label('history_intro', 'History') }}</h3>
+                <h3 data-fx="rise" class="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl dark:text-white">{{ $label('history_intro', 'History') }}</h3>
                 @if ($filledHtml($historyIntro))
-                    <x-site.prose :html="$historyIntro" class="mt-4" />
+                    <x-site.prose data-fx="rise" data-fx-delay="1" :html="$historyIntro" class="mt-4" />
                 @endif
             </div>
 
             @if ($milestones->isNotEmpty())
                 <ol role="list" class="relative space-y-10 border-l border-slate-200 pl-8 lg:col-span-7 dark:border-white/10">
                     @foreach ($milestones as $milestone)
-                        <li class="relative">
+                        <li data-fx="tilt" data-fx-delay="{{ ($loop->index % 4) + 1 }}" class="relative">
                             <span class="absolute -left-[calc(2.4375rem+0.5px)] top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-brand-600 ring-4 ring-white dark:bg-brand-400 dark:ring-slate-950" aria-hidden="true"></span>
                             @if (filled(data_get($milestone, 'content.year')))
                                 <p class="text-sm font-semibold tabular-nums text-brand-600 dark:text-brand-400">{{ data_get($milestone, 'content.year') }}</p>

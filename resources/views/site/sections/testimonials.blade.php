@@ -32,7 +32,7 @@
 
 @if ($cards->isNotEmpty())
     <x-site.section :anchor="data_get($section ?? null, 'anchor')" background="muted" :label="$heading">
-        <x-site.heading :title="$heading" :subtitle="$description !== '' ? $description : null" align="center" />
+        <x-site.heading data-fx="rise" :title="$heading" :subtitle="$description !== '' ? $description : null" align="center" />
 
         <ul role="list" class="mt-12 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             @foreach ($cards as $card)
@@ -43,7 +43,7 @@
                         : collect([data_get($card, 'author_designation'), data_get($card, 'author_company')])->filter()->implode(', ');
                     $photo = data_get($card, 'photo');
                 @endphp
-                <li id="testimonial-{{ (int) data_get($card, 'id') }}" class="scroll-mt-28">
+                <li data-fx="rise" data-fx-delay="{{ ($loop->index % 3) + 1 }}" id="testimonial-{{ (int) data_get($card, 'id') }}" class="scroll-mt-28">
                     <figure class="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-card dark:border-white/10 dark:bg-slate-900">
                         @include('site.marketing.partials.stars', ['rating' => data_get($card, 'rating')])
                         <blockquote class="mt-4 flex-1 text-base leading-relaxed text-slate-700 dark:text-slate-200">
@@ -70,7 +70,7 @@
         </ul>
 
         @if (is_array($viewAll) && filled($viewAll['label'] ?? null) && filled($viewAll['url'] ?? null))
-            <div class="mt-10 text-center">
+            <div data-fx="rise" class="mt-10 text-center">
                 <x-site.button :link="$viewAll" icon="arrow-right" />
             </div>
         @endif

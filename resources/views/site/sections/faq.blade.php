@@ -29,9 +29,11 @@
 
 @if ($questions !== [])
     <x-site.section :anchor="data_get($section ?? null, 'anchor')" background="muted" :label="$heading !== '' ? $heading : null">
-        <x-site.heading :title="$heading" :subtitle="$description" align="center" />
+        <x-site.heading data-fx="rise" :title="$heading" :subtitle="$description" align="center" />
 
         <x-site.accordion
+            data-fx="rise"
+            data-fx-delay="1"
             :items="$questions"
             :columns="$columns"
             :open-first="$openFirst"
@@ -45,7 +47,7 @@
         />
 
         @if (is_array($showAll) && filled($showAll['label'] ?? null) && filled($showAll['url'] ?? null))
-            <div class="mt-10 text-center">
+            <div data-fx="rise" class="mt-10 text-center">
                 <x-site.button :link="$showAll" icon="arrow-right" />
             </div>
         @endif

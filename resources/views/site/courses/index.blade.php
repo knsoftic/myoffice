@@ -30,10 +30,10 @@
                 </nav>
             @endif
 
-            <h1 class="text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">
+            <h1 data-fx="rise" class="text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">
                 {{ $category?->name ?? 'Courses' }}
             </h1>
-            <p class="mt-2 max-w-2xl text-slate-600 dark:text-slate-300">{{ $pageDescription }}</p>
+            <p data-fx="rise" data-fx-delay="1" class="mt-2 max-w-2xl text-slate-600 dark:text-slate-300">{{ $pageDescription }}</p>
         </div>
     </section>
 
@@ -141,7 +141,7 @@
 
                     <div class="grid gap-5 sm:grid-cols-2">
                         @foreach ($courses as $course)
-                            <article class="flex flex-col overflow-hidden rounded-xl border border-slate-200 transition-shadow hover:shadow-md dark:border-slate-800">
+                            <article data-fx="tilt" data-fx-delay="{{ ($loop->index % 4) + 1 }}" class="flex flex-col overflow-hidden rounded-xl border border-slate-200 transition-shadow hover:shadow-md dark:border-slate-800">
                                 <a href="{{ route('site.courses.show', $course->slug) }}" class="block">
                                     @if (filled($course->thumbnail_path))
                                         <img src="{{ \Illuminate\Support\Facades\Storage::url($course->thumbnail_path) }}"

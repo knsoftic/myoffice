@@ -98,10 +98,11 @@
             <div class="absolute inset-0 bg-gradient-to-b from-brand-50 via-white to-white dark:from-brand-950/50 dark:via-slate-950 dark:to-slate-950"></div>
             <div
                 class="absolute inset-0 opacity-70 [mask-image:radial-gradient(ellipse_at_top,black_30%,transparent_75%)] dark:opacity-40"
-                style="background-image: linear-gradient(to right, rgb(var(--brand-500) / 0.08) 1px, transparent 1px), linear-gradient(to bottom, rgb(var(--brand-500) / 0.08) 1px, transparent 1px); background-size: 3.5rem 3.5rem;"
+                data-fx-parallax
+                style="background-image: linear-gradient(to right, rgb(var(--brand-500) / 0.08) 1px, transparent 1px), linear-gradient(to bottom, rgb(var(--brand-500) / 0.08) 1px, transparent 1px); background-size: 3.5rem 3.5rem; --fx-far: 28px;"
             ></div>
-            <div class="absolute -top-40 left-1/2 h-[36rem] w-[36rem] -translate-x-1/2 rounded-full bg-brand-400/20 blur-3xl dark:bg-brand-500/15"></div>
-            <div class="absolute -right-32 top-1/3 h-80 w-80 rounded-full bg-brand-300/20 blur-3xl dark:bg-brand-700/20"></div>
+            <div class="absolute -top-40 left-1/2 h-[36rem] w-[36rem] -translate-x-1/2 rounded-full bg-brand-400/20 blur-3xl dark:bg-brand-500/15" data-fx-parallax style="--fx-far: 70px"></div>
+            <div class="absolute -right-32 top-1/3 h-80 w-80 rounded-full bg-brand-300/20 blur-3xl dark:bg-brand-700/20" data-fx-parallax style="--fx-far: -110px"></div>
         @endif
     </div>
 
@@ -122,13 +123,13 @@
                     'mx-auto max-w-4xl text-center' => ! $alignLeft,
                 ])>
                     @if ($heading !== '')
-                        <h1 class="text-balance text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl lg:leading-[1.05] dark:text-white">
+                        <h1 data-fx="rise" class="text-balance text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl lg:leading-[1.05] dark:text-white">
                             {{ $heading }}
                         </h1>
                     @endif
 
                     @if ($subtitle !== '')
-                        <p @class([
+                        <p data-fx="rise" data-fx-delay="1" @class([
                             'text-pretty text-lg leading-relaxed text-slate-600 sm:text-xl dark:text-slate-300',
                             'mt-6' => $heading !== '',
                             'mx-auto max-w-2xl' => ! $alignLeft,
@@ -138,6 +139,8 @@
 
                     @if (filled($description))
                         <x-site.prose
+                            data-fx="rise"
+                            data-fx-delay="2"
                             :html="$description"
                             size="lg"
                             @class([
@@ -149,7 +152,7 @@
                     @endif
 
                     @if ($buttons !== [])
-                        <div @class([
+                        <div data-fx="rise" data-fx-delay="3" @class([
                             'mt-10 flex flex-col gap-3 sm:flex-row sm:flex-wrap',
                             'sm:justify-center' => ! $alignLeft,
                         ])>
@@ -166,7 +169,7 @@
                         'relative mx-auto mt-16 max-w-5xl sm:mt-20' => ! $split,
                     ])>
                         <div class="absolute -inset-4 -z-10 rounded-[2rem] bg-gradient-to-tr from-brand-500/20 via-brand-300/10 to-transparent blur-2xl dark:from-brand-500/25" aria-hidden="true"></div>
-                        <div class="overflow-hidden rounded-2xl bg-white/60 p-1.5 shadow-2xl ring-1 ring-slate-900/10 backdrop-blur dark:bg-white/5 dark:ring-white/10">
+                        <div data-fx="deck" data-fx-delay="2" class="overflow-hidden rounded-2xl bg-white/60 p-1.5 shadow-2xl ring-1 ring-slate-900/10 backdrop-blur dark:bg-white/5 dark:ring-white/10">
                             <x-site.image
                                 :media="$heroImage"
                                 profile="hero"
@@ -180,7 +183,7 @@
             </div>
 
             @if ($statistics !== [])
-                <x-site.stats :items="$statistics" class="mt-16 sm:mt-20" />
+                <x-site.stats data-fx="rise" data-fx-delay="4" :items="$statistics" class="mt-16 sm:mt-20" />
             @endif
         </div>
     </div>

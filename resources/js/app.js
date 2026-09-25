@@ -7,6 +7,7 @@ import { registerSidebar } from './sidebar';
 import { registerToasts } from './toasts';
 import { registerFocusTrap } from './focus-trap';
 import { registerComponents } from './components';
+import { registerScrollFx } from './scroll-fx';
 
 /*
 |--------------------------------------------------------------------------
@@ -26,6 +27,22 @@ registerComponents(Alpine);
 window.Alpine = Alpine;
 
 Alpine.start();
+
+/*
+|--------------------------------------------------------------------------
+| Public-site scroll effects
+|--------------------------------------------------------------------------
+|
+| Not an Alpine store and not passed Alpine: it wires plain observers to plain
+| elements and never renders anything, so binding it to the framework would buy
+| it nothing and tie the public site's motion to Alpine's lifecycle.
+|
+| It returns immediately unless <html> carries `.fx-on`, which only the panels'
+| sibling gate script sets — so the panels, which never include that script, pay
+| one class check for it and nothing else.
+|
+*/
+registerScrollFx();
 
 /*
 |--------------------------------------------------------------------------

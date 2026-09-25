@@ -31,12 +31,12 @@
 
 @if ($cards->isNotEmpty())
     <x-site.section :anchor="data_get($section ?? null, 'anchor')" background="surface" :label="$heading">
-        <x-site.heading :title="$heading" :subtitle="$description !== '' ? $description : null" align="center" />
+        <x-site.heading data-fx="rise" :title="$heading" :subtitle="$description !== '' ? $description : null" align="center" />
 
         <ul role="list" class="mt-12 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             @foreach ($cards as $card)
                 @php $photo = data_get($card, 'photo'); @endphp
-                <li id="student-review-{{ (int) data_get($card, 'id') }}" class="scroll-mt-28">
+                <li data-fx="rise" data-fx-delay="{{ ($loop->index % 3) + 1 }}" id="student-review-{{ (int) data_get($card, 'id') }}" class="scroll-mt-28">
                     <figure class="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card dark:border-white/10 dark:bg-slate-900">
                         @if (filled(data_get($card, 'video_embed_url')) || filled(data_get($card, 'video_url')))
                             @include('site.marketing.partials.video-embed', ['embedUrl' => data_get($card, 'video_embed_url'), 'url' => data_get($card, 'video_url'), 'title' => 'Video review by '.data_get($card, 'student_name')])
@@ -68,7 +68,7 @@
         </ul>
 
         @if (is_array($viewAll) && filled($viewAll['label'] ?? null) && filled($viewAll['url'] ?? null))
-            <div class="mt-10 text-center">
+            <div data-fx="rise" class="mt-10 text-center">
                 <x-site.button :link="$viewAll" icon="arrow-right" />
             </div>
         @endif

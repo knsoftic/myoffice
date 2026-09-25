@@ -357,3 +357,138 @@
         );
     }
 }
+
+/*
+|--------------------------------------------------------------------------
+| Scroll effects (public site)
+|--------------------------------------------------------------------------
+|
+| Entrance reveals and scroll-linked depth for the public pages. Two rules run
+| through all of it.
+|
+| **Everything is scoped to `.fx-on`.** That class is set by one inline script
+| (site/partials/fx-script.blade.php) and only when JavaScript runs, an
+| IntersectionObserver exists, and the visitor has not asked for reduced motion.
+| Without it not one declaration below applies, so a crawler, a text browser, a
+| failed bundle and somebody with vestibular disorder all get the finished page
+| with nothing hidden. An effect that can hide content must be opt-in from a
+| working runtime, never opt-out from a broken one.
+|
+| **`perspective()` sits inside each transform, never on a parent.** A parent
+| with `perspective` becomes a containing block for its fixed descendants, which
+| silently re-anchors sticky headers and modals inside that subtree. Per-element
+| perspective costs nothing and cannot reach anything it was not applied to.
+|
+| `data-fx` (entrance, one-shot) and `data-fx-parallax` (continuous, scroll-linked)
+| are mutually exclusive on one element: the first animates `transform` with a
+| transition, the second rewrites it every frame, and an element wearing both
+| would fight itself.
+|
+*/
+@layer utilities {
+    /* ---------------------------------------------------------------- entrance */
+    .fx-on [data-fx] {
+        opacity: 0;
+        transition:
+            opacity 700ms cubic-bezier(0.16, 1, 0.3, 1),
+            transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* Only while it still has somewhere to travel — `will-change` held on every
+       revealed element is memory the page never gets back. */
+    .fx-on [data-fx]:not(.fx-in) {
+        will-change: opacity, transform;
+    }
+
+    .fx-on [data-fx='rise'] {
+        transform: translate3d(0, 2.5rem, 0);
+    }
+
+    /* The page tipping up towards the reader — the workhorse of the 3D feel. */
+    .fx-on [data-fx='tilt'] {
+        transform: perspective(1200px) rotateX(14deg) translate3d(0, 3rem, 0) scale(0.94);
+        transform-origin: 50% 100%;
+    }
+
+    /* A heavier tilt with a twist, for a card deck or a screenshot cluster. */
+    .fx-on [data-fx='deck'] {
+        transform: perspective(1400px) rotateX(22deg) rotateZ(-4deg) translate3d(0, 4rem, 0) scale(0.88);
+        transform-origin: 50% 100%;
+    }
+
+    .fx-on [data-fx='left'] {
+        transform: perspective(1200px) rotateY(-16deg) translate3d(-2.5rem, 0, 0);
+        transform-origin: 100% 50%;
+    }
+
+    .fx-on [data-fx='right'] {
+        transform: perspective(1200px) rotateY(16deg) translate3d(2.5rem, 0, 0);
+        transform-origin: 0% 50%;
+    }
+
+    .fx-on [data-fx='zoom'] {
+        transform: scale(0.9);
+    }
+
+    /*
+    | The finished state, and it is deliberately short-lived: scroll-fx.js removes `data-fx`
+    | once the transition ends, which drops every rule in this block off the element.
+    |
+    | It has to. `.fx-on [data-fx].fx-in` outranks Tailwind's `.hover\:-translate-y-0\.5:hover`,
+    | so a card that kept the attribute would stop lifting on hover the moment it appeared, and
+    | the 700ms above would replace whatever `duration-200` the component chose. An entrance
+    | effect that permanently rewrites the component it decorated is a bug wearing a feature's
+    | clothes.
+    */
+    .fx-on [data-fx].fx-in {
+        opacity: 1;
+        transform: none;
+    }
+
+    /* ----------------------------------------------------------------- stagger */
+    .fx-on [data-fx-delay='1'] { transition-delay: 80ms; }
+    .fx-on [data-fx-delay='2'] { transition-delay: 160ms; }
+    .fx-on [data-fx-delay='3'] { transition-delay: 240ms; }
+    .fx-on [data-fx-delay='4'] { transition-delay: 320ms; }
+    .fx-on [data-fx-delay='5'] { transition-delay: 400ms; }
+    .fx-on [data-fx-delay='6'] { transition-delay: 480ms; }
+
+    /* ---------------------------------------------------------------- parallax */
+    /*
+    | `--fx-p` is written by scroll-fx.js: -1 when the element sits a viewport
+    | below the fold, 0 as it crosses the middle, +1 a viewport above. `--fx-far`
+    | scales how much it answers, so one rule drives a whole stack of layers at
+    | different depths.
+    |
+    | No transition: this follows the scrollbar, and easing a value that is
+    | already continuous only makes it lag behind the finger dragging it.
+    */
+    .fx-on [data-fx-parallax] {
+        transform: translate3d(0, calc(var(--fx-p, 0) * var(--fx-far, 40px)), 0);
+        will-change: transform;
+    }
+
+    /* Parallax plus a little yaw and pitch — a card that leans as it passes. */
+    .fx-on [data-fx-float] {
+        transform:
+            perspective(1200px)
+            translate3d(0, calc(var(--fx-p, 0) * var(--fx-far, 30px)), 0)
+            rotateX(calc(var(--fx-p, 0) * -7deg))
+            rotateY(calc(var(--fx-p, 0) * 5deg));
+        will-change: transform;
+    }
+
+    /*
+    | Phones do the reveals and none of the scroll-linked work. A parallax layer
+    | is a transform recalculated every frame on the device least able to afford
+    | it, and on a narrow screen the travel it buys is a few pixels nobody reads
+    | as depth. The entrance effects stay: they run once and then stop.
+    */
+    @media (max-width: 767px) {
+        .fx-on [data-fx-parallax],
+        .fx-on [data-fx-float] {
+            transform: none;
+            will-change: auto;
+        }
+    }
+}

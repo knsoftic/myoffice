@@ -28,8 +28,8 @@
                 <div class="absolute inset-0 bg-slate-950/70"></div>
             </div>
         @elseif ($color === null)
-            <div class="pointer-events-none absolute -top-24 left-1/2 -z-10 h-72 w-[48rem] -translate-x-1/2 rounded-full bg-brand-500/30 blur-3xl" aria-hidden="true"></div>
-            <div class="pointer-events-none absolute -bottom-32 -right-24 -z-10 h-72 w-72 rounded-full bg-brand-400/20 blur-3xl" aria-hidden="true"></div>
+            <div class="pointer-events-none absolute -top-24 left-1/2 -z-10 h-72 w-[48rem] -translate-x-1/2 rounded-full bg-brand-500/30 blur-3xl" aria-hidden="true" data-fx-parallax style="--fx-far: 50px"></div>
+            <div class="pointer-events-none absolute -bottom-32 -right-24 -z-10 h-72 w-72 rounded-full bg-brand-400/20 blur-3xl" aria-hidden="true" data-fx-parallax style="--fx-far: -80px"></div>
         @endif
 
         <div class="mx-auto max-w-2xl">
@@ -44,7 +44,7 @@
             @endif
 
             @if ($buttons !== [])
-                <div class="mt-10 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
+                <div data-fx="rise" data-fx-delay="2" class="mt-10 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
                     @foreach ($buttons as $button)
                         <x-site.button :link="$button" size="lg" />
                     @endforeach

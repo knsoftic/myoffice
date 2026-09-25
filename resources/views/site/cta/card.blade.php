@@ -36,7 +36,7 @@
             @endif
 
             @if ($buttons !== [])
-                <div class="mt-8 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
+                <div data-fx="rise" data-fx-delay="2" class="mt-8 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
                     @foreach ($buttons as $button)
                         <x-site.button :link="$button" />
                     @endforeach

@@ -23,7 +23,7 @@
 @if ($block !== null && $label !== '')
     @if ($variant === CtaVariant::FullWidth)
         <x-site.section :anchor="data_get($section ?? null, 'anchor')" background="none" padding="none" width="full" :label="$label">
-            <x-site.cta :cta="$block" />
+            <x-site.cta data-fx="rise" :cta="$block" />
         </x-site.section>
     @else
         <x-site.section
@@ -32,7 +32,7 @@
             :padding="$variant === CtaVariant::Inline ? 'tight' : 'default'"
             :label="$label"
         >
-            <x-site.cta :cta="$block" />
+            <x-site.cta data-fx="rise" :cta="$block" />
         </x-site.section>
     @endif
 @endif

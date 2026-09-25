@@ -105,7 +105,7 @@
                         x-on:keydown.arrow-right.window="if (open) next()"
                         x-on:keydown.arrow-left.window="if (open) prev()"
                     >
-                        <button type="button" x-on:click="show(0, $el)" class="group block w-full overflow-hidden rounded-2xl bg-slate-100 shadow-card ring-1 ring-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:bg-slate-800 dark:ring-white/10">
+                        <button type="button" data-fx="deck" x-on:click="show(0, $el)" class="group block w-full overflow-hidden rounded-2xl bg-slate-100 shadow-card ring-1 ring-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:bg-slate-800 dark:ring-white/10">
                             <x-site.image :media="$slides[0]['media']" profile="banner" :eager="true" :alt="$slides[0]['alt']" class="h-full w-full transition duration-300 group-hover:scale-[1.01]" />
                             <span class="sr-only">Open the gallery</span>
                         </button>
@@ -172,7 +172,7 @@
             </div>
 
             <aside class="mt-12 lg:col-span-4 lg:mt-0" aria-label="Project facts">
-                <div class="space-y-6 rounded-2xl border border-slate-200 bg-slate-50 p-6 lg:sticky lg:top-28 dark:border-white/10 dark:bg-white/[0.03]">
+                <div data-fx="right" class="space-y-6 rounded-2xl border border-slate-200 bg-slate-50 p-6 lg:sticky lg:top-28 dark:border-white/10 dark:bg-white/[0.03]">
                     <dl class="space-y-4 text-sm">
                         @if (filled($item->client_name))
                             <div>
@@ -259,7 +259,7 @@
             <ul role="list" class="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                 @foreach ($related as $relatedItem)
                     @php $relatedCover = $snapshot($relatedItem, ['coverAsset', 'cover', 'coverMedia'], ImageProfile::Card); @endphp
-                    <li class="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card transition hover:shadow-card-hover dark:border-white/10 dark:bg-slate-900">
+                    <li data-fx="tilt" data-fx-delay="{{ ($loop->index % 4) + 1 }}" class="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card transition hover:shadow-card-hover dark:border-white/10 dark:bg-slate-900">
                         <div class="aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
                             @if ($relatedCover)
                                 <x-site.image :media="$relatedCover" profile="card" :lazy="$lazy" :alt="$relatedItem->title" class="h-full w-full transition duration-300 group-hover:scale-[1.02]" />

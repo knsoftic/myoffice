@@ -38,12 +38,12 @@
                     @endif
                 </nav>
 
-                <h1 class="text-3xl font-semibold tracking-tight text-slate-900 dark:text-white sm:text-4xl">
+                <h1 data-fx="rise" class="text-3xl font-semibold tracking-tight text-slate-900 dark:text-white sm:text-4xl">
                     {{ $course->name }}
                 </h1>
 
                 @if (filled($course->short_description))
-                    <p class="mt-3 max-w-2xl text-lg text-slate-600 dark:text-slate-300">{{ $course->short_description }}</p>
+                    <p data-fx="rise" data-fx-delay="1" class="mt-3 max-w-2xl text-lg text-slate-600 dark:text-slate-300">{{ $course->short_description }}</p>
                 @endif
 
                 <div class="mt-5 flex flex-wrap items-center gap-2 text-sm">
@@ -83,7 +83,7 @@
 
             {{-- The fee block and the one thing the visitor came to do. --}}
             <aside class="lg:col-span-1">
-                <div class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <div data-fx="right" class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                     @if ($total !== null)
                         <p class="text-3xl font-semibold tabular-nums text-slate-900 dark:text-white">
                             {{ money($course->course_fee) }}
@@ -333,7 +333,7 @@
                     <h2 class="mb-3 text-xl font-semibold text-slate-900 dark:text-white">What students say</h2>
                     <div class="grid gap-4 sm:grid-cols-2">
                         @foreach ($payload->reviews as $review)
-                            <blockquote class="rounded-xl border border-slate-200 p-5 dark:border-slate-800">
+                            <blockquote data-fx="tilt" data-fx-delay="{{ ($loop->index % 4) + 1 }}" class="rounded-xl border border-slate-200 p-5 dark:border-slate-800">
                                 <p class="text-sm text-slate-700 dark:text-slate-200">{{ $review->review }}</p>
                                 <footer class="mt-3 text-xs text-slate-500 dark:text-slate-400">
                                     — {{ $review->student_name }}

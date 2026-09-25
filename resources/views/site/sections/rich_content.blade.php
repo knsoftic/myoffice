@@ -40,21 +40,21 @@
     <x-site.section :anchor="data_get($section ?? null, 'anchor')" :background="$background" :label="$heading !== '' ? $heading : null">
         @if ($layout === 'full')
             <div class="mx-auto max-w-3xl">
-                <x-site.heading :title="$heading" :subtitle="$subheading" align="center" />
+                <x-site.heading data-fx="rise" :title="$heading" :subtitle="$subheading" align="center" />
 
                 @if ($hasBody)
-                    <x-site.prose :html="$body" size="lg" @class(['mt-8' => $heading !== '' || $subheading !== '']) />
+                    <x-site.prose data-fx="rise" data-fx-delay="1" :html="$body" size="lg" @class(['mt-8' => $heading !== '' || $subheading !== '']) />
                 @endif
             </div>
 
             @if ($image !== null)
-                <div class="mx-auto mt-12 max-w-5xl overflow-hidden rounded-2xl bg-slate-100 shadow-xl ring-1 ring-slate-900/5 dark:bg-slate-800 dark:ring-white/10">
+                <div data-fx="deck" class="mx-auto mt-12 max-w-5xl overflow-hidden rounded-2xl bg-slate-100 shadow-xl ring-1 ring-slate-900/5 dark:bg-slate-800 dark:ring-white/10">
                     <x-site.image :media="$image" profile="card" :lazy="$lazy" img-class="h-auto w-full object-cover" />
                 </div>
             @endif
         @else
             <div class="grid items-center gap-12 lg:grid-cols-2 lg:gap-16">
-                <div @class(['lg:order-2' => $layout === 'text_right'])>
+                <div data-fx="{{ $layout === 'text_right' ? 'right' : 'left' }}" @class(['lg:order-2' => $layout === 'text_right'])>
                     <x-site.heading :title="$heading" :subtitle="$subheading" align="left" />
 
                     @if ($hasBody)
@@ -62,7 +62,7 @@
                     @endif
                 </div>
 
-                <div @class(['lg:order-1' => $layout === 'text_right'])>
+                <div data-fx="{{ $layout === 'text_right' ? 'left' : 'right' }}" @class(['lg:order-1' => $layout === 'text_right'])>
                     <div class="overflow-hidden rounded-2xl bg-slate-100 shadow-xl ring-1 ring-slate-900/5 dark:bg-slate-800 dark:ring-white/10">
                         <x-site.image :media="$image" profile="card" :lazy="$lazy" ratio="4/3" class="h-full w-full" />
                     </div>
@@ -77,7 +77,7 @@
                 'lg:grid-cols-4' => $highlights->count() === 4,
             ])>
                 @foreach ($highlights as $highlight)
-                    <li class="flex gap-4 rounded-2xl border border-slate-200/80 bg-white/70 p-6 dark:border-white/10 dark:bg-white/[0.03]">
+                    <li data-fx="tilt" data-fx-delay="{{ ($loop->index % 4) + 1 }}" class="flex gap-4 rounded-2xl border border-slate-200/80 bg-white/70 p-6 dark:border-white/10 dark:bg-white/[0.03]">
                         <span class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600 ring-1 ring-inset ring-brand-100 dark:bg-brand-500/10 dark:text-brand-300 dark:ring-brand-500/20">
                             <x-ui.icon :name="data_get($highlight, 'content.icon') ?: 'sparkles'" class="h-5 w-5" />
                         </span>

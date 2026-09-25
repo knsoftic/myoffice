@@ -7,7 +7,7 @@
 --}}
 
 <div class="grid overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl lg:grid-cols-2 dark:border-white/10 dark:bg-slate-900">
-    <div class="order-2 flex flex-col justify-center px-6 py-12 sm:px-12 lg:order-1 lg:py-16">
+    <div data-fx="left" class="order-2 flex flex-col justify-center px-6 py-12 sm:px-12 lg:order-1 lg:py-16">
         <{{ $headingTag }} class="text-balance text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl dark:text-white">{{ $heading }}</{{ $headingTag }}>
 
         @if ($subheading !== '')
@@ -27,7 +27,7 @@
         @endif
     </div>
 
-    <div class="relative order-1 min-h-48 overflow-hidden lg:order-2 lg:min-h-full" aria-hidden="true">
+    <div data-fx="right" data-fx-delay="1" class="relative order-1 min-h-48 overflow-hidden lg:order-2 lg:min-h-full" aria-hidden="true">
         @if ($background !== null)
             <x-site.image :media="$background" profile="card" class="absolute inset-0 h-full w-full" />
         @elseif ($color !== null)

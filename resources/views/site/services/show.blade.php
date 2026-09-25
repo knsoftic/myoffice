@@ -64,7 +64,7 @@
         <div class="lg:grid lg:grid-cols-12 lg:gap-12">
             <article class="lg:col-span-8">
                 @if ($image)
-                    <div class="mb-10 overflow-hidden rounded-2xl bg-slate-100 shadow-card ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-white/10">
+                    <div data-fx="deck" class="mb-10 overflow-hidden rounded-2xl bg-slate-100 shadow-card ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-white/10">
                         <x-site.image :media="$image" profile="banner" :eager="true" :alt="$service->name" class="h-full w-full" />
                     </div>
                 @endif
@@ -106,7 +106,7 @@
             </article>
 
             <aside class="mt-12 lg:col-span-4 lg:mt-0" aria-label="Start this service">
-                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-6 lg:sticky lg:top-28 dark:border-white/10 dark:bg-white/[0.03]">
+                <div data-fx="right" class="rounded-2xl border border-slate-200 bg-slate-50 p-6 lg:sticky lg:top-28 dark:border-white/10 dark:bg-white/[0.03]">
                     @if ($hasPrice)
                         <p class="text-sm text-slate-500 dark:text-slate-400">{{ $service->price_note ?: 'Starting from' }}</p>
                         <p class="mt-1 text-3xl font-bold tracking-tight tabular-nums text-slate-900 dark:text-white">{{ money((string) $service->starting_price) }}</p>
@@ -135,7 +135,7 @@
                         $cover = $snapshot($item, ['coverAsset', 'cover', 'coverMedia'], ImageProfile::Card);
                         $itemUrl = $portfolioDetail && Route::has('site.portfolio.show') ? route('site.portfolio.show', $item->slug) : null;
                     @endphp
-                    <li class="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card transition hover:shadow-card-hover dark:border-white/10 dark:bg-slate-900">
+                    <li data-fx="tilt" data-fx-delay="{{ ($loop->index % 4) + 1 }}" class="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card transition hover:shadow-card-hover dark:border-white/10 dark:bg-slate-900">
                         <div class="aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
                             @if ($cover)
                                 <x-site.image :media="$cover" profile="card" :lazy="$lazy" :alt="$item->title" class="h-full w-full transition duration-300 group-hover:scale-[1.02]" />
@@ -164,7 +164,7 @@
             <x-site.heading title="Related services" align="left" />
             <ul role="list" class="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                 @foreach ($relatedServices as $related)
-                    <li class="group relative rounded-2xl border border-slate-200 bg-white p-6 shadow-card transition hover:-translate-y-0.5 hover:shadow-card-hover dark:border-white/10 dark:bg-slate-900">
+                    <li data-fx="tilt" data-fx-delay="{{ ($loop->index % 4) + 1 }}" class="group relative rounded-2xl border border-slate-200 bg-white p-6 shadow-card transition hover:-translate-y-0.5 hover:shadow-card-hover dark:border-white/10 dark:bg-slate-900">
                         <span class="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-300">
                             <x-ui.icon :name="filled($related->icon) ? $related->icon : 'wrench-screwdriver'" class="h-5 w-5" />
                         </span>

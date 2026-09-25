@@ -34,11 +34,11 @@
 @if ($posts->isNotEmpty())
     <x-site.section :anchor="data_get($section ?? null, 'anchor')" background="muted" :label="$heading">
         <div class="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
-            <x-site.heading :title="$heading" :subtitle="$description !== '' ? $description : null" align="left" />
+            <x-site.heading data-fx="rise" :title="$heading" :subtitle="$description !== '' ? $description : null" align="left" />
             @if (is_array($viewAll) && filled($viewAll['label'] ?? null) && filled($viewAll['url'] ?? null))
-                <x-site.button :link="$viewAll" icon="arrow-right" class="shrink-0" />
+                <x-site.button data-fx="rise" data-fx-delay="1" :link="$viewAll" icon="arrow-right" class="shrink-0" />
             @elseif ($blogUrl)
-                <x-site.button label="All posts" :url="$blogUrl" style="outline" icon="arrow-right" class="shrink-0" />
+                <x-site.button data-fx="rise" data-fx-delay="1" label="All posts" :url="$blogUrl" style="outline" icon="arrow-right" class="shrink-0" />
             @endif
         </div>
 
@@ -52,7 +52,7 @@
                     }
                     $categoryUrl = $safeUrl(data_get($post, 'category.url'));
                 @endphp
-                <li class="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card transition duration-200 hover:-translate-y-0.5 hover:shadow-card-hover focus-within:ring-2 focus-within:ring-brand-500/50 dark:border-white/10 dark:bg-slate-900">
+                <li data-fx="tilt" data-fx-delay="{{ ($loop->index % 3) + 1 }}" class="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card transition duration-200 hover:-translate-y-0.5 hover:shadow-card-hover focus-within:ring-2 focus-within:ring-brand-500/50 dark:border-white/10 dark:bg-slate-900">
                     <div class="aspect-video overflow-hidden bg-slate-100 dark:bg-slate-800">
                         @if (filled(data_get($image, 'url')))
                             <x-site.image :media="$image" profile="card" :alt="data_get($post, 'title')" class="h-full w-full transition duration-300 group-hover:scale-[1.02]" />

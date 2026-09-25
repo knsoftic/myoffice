@@ -782,6 +782,59 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-09-25 — Scroll effects for the public site, and the class that decides whether any of it happens
+
+Asked for the public site to feel like a reference marketing site, with 3D scrolling. Built as a
+**dependency-free** system — no GSAP, no ScrollTrigger, no Three.js — because everything wanted here
+is a CSS transform and an `IntersectionObserver`, and a marketing page is the worst place to spend
+150 kB of someone's data plan on a library that tilts cards. Total cost: **+1.5 kB CSS, +1.6 kB JS**,
+across **81 effects and 8 parallax layers in 24 view files**.
+
+**The design decision the whole thing rests on: an effect that can hide content must be opt-in from
+a working runtime, never opt-out from a broken one.** Every entrance starts its element at
+`opacity: 0`, which is only safe if something is *guaranteed* to finish. Three things stop that —
+JavaScript never runs, the bundle fails, the visitor asked for reduced motion — so every hiding
+declaration is scoped to `.fx-on` on `<html>`, and one inline pre-paint script is the only thing
+that sets it. No class, no hiding: a crawler, a text browser, a blocked CDN and somebody with
+vestibular disorder all get the complete page. There is no `<noscript>` fallback to keep in sync,
+because the default state *is* the fallback. Verified by removing the class and measuring: **0 of
+14 elements hidden, every one `opacity: 1, transform: none`.**
+
+**`perspective()` sits inside each transform, never on a parent.** A parent with `perspective`
+becomes a containing block for its fixed descendants, which silently re-anchors sticky headers and
+modals inside that subtree. Per-element perspective costs nothing and cannot reach what it was not
+applied to.
+
+**The entrance is released when it ends, and that came out of a review.** An agent adding attributes
+noticed the teaser card already carries `hover:-translate-y-0.5 transition duration-200`. The
+problem was real and one specificity calculation deep: `.fx-on [data-fx].fx-in` is two classes and
+an attribute against `.hover\:-translate-y-0\.5:hover`'s one class and a pseudo-class, so the card
+would have **stopped lifting on hover the moment it finished appearing**, and anything still moving
+would take 700ms instead of the 200ms the component chose. An entrance effect that permanently
+rewrites the component it decorated is a bug wearing a feature's clothes. So `scroll-fx.js` removes
+`data-fx` on `transitionend` — dropping the transition, the override and the `will-change` in one —
+with a timeout as the safety net, because `transitionend` never fires for an element that was
+already at its final value or sits in a throttled tab. Verified by walking the page: **14 revealed,
+0 attributes left, 0 elements invisible.**
+
+Parallax is driven by an observer too, not a `querySelectorAll` per frame: only elements actually on
+screen are in the live set, so a long page with forty layers still measures the handful the reader
+can see. Phones get the reveals and none of the scroll-linked work — a transform recalculated every
+frame on the device least able to afford it, buying a few pixels of travel nobody reads as depth.
+
+**What was deliberately left static, because motion is a cost paid by the reader:** prose bodies on
+every `show` page (somebody arrived to read that course; fading it in paragraph by paragraph makes
+reading feel like fighting the page), filter and search controls above the fold, the contact form,
+breadcrumbs, pagination, empty states, the sticky asides, and the Alpine dialogs in
+`success_stories` — an observer-driven transform on a `display: none` element either never fires or
+fights Alpine's own show/hide. `inline.blade.php` got nothing at all: it is a one-line notice bar,
+and a strip that slides in reads as a cookie banner. Quote cards and team portraits got the gentle
+`rise` rather than `tilt`, because a quote you are meant to read and a person's face should not
+swing in 3D.
+
+Every Blade view compiles (`view:cache` clean across the whole application, four agents' edits
+included).
+
 ### 2026-09-25 — A front desk with every permission it needed and nothing to look at
 
 The request was "build the reception panel". The answer was that **it already exists and had been

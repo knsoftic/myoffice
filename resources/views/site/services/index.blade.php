@@ -103,7 +103,7 @@
                         $technologies = $service->relationLoaded('technologies') ? $service->technologies : collect();
                         $showUrl = route('site.services.show', $service->slug);
                     @endphp
-                    <li class="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card transition duration-200 hover:-translate-y-0.5 hover:shadow-card-hover focus-within:ring-2 focus-within:ring-brand-500/50 dark:border-white/10 dark:bg-slate-900">
+                    <li data-fx="tilt" data-fx-delay="{{ ($loop->index % 4) + 1 }}" class="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card transition duration-200 hover:-translate-y-0.5 hover:shadow-card-hover focus-within:ring-2 focus-within:ring-brand-500/50 dark:border-white/10 dark:bg-slate-900">
                         @if ($media)
                             <div class="aspect-video overflow-hidden bg-slate-100 dark:bg-slate-800">
                                 <x-site.image :media="$media" profile="card" :lazy="$lazy" class="h-full w-full transition duration-300 group-hover:scale-[1.02]" />
@@ -171,7 +171,7 @@
 
     @if ($contactUrl && $services->isNotEmpty())
         <x-site.section background="muted" padding="default">
-            <div class="flex flex-col items-start gap-6 rounded-2xl bg-white p-8 shadow-card ring-1 ring-slate-200 sm:flex-row sm:items-center sm:justify-between dark:bg-slate-900 dark:ring-white/10">
+            <div data-fx="rise" class="flex flex-col items-start gap-6 rounded-2xl bg-white p-8 shadow-card ring-1 ring-slate-200 sm:flex-row sm:items-center sm:justify-between dark:bg-slate-900 dark:ring-white/10">
                 <div>
                     <h2 class="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Not sure which service fits?</h2>
                     <p class="mt-2 text-slate-600 dark:text-slate-300">Describe the problem. We will suggest the shortest path to a working product.</p>

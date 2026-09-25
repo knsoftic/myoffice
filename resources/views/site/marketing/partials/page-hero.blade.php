@@ -18,7 +18,7 @@
 @endphp
 
 <section class="relative isolate overflow-hidden border-b border-slate-200/80 bg-slate-50 dark:border-white/10 dark:bg-slate-900/40" aria-labelledby="page-title">
-    <div class="pointer-events-none absolute -top-32 right-0 -z-10 h-72 w-[40rem] rounded-full bg-brand-400/15 blur-3xl dark:bg-brand-600/10" aria-hidden="true"></div>
+    <div class="pointer-events-none absolute -top-32 right-0 -z-10 h-72 w-[40rem] rounded-full bg-brand-400/15 blur-3xl dark:bg-brand-600/10" aria-hidden="true" data-fx-parallax style="--fx-far: 55px"></div>
 
     <div class="mx-auto max-w-screen-xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8 lg:py-20">
         <nav aria-label="Breadcrumb">
@@ -45,17 +45,17 @@
         </nav>
 
         @if (filled($eyebrow ?? null))
-            <p class="mt-6 text-xs font-semibold uppercase tracking-[0.14em] text-brand-600 dark:text-brand-400">{{ $eyebrow }}</p>
+            <p data-fx="rise" class="mt-6 text-xs font-semibold uppercase tracking-[0.14em] text-brand-600 dark:text-brand-400">{{ $eyebrow }}</p>
         @endif
 
-        <h1 id="page-title" @class([
+        <h1 id="page-title" data-fx="rise" data-fx-delay="1" @class([
             'max-w-4xl text-balance text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl dark:text-white',
             'mt-6' => blank($eyebrow ?? null),
             'mt-2' => filled($eyebrow ?? null),
         ])>{{ $title }}</h1>
 
         @if ($subtitle !== '')
-            <p class="mt-5 max-w-2xl text-pretty text-lg leading-relaxed text-slate-600 sm:text-xl dark:text-slate-300">{{ $subtitle }}</p>
+            <p data-fx="rise" data-fx-delay="2" class="mt-5 max-w-2xl text-pretty text-lg leading-relaxed text-slate-600 sm:text-xl dark:text-slate-300">{{ $subtitle }}</p>
         @endif
     </div>
 </section>

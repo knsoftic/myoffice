@@ -33,7 +33,7 @@
 
 @if ($stories->isNotEmpty())
     <x-site.section :anchor="data_get($section ?? null, 'anchor')" background="muted" :label="$heading">
-        <x-site.heading :title="$heading" :subtitle="$description !== '' ? $description : null" align="center" />
+        <x-site.heading data-fx="rise" :title="$heading" :subtitle="$description !== '' ? $description : null" align="center" />
 
         <div x-data="{ openId: null, opener: null, show(id, el) { this.openId = id; this.opener = el; }, hide() { this.openId = null; this.$nextTick(() => this.opener?.focus()); } }" x-on:keydown.escape.window="if (openId !== null) hide()">
             <ul role="list" class="mt-12 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -42,7 +42,7 @@
                         $photo = data_get($story, 'photo');
                         $outcome = collect([data_get($story, 'company_name'), data_get($story, 'platform')])->filter()->implode(' · ');
                     @endphp
-                    <li id="success-story-{{ (int) data_get($story, 'id') }}" class="scroll-mt-28">
+                    <li data-fx="rise" data-fx-delay="{{ ($loop->index % 3) + 1 }}" id="success-story-{{ (int) data_get($story, 'id') }}" class="scroll-mt-28">
                         <article class="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-card dark:border-white/10 dark:bg-slate-900">
                             <div class="flex items-center gap-4">
                                 <span class="h-14 w-14 shrink-0 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
@@ -110,7 +110,7 @@
         </div>
 
         @if (is_array($viewAll) && filled($viewAll['label'] ?? null) && filled($viewAll['url'] ?? null))
-            <div class="mt-10 text-center">
+            <div data-fx="rise" class="mt-10 text-center">
                 <x-site.button :link="$viewAll" icon="arrow-right" />
             </div>
         @endif

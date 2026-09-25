@@ -35,11 +35,11 @@
 @if ($jobs->isNotEmpty())
     <x-site.section :anchor="data_get($section ?? null, 'anchor')" background="surface" :label="$heading">
         <div class="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
-            <x-site.heading :title="$heading" :subtitle="$description !== '' ? $description : null" align="left" />
+            <x-site.heading data-fx="rise" :title="$heading" :subtitle="$description !== '' ? $description : null" align="left" />
             @if (is_array($viewAll) && filled($viewAll['label'] ?? null) && filled($viewAll['url'] ?? null))
-                <x-site.button :link="$viewAll" icon="arrow-right" class="shrink-0" />
+                <x-site.button data-fx="rise" data-fx-delay="1" :link="$viewAll" icon="arrow-right" class="shrink-0" />
             @elseif ($careersUrl)
-                <x-site.button label="All openings" :url="$careersUrl" style="outline" icon="arrow-right" class="shrink-0" />
+                <x-site.button data-fx="rise" data-fx-delay="1" label="All openings" :url="$careersUrl" style="outline" icon="arrow-right" class="shrink-0" />
             @endif
         </div>
 
@@ -53,7 +53,7 @@
                         : 'Negotiable';
                     $meta = collect([data_get($job, 'location'), data_get($job, 'work_mode.label'), data_get($job, 'department')])->filter()->implode(' · ');
                 @endphp
-                <li class="group relative flex flex-col gap-2 p-5 transition hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between dark:hover:bg-white/[0.03]">
+                <li data-fx="rise" data-fx-delay="{{ ($loop->index % 4) + 1 }}" class="group relative flex flex-col gap-2 p-5 transition hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between dark:hover:bg-white/[0.03]">
                     <div class="min-w-0">
                         <h3 class="font-semibold text-slate-900 dark:text-white">
                             @if ($jobUrl)

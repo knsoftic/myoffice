@@ -100,7 +100,7 @@
                         $url = $detailEnabled ? route('site.portfolio.show', $item->slug) : null;
                         $category = $item->relationLoaded('category') ? $item->category : null;
                     @endphp
-                    <li class="group relative break-inside-avoid overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card transition duration-200 hover:shadow-card-hover focus-within:ring-2 focus-within:ring-brand-500/50 dark:border-white/10 dark:bg-slate-900">
+                    <li data-fx="tilt" data-fx-delay="{{ ($loop->index % 4) + 1 }}" class="group relative break-inside-avoid overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card transition duration-200 hover:shadow-card-hover focus-within:ring-2 focus-within:ring-brand-500/50 dark:border-white/10 dark:bg-slate-900">
                         @if ($cover)
                             <div class="overflow-hidden bg-slate-100 dark:bg-slate-800">
                                 <x-site.image :media="$cover" profile="card" :lazy="$lazy" :alt="$item->title" img-class="h-auto w-full object-cover transition duration-300 group-hover:scale-[1.02]" />
