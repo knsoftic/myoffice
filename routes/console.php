@@ -373,3 +373,74 @@ Schedule::command('notifications:prune')->weeklyOn(1, '03:30')->withoutOverlappi
 Schedule::command('reports:prune-exports')->dailyAt('03:00')->withoutOverlapping(30);
 Schedule::command('reports:warm-caches')->dailyAt('06:30')->withoutOverlapping(60);
 Schedule::command('activity-log:prune')->weeklyOn(1, '03:45')->withoutOverlapping(120);
+
+
+/*
+|--------------------------------------------------------------------------
+| Operations, backups and the nightly proofs (phase-24-25 §10.4)
+|--------------------------------------------------------------------------
+|
+| **The order is the contract's and it is load bearing.** `integrity:verify` runs at 02:15, after
+| `financial:verify-constraints` at 02:00, because the verdict it records is the one that command
+| produced — running it first would file yesterday's answer under today's date. `backup:prune` runs
+| after both `backup:run` entries and `backup:verify` after the prune, so a checksum is never taken
+| of a file the prune is about to remove.
+|
+| **Two entries take their cadence from settings, and cannot say so in a cron expression.** The
+| scheduler is built at boot, so `backup.database_schedule` and `backup.database_time` are not
+| available as a fluent call — the entry is registered hourly and the COMMAND decides whether this
+| is its minute. The alternative is a cadence nobody can change without a deploy, which is not a
+| setting at all.
+|
+| **`withoutOverlapping` everywhere, with a minute budget on the two that matter.** A database
+| backup that overran its window must not have a second copy of itself start: two `mysqldump`
+| processes against one database is how a backup window becomes an outage.
+|
+| Everything here is idempotent for the day, so a missed night self-heals the next one rather than
+| leaving a gap somebody has to notice.
+|
+| The eight spine and Phase 18 entries above are NOT restated here. `schedule:list` is diffed
+| against §10.4's table by GL-41, and the table is the authority for both halves.
+|
+*/
+
+// --------------------------------------------------------------------- heartbeats
+// A scheduler that stops does not fail, it goes quiet — and every proof below it goes quiet with
+// it. This is the entry whose absence the health screen is watching for.
+Schedule::command('ops:heartbeat')->everyMinute()->withoutOverlapping()->runInBackground();
+Schedule::command('ops:check-heartbeats')->everyFiveMinutes()->withoutOverlapping();
+
+// --------------------------------------------------------------------- retention
+Schedule::command('ops:prune-logs')->dailyAt('00:30')->withoutOverlapping(15);
+
+// --------------------------------------------------------------------- the nightly proofs
+// 02:15, after the spine's financial:verify-constraints at 02:00. One integrity_check_runs row per
+// suite, and the financial suites run first inside the command.
+Schedule::command('integrity:verify --suite=all')->dailyAt('02:15')->withoutOverlapping(60);
+
+// --------------------------------------------------------------------- backups
+// Registered hourly; the command reads backup.database_schedule / database_time and returns
+// immediately when this is not its minute, or when backup.enabled is false. See the note above.
+Schedule::command('backup:run --type=database')->hourly()->withoutOverlapping(120);
+Schedule::command('backup:run --type=files')->hourly()->withoutOverlapping(180);
+
+// Files only, never a backup_runs row — the table is append-only (§6.10.3, D19).
+Schedule::command('backup:prune')->dailyAt('03:30')->withoutOverlapping(30);
+
+// The cheap proof daily, the real one weekly. A checksum says the bytes are intact; only a restore
+// says the archive can be restored, which is the question GL-36 actually asks.
+Schedule::command('backup:verify --latest')->dailyAt('04:00')->withoutOverlapping(30);
+Schedule::command('backup:verify --latest --deep')->weeklyOn(0, '04:30')->withoutOverlapping(120);
+
+// --------------------------------------------------------------------- weekly audits
+// Nulls old findings and deletes nothing: the verdict and the counts are kept for ever (§2.3).
+Schedule::command('ops:prune-integrity-runs')->weeklyOn(0, '05:00')->withoutOverlapping();
+
+// Writes an integrity_check_runs row with suite = security, and notifies on a NEW finding — a
+// weekly report that repeats last week's known issues is a report people stop opening.
+Schedule::command('security:audit --quiet-run')->weeklyOn(1, '05:30')->withoutOverlapping(60);
+
+// --------------------------------------------------------------------- the daily digest
+// Registered hourly for the same reason as the backups: ops.error_digest_time is a setting, and the
+// command gates itself on it and on ops.error_digest_enabled.
+Schedule::command('ops:digest')->hourly()->withoutOverlapping(30);
