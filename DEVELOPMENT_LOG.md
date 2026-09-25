@@ -782,6 +782,53 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-09-25 — A section view that nothing could reach, and a header that offered a visitor nothing to do
+
+Asked to enhance the landing page's UI. Most of what looked sparse turned out to be configuration
+rather than code, and saying so was more useful than adding gradients — but underneath it was one
+real gap.
+
+**`site/sections/courses.blade.php` has existed since the institute phases and could not be added to
+any page.** It is a one-line include of Phase 3's shared teaser, exactly like `sections/services`
+beside it. But `MarketingSectionTypes` declares *Phase 4's nine types*, and `courses` belongs to
+14-17, so it was never registered: no type meant no provider, no provider meant
+`SectionService::place('courses', …)` threw `UnknownSectionTypeException`, and the view was
+unreachable from the editor. A finished view with no way to reach it is the kind of gap that reads
+as "the feature does not exist" rather than as a bug.
+
+`CoursesSectionProvider` is the missing half, mirroring `ServicesSectionProvider`. It filters on
+published **and** an active category — the same predicate `PublicCourseService::catalogue()` uses —
+so a card on the home page can never link to a course whose own page 404s; a section advertising
+something the site then denies is worse than an empty section. `media` is deliberately null: courses
+carry `image_path` as a plain column rather than a `media_assets` row (D24's library does not cover
+them), and handing the teaser a raw path would route around the image pipeline every other card goes
+through. The teaser hides its image block when there is none, so a course renders as a clean text
+card.
+
+**The header was never under-built, only under-configured.** It already supports four buttons
+(`login`, `contact`, `admission`, `cta`), sticky with hysteresis, transparent-over-hero, an
+off-canvas drawer with a focus trap, and light/dark logo overrides. Only `login_button` was on — so
+a marketing site's front door offered a visitor nothing to do but sign in to an account they do not
+have.
+
+**And the navigation was already right, waiting.** `WebsiteCmsSeeder` creates a **Courses** item in
+the header menu and deliberately leaves it off: *"disabled until the phase that owns the target
+ships, so the navigation is never a dead link"*. That was correct when `/courses` had nothing on it.
+With 34 published courses the same rule points the other way, and the item only needed flipping.
+
+`WebsiteCoursesSeeder` does those three things and **every one is guarded by "is there anything to
+show?"** — it counts published courses first and returns untouched when the answer is zero. Run
+before `courses:publish` it is a no-op, which is correct rather than inconvenient: switching on a
+link to an empty page is the exact mistake the original `is_enabled => false` existed to prevent.
+
+Two things the first runs taught, both now in the code. `CacheVersion::bump()` takes a required
+reason. `menu_items` has no `deleted_at` — a removed item is gone rather than hidden — so the
+"never resurrect a deleted row" guard I wrote was guarding against a state that cannot exist.
+And `SectionService::place()` appends, so the new section landed *after* the closing call to action;
+it is now moved to sit after About, because the CTA is the page's last word and content after it
+reads as something somebody forgot to move.
+
+
 ### 2026-09-25 — A course code generates itself, and only on the way in
 
 `CourseService::codeFor()` refused an empty code outright, so "what shall we call it?" was a

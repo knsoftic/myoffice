@@ -32,6 +32,11 @@ final class MarketingSectionTypes
     {
         return [
             'services' => self::catalogue('Services', 'The published service catalogue as cards.', 'briefcase', 'business', 30, ServicesSectionProvider::class, 'What we build', 'View all services', '/services', category: true),
+            // The institute's own catalogue. The section view has existed since the institute
+            // phases; this is the type declaration it was missing, without which
+            // SectionService::place('courses', ...) threw UnknownSectionTypeException and the
+            // block could not be added to any page.
+            'courses' => self::catalogue('Courses', 'The published course catalogue as cards.', 'academic-cap', 'business', 35, CoursesSectionProvider::class, 'What we teach', 'View all courses', '/courses', category: true),
             'portfolio' => self::catalogue('Portfolio', 'Published case studies with their cover images.', 'photo', 'business', 50, PortfolioSectionProvider::class, 'Recent work', 'View the portfolio', '/portfolio', category: true),
             'team' => self::catalogue('Team', 'Published, public team members.', 'user-group', 'business', 60, TeamSectionProvider::class, 'Meet the team', 'Meet everyone', '/team', featured: false, limit: 8),
             'testimonials' => self::catalogue('Testimonials', 'Approved client and student testimonials only.', 'chat-bubble-left-right', 'engagement', 70, TestimonialsSectionProvider::class, 'What our clients say', null, null, testimonialType: true),
