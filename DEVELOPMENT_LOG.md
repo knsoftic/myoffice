@@ -782,6 +782,101 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-09-25 — Six public pages, the events module, and a role that exists to hold one button
+
+A 33-page sitemap was specified. **Most of it already existed**, and saying so was the useful part of
+the work: 14 pages are live routes, four are CMS pages at any slug the editor chooses, and the seven
+"software house" pages — web development, mobile apps, custom software, e-commerce, graphic design,
+digital marketing, hosting — are **seven rows in the services module, not seven pages of code**.
+"Student projects" is a portfolio category, because `PortfolioController` already filters on one.
+What was genuinely missing was six pages and one module.
+
+**The five new public pages** are `/fee-structure`, `/timetable`, `/trainers`, `/student-reviews`
+and `/request-a-quote`. Each is a controller, a view and a settings toggle, all following
+`TeamController`'s 61-line shape.
+
+**Every one defaults to OFF, unlike the team page.** These read live operational data — what a
+course costs, when classes run, who teaches them — and an installation that has not filled that in
+would publish an empty fee table the day it migrated. A page nobody switched on is invisible; a page
+that switched itself on and is empty is a shop with its lights on and no stock. Off is a **404**,
+never an empty 200: a soft-404 gets indexed, and an indexed empty fee page outranks the real one for
+the query that mattered most.
+
+**The timetable is the one with a real privacy question, and it decided the design.**
+`ClassSession` was rejected as its source — those rows carry `expected_count`, `present_count`,
+`absent_count`, `teacher_id`: an attendance register one join from a marketing page. It reads
+`timetable_entries`, the weekly *rule*, instead. The controller then flattens everything to plain
+arrays before the view sees it, so the template **cannot** print an attribute that was never put in
+it. No student, no roster, no enrolment count, no teacher and no meeting URL is loaded at all — a
+public meeting URL is a Zoom-bombing invitation, so it is absent rather than merely unprinted.
+
+`/trainers` combines `public()` **and** `teaching()`: a resigned trainer whose `is_public` nobody
+switched back off was otherwise still being advertised. Trainer photos are **not** rendered —
+`teachers.photo_path` is a bare string with no upload service, no accessor and no serving route
+anywhere in the repo, and D21 forbids inventing one on the public disk; the cards use initials.
+`/request-a-quote` submits through `ContactInquiryService` as `InquiryType::Service`, **set server
+side and never read from the body**, so no browser can retype a quote as something else.
+
+**The events module** is new end to end: table, model, policy, admin CRUD, two public pages, a
+sitemap provider and a sidebar entry. Two design decisions carried it. It **reuses `ContentStatus`**
+rather than growing a fourth-case enum spelling the same four words — that is how two screens end up
+disagreeing about what "scheduled" allows. And **an announcement is an event with no end**: rather
+than a `type` column splitting the table in two, nullable `ends_at` does the work, because a thing
+that happens at a moment and a thing that runs between two moments are the same row shape. A column
+that exists only to be branched on in every query is a table pretending to be two tables.
+
+Four CHECK constraints stand under it, and the Form Requests mirror them **in `after()`, not in the
+rule array** — the agent's reasoning, and it is right: MariaDB evaluates a CHECK against the *final*
+row, so on a partial update a declarative `after_or_equal:starts_at` only sees what was posted and
+passes while writing a row the database will reject. `$fillable` omits `status`, `published_at` and
+`is_featured` entirely, so an `events.edit`-only user cannot reach them by posting an extra field;
+the policy keeps `changeStatus()` and `update()` independent, neither falling back to the other.
+
+**Two bugs found on the way, both fixed at source.**
+
+`DeliveryMode::Hybrid->icon()` returned `arrows-right-left`, which the icon component does not
+carry — so every screen showing a hybrid class rendered the missing-icon placeholder, silently,
+because an unresolvable icon is a box rather than an exception. Now `squares-2x2`, which is
+registered and reads closer to the meaning anyway.
+
+And **an all-day event dropped into "past" at 00:01 on the morning it was happening.** An all-day row
+stores midnight, because that is what "no clock" means in a datetime column, and `effectiveEnd()`
+compared that raw value against `now()`. The institute's own open day would have moved itself to the
+archive hours before anybody arrived — invisible in testing, because it only shows on the one day the
+event matters. Fixed in `effectiveEnd()` and in a single `applyWindow()` the two scopes now share, so
+`hasEnded()`, `isUpcoming()`, `isInProgress()`, `upcoming()` and `past()` cannot give different
+answers.
+
+**SEO needed less than expected, and checking first is why.** The suspicion was that detail pages
+were missing from the sitemap; they are not — `SitemapGenerator` has a provider seam with providers
+already registered for blog posts, categories, tags, portfolio, services, team, job openings and
+course categories. Events got the ninth. And `isPublicRouteKey()` is generic: any `site.*` GET route
+with no parameters becomes an SEO target and a sitemap entry **automatically**, so all five new index
+pages are covered with no registration at all.
+
+The events provider keeps past events in the sitemap deliberately — the day it happened is content,
+and dropping the URL the week after turns a page that earned links into a 404. It also demands
+`published_at` be non-null and past, which is *stricter* than the page itself needs: a sitemap
+listing a URL that 404s costs something on every crawl, while a public page missing from the sitemap
+is found one link later. Where the two rules can disagree, the sitemap takes the conservative side.
+
+**The Website Manager role exists to hold one button.** `SEO Expert` is deliberately an author — it
+edits copy and metadata and cannot publish any of it. That left a gap: on a small team, the person
+who *was* allowed to publish had to be an Admin, which means handing over HR, finance and the
+collaborator ledger to get a publish button. The new role is everything the website is made of at
+full ability, `change_status` included, and **not one permission outside it** — read-only on the four
+institute modules the new pages surface, because a website manager decides whether `/fee-structure`
+is visible, not what a fee is.
+
+It cannot switch its own pages on, and that is recorded as **T58** rather than papered over: the
+toggles live in the settings table and the only ability that writes one is `settings.edit`, which
+also opens the SMTP credentials and the backup configuration. Paying the mail password for five
+checkboxes was the wrong trade; the fix is a narrow `settings.edit_website`, in the shape
+`settings.edit_mail` already established.
+
+Verified: `view:cache` clean across the application, `route:cache` clean — which is what proves every
+one of the 12 new routes resolves to a controller and method that exist.
+
 ### 2026-09-25 — Scroll effects for the public site, and the class that decides whether any of it happens
 
 Asked for the public site to feel like a reference marketing site, with 3D scrolling. Built as a
@@ -3483,6 +3578,7 @@ data, all with a named fix:
 | T53 | Four deployment tests the runbooks name do not exist: DEP-17, DEP-18, DEP-19, DEP-20. | med | There is no deployment test directory at all. `docs/{RESTORE,DEPLOY,ROLLBACK}.md` each opened by asserting that one of these enforced its step list — ROLLBACK.md said the per-phase table was "verified, not aspirational" — and none of them had been written. The claims are now stated as contracted-but-unwritten, with the honest consequence spelled out where the reader meets it (D170). The tests themselves remain owed. |
 | T54 | **Parallel agent rounds must not share one test database.** | Running six test-running agents at once produced five concurrent PHPUnit processes against `my_office_test`, each doing `migrate:fresh --seed` and dropping the others tables mid-migration - D157 happening live, and caused by the fan-out rather than by any agent: each had been told never to run two test processes at once, and each obeyed. The agents adapted by creating their own schemas, which is why both primary databases survived; twenty-five probe databases were left behind and dropped afterwards. **The rule for a future round: either give each test-running agent its own `DB_DATABASE` in the prompt, or run those slices one at a time.** `phpunit.xml` sets `DB_DATABASE` without `force="true"`, so an environment variable already overrides it - the mechanism exists and only needs to be assigned. |
 | T55 | **Every documented `queue:work` command omits the `financial` queue, so no commission is ever generated.** | **high** | `PRODUCTION.md` §5, `docs/phases/phase-24-25.md` §6.9.5 and both worker definitions specify `--queue=high,default`; `SystemHealthService::probeQueue()`'s remediation hint says `--queue=high,default,low`, naming a `low` queue that does not exist. The jobs this codebase actually dispatches are `high` (the `ops:heartbeat` stamp), **`financial`** (`ProcessStudentFeeCommission`, `ProcessProjectPaymentCommission`, `ProcessCommissionReversal`, `GenerateMonthlyFeeCharges`, `RecomputeStudentFeeCaches`), `default` (two) and `exports` (`BuildReportExport`). A worker started from any documented command therefore never drains `financial` or `exports`. **It fails silently in the worst possible direction**: the heartbeat rides on `high`, so `ops:health` keeps reporting the queue **ok** while every commission, every reversal and every monthly fee generation accumulates unprocessed in `jobs` — which is verbatim the failure PRODUCTION.md §5 warns about (*"a fee payment is recorded, the commission job is enqueued, and no ledger entry ever appears"*), reached by following PRODUCTION.md's own command. The working form is `--queue=high,financial,default,exports`: heartbeat first so health stays truthful, money second, general work third, bulk exports last. Found while writing `docs/AAPANEL.md`, which documents the correct command and the discrepancy; the four stale spellings are still to be corrected at source, and the queue probe should assert that a worker is listening on `financial` rather than inferring liveness from a heartbeat on another queue. |
+| T58 | **There is no narrow way to grant the website's own settings, so the Website Manager role cannot switch its own pages on.** | med | The five `website.*_page_enabled` toggles decide whether `/fee-structure`, `/timetable`, `/trainers`, `/student-reviews` and `/request-a-quote` exist at all, and they live in the settings table. The only ability that can write a setting is `settings.edit`, which is all-or-nothing: granting it to a content role to buy five checkboxes would also hand over the SMTP credentials, the security group, the trusted-proxy list and the backup configuration. So the new role holds `settings` READ — it can see that a page is switched off and cannot switch it on, and an Admin does that once per page. **The fix is a narrow ability, not a wider grant**: `settings.edit_website`, scoped to the `website` settings group, in exactly the shape of the existing Super-Admin-only `settings.edit_mail` (§4.3's precedent for a single guarded operation). Until then the limitation is real but small — five one-time toggles, not day-to-day work — which is why the role shipped with it rather than waiting. |
 | T57 | **Widget permissions were chosen per widget and never checked against the roles that read them, so a correctly-configured role can sign in to a blank dashboard.** | med | Found while adding the front-desk widgets: of 38 widgets, **not one** was visible to `Receptionist` — a role with 75 permissions. The near-misses are the evidence that this is a mismatch rather than an intention. **`fee_collected_today`, `pending_fees` and `overdue_fees` all require `student_fees.view_reports`, and the front desk holds `student_fees` READ_CREATE** — so the three cards about fee money were hidden from the person who takes the fee money, while `student_fee_payments.view_any`, which that role does hold, gated nothing at all. `new_inquiries` and `inquiry_routing_backlog` miss the same way: they want `contact_inquiries.view_any` where §9.1.2 deliberately grants `view` alone. Five new widgets now cover the front desk, but the **general** gap is unfixed: nothing asserts that every panel-facing role sees at least one widget, so the next role added inherits the same blank page silently. The test to write is a matrix — for each seeded role, `DashboardRegistry::for($user)` must be non-empty — and it belongs beside the existing `DashboardWidgetRegistryTest`. Re-gating the three fee widgets is the separate, more careful question, since widening them touches every other role that sees them. |
 | T56 | **`integrity:verify --suite=all` exits 2, so the nightly integrity run and `composer harden` both fail every time.** | **high** | `IntegrityCheckSuite` has nine cases and no `all`; the command's guard rejects an unknown suite before doing any work and returns 2. Confirmed by running it: `Unknown suite [all]. Known suites: constraints, wallet, schema, routes, isolation, uploads, performance, security, backup.` Omitting `--suite` is what runs all nine (`$requested === null` → `runAll()`). The broken form is live in **`composer.json:84`** (harden step 3, so the gate cannot pass), **`routes/console.php:419`** (`dailyAt('02:15')`, so the daily proof of the money never runs), `docs/INSTALL.md:420` and `DemoSeed.php`. **`GoLiveCheck.php:120` asserts the schedule *contains* `--suite=all`**, so the go-live gate currently requires the broken invocation to be scheduled and would fail if the schedule were fixed alone — both must change together. `ROLLBACK.md` already states the correct usage, which is how the discrepancy was noticed. This is D170's pattern once more: a green scheduler is not evidence the suites ran. |
 

@@ -1352,6 +1352,26 @@ final class PermissionRegistry
                 // phase-04 §4: + REPORTS (only view_reports is new; export and print were already held).
                 'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::APPROVE, self::ASSIGN, self::FILES, self::RESTORE, self::REPORTS),
             ],
+            /*
+            | Events and announcements.
+            |
+            | **No APPROVE and no ASSIGN, unlike the blog beside it.** A post moves through an
+            | editorial workflow and has an author it belongs to; an event is a date somebody
+            | publishes. Declaring abilities a module never checks is how a role editor grows a
+            | column of checkboxes that do nothing — a module declares only what it enforces.
+            |
+            | FILES is here because the cover image is a media library row (D24), and RESTORE
+            | because an event is soft-deleted content somebody will want back the day after they
+            | withdrew the wrong one.
+            */
+            'events' => [
+                'name' => 'Events',
+                'group' => ModuleGroup::Website,
+                'icon' => 'calendar-days',
+                'is_core' => false,
+                'sort' => 925,
+                'abilities' => self::merge(self::CRUD_FULL, self::STATUS, self::FILES, self::RESTORE),
+            ],
             'jobs' => [
                 'name' => 'Jobs',
                 'group' => ModuleGroup::Website,

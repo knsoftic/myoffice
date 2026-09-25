@@ -43,12 +43,23 @@ enum DeliveryMode: string
         };
     }
 
+    /**
+     * **Every name here must be registered in `components/ui/icon.blade.php`.**
+     *
+     * `Hybrid` returned `arrows-right-left`, which that component does not carry, so every screen
+     * showing a hybrid class rendered the missing-icon placeholder — silently, because an icon that
+     * cannot be resolved is a box rather than an exception. `squares-2x2` is registered, and reads
+     * closer to the meaning anyway: hybrid is two things at once, not two things swapping.
+     *
+     * Found while building the public timetable, which worked around it by mapping the mode value
+     * to icons itself rather than editing a shared component. That workaround can now go.
+     */
     public function icon(): string
     {
         return match ($this) {
             self::Physical => 'building-office-2',
             self::Online => 'video-camera',
-            self::Hybrid => 'arrows-right-left',
+            self::Hybrid => 'squares-2x2',
         };
     }
 

@@ -2499,6 +2499,20 @@ final class SettingsRegistry
                 'span' => 4,
                 'sort' => 200,
             ],
+            /*
+            | The events board pages both lists — upcoming and past — at this size. It is declared
+            | here because `Site\EventController` already reads it: an undeclared key falls back to
+            | its hard-coded default for ever, which looks like a working setting nobody can find.
+            */
+            'events_per_page' => [
+                'label' => 'Events per page',
+                'type' => self::TYPE_NUMBER,
+                'rules' => ['required', 'integer', 'min:3', 'max:48'],
+                'default' => 9,
+                'public' => true,
+                'span' => 4,
+                'sort' => 202,
+            ],
             'team_page_enabled' => [
                 'label' => 'Show the team page',
                 'type' => self::TYPE_BOOLEAN,
@@ -2508,6 +2522,87 @@ final class SettingsRegistry
                 'public' => true,
                 'span' => 4,
                 'sort' => 210,
+            ],
+
+            /*
+            |------------------------------------------------------------------------------------
+            | The institute's four public pages, and the quote form.
+            |
+            | **Each defaults to `false`, unlike the team page above.** These read live operational
+            | data — what a course costs, when classes run, who teaches them, what students said —
+            | and an installation that has not filled that in yet would publish an empty fee table
+            | or a timetable with no classes. A page nobody switched on is invisible; a page that
+            | switched itself on and is empty is a shop with its lights on and no stock.
+            |
+            | Off is a 404, never an empty page: a soft-404 that answers 200 gets indexed, and an
+            | indexed empty fee page outranks the real one for the query that mattered most.
+            |------------------------------------------------------------------------------------
+            */
+            'fee_structure_page_enabled' => [
+                'label' => 'Show the fee structure page',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Publishes course fees at /fee-structure. Off makes it a 404. '
+                    .'Only published courses appear, and each shows the fees already on its own record.',
+                'public' => true,
+                'span' => 4,
+                'sort' => 212,
+            ],
+            'timetable_page_enabled' => [
+                'label' => 'Show the class timetable page',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Publishes the week ahead at /timetable. Off makes it a 404. '
+                    .'Nothing about a student is shown — only the batch, the course, the day and the time.',
+                'public' => true,
+                'span' => 4,
+                'sort' => 214,
+            ],
+            'trainers_page_enabled' => [
+                'label' => 'Show the trainers page',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Publishes teaching staff at /trainers. Off makes it a 404. '
+                    .'Separate from the team page: a trainer is teaching staff, a team member is anybody.',
+                'public' => true,
+                'span' => 4,
+                'sort' => 216,
+            ],
+            'reviews_page_enabled' => [
+                'label' => 'Show the student reviews page',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Publishes approved student reviews at /student-reviews. Off makes it a 404. '
+                    .'Only reviews already approved for the website appear — this page cannot widen that.',
+                'public' => true,
+                'span' => 4,
+                'sort' => 218,
+            ],
+            'events_page_enabled' => [
+                'label' => 'Show the events page',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'Publishes events and announcements at /events. Off makes it a 404. '
+                    .'Only published events appear, and a past event drops off the upcoming list by itself.',
+                'public' => true,
+                'span' => 4,
+                'sort' => 222,
+            ],
+            'quote_page_enabled' => [
+                'label' => 'Show the request-a-quote page',
+                'type' => self::TYPE_BOOLEAN,
+                'rules' => ['nullable', 'boolean'],
+                'default' => false,
+                'help' => 'A project enquiry form at /request-a-quote. Off makes it a 404. '
+                    .'Submissions land in the same inbox as the contact form, typed as a service enquiry.',
+                'public' => true,
+                'span' => 4,
+                'sort' => 220,
             ],
             'portfolio_detail_enabled' => [
                 'label' => 'Portfolio detail pages',

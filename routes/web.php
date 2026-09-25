@@ -6,6 +6,8 @@ use App\Http\Controllers\Site\AdmissionController as SiteAdmissionController;
 use App\Http\Controllers\Site\BlogController;
 use App\Http\Controllers\Site\CareerController;
 use App\Http\Controllers\Site\ContactController;
+use App\Http\Controllers\Site\EventController;
+use App\Http\Controllers\Site\FeeStructureController;
 use App\Http\Controllers\Site\CourseController as SiteCourseController;
 use App\Http\Controllers\Site\HomeController;
 use App\Http\Controllers\Site\PortfolioController;
@@ -13,9 +15,13 @@ use App\Http\Controllers\Site\PreviewController;
 use App\Http\Controllers\Site\PublicInvoiceController;
 use App\Http\Controllers\Site\ReferralController;
 use App\Http\Controllers\Site\RobotsController;
+use App\Http\Controllers\Site\QuoteController;
 use App\Http\Controllers\Site\ServiceController;
+use App\Http\Controllers\Site\StudentReviewController;
 use App\Http\Controllers\Site\SitemapController;
 use App\Http\Controllers\Site\TeamController;
+use App\Http\Controllers\Site\TimetableController;
+use App\Http\Controllers\Site\TrainerController;
 use App\Http\Controllers\Ops\HealthController;
 use App\Http\Controllers\Site\VerificationController;
 use Illuminate\Support\Facades\Route;
@@ -99,6 +105,57 @@ Route::middleware(['capture_referral', 'site', 'site_module:portfolio', 'site.ca
 });
 
 Route::get('team', [TeamController::class, 'index'])->middleware(['capture_referral', 'site', 'site_module:team', 'site.cache'])->name('site.team.index');
+
+/*
+|--------------------------------------------------------------------------
+| The institute's four public pages, and the quote form
+|--------------------------------------------------------------------------
+|
+| Each carries `site_module:` for the module whose data it publishes, so switching that module
+| off 404s the page along with its admin screens — a public page outliving the module that
+| feeds it is how a site ends up serving a fee table nobody can edit any more.
+|
+| The four read-only pages take `site.cache`. `/request-a-quote` does not, for the same reason
+| the contact page does not: it prints a per-request CSRF token and a spam guard, and a cached
+| form is a form whose token is somebody else's.
+|
+| `/fee-structure` is gated on `courses` rather than a module of its own. The page has no data
+| of its own — it is the course catalogue with its fee columns shown — so a `fee_structure`
+| module would be a switch that claimed to control something it does not own.
+*/
+
+Route::get('fee-structure', [FeeStructureController::class, 'index'])
+    ->middleware(['capture_referral', 'site', 'site_module:courses', 'site.cache'])
+    ->name('site.fees.index');
+
+Route::get('timetable', [TimetableController::class, 'index'])
+    ->middleware(['capture_referral', 'site', 'site_module:timetable', 'site.cache'])
+    ->name('site.timetable.index');
+
+Route::get('trainers', [TrainerController::class, 'index'])
+    ->middleware(['capture_referral', 'site', 'site_module:teachers', 'site.cache'])
+    ->name('site.trainers.index');
+
+Route::get('student-reviews', [StudentReviewController::class, 'index'])
+    ->middleware(['capture_referral', 'site', 'site_module:student_reviews', 'site.cache'])
+    ->name('site.reviews.index');
+
+/*
+| Events and announcements. The detail route is bound on `slug`, like every other public
+| detail page, so the URL survives a title being edited.
+*/
+Route::middleware(['capture_referral', 'site', 'site_module:events', 'site.cache'])->group(function (): void {
+    Route::get('events', [EventController::class, 'index'])->name('site.events.index');
+    Route::get('events/{event:slug}', [EventController::class, 'show'])->name('site.events.show');
+});
+
+Route::get('request-a-quote', [QuoteController::class, 'index'])
+    ->middleware(['capture_referral', 'site', 'site_module:contact_inquiries'])
+    ->name('site.quote.index');
+
+Route::post('request-a-quote', [QuoteController::class, 'store'])
+    ->middleware(['site', 'site_module:contact_inquiries', 'throttle:public-contact'])
+    ->name('site.quote.store');
 
 Route::middleware(['capture_referral', 'site', 'site_module:blog_posts'])->group(function (): void {
     Route::get('blog', [BlogController::class, 'index'])->middleware('site.cache')->name('site.blog.index');

@@ -398,6 +398,65 @@ class RoleSeeder extends Seeder
                 'permissions' => $this->merge($staffBase, $this->deliveryTeamGrant()),
             ],
             [
+                'name' => 'Website Manager',
+                'label' => 'Website Manager',
+                'description' => 'Owns the public website end to end: sections, pages, menus, SEO, blog, FAQs, testimonials and the media library — and may publish.',
+                'panel' => PanelType::Admin,
+                'level' => 30,
+                'is_system' => false,
+                'is_default' => false,
+                /*
+                | **The difference from SEO Expert is `change_status`, and that is the whole point
+                | of the role existing.** The SEO Expert is deliberately an author: it edits copy
+                | and metadata and cannot put any of it live, so an SEO change waits for somebody
+                | with publish rights. That leaves a gap — on a small team the person who *is*
+                | that somebody had to be an Admin, which hands out HR, finance and the collaborator
+                | ledger to get one publish button.
+                |
+                | This role is the publish button and nothing else: everything the website is made
+                | of, at full ability, and not one permission outside it.
+                */
+                'permissions' => $this->merge(
+                    $staffBase,
+                    // The website itself — full control, publishing included.
+                    PermissionRegistry::permissionNamesFor([
+                        'website_sections', 'pages', 'menus', 'seo', 'website_media',
+                        'blog_posts', 'blog_categories', 'blog_tags',
+                        'faqs', 'testimonials',
+                    ]),
+                    // The catalogue as it appears on the site. Read + edit + publish, because the
+                    // marketing copy on a service page is website work.
+                    PermissionRegistry::permissionNamesFor(['services', 'portfolio', 'team'], self::READ_EDIT),
+                    PermissionRegistry::permissionNamesFor(['services', 'portfolio', 'team'], [Ability::ChangeStatus]),
+                    /*
+                    | **Read-only on the four modules the new public pages surface.** A website
+                    | manager decides whether /fee-structure is visible and how it reads; they do
+                    | not decide what a fee is, when a class runs, who teaches it or which review
+                    | was approved. Those are the institute's decisions, made on the institute's
+                    | screens, and this role publishes them rather than authoring them.
+                    */
+                    PermissionRegistry::permissionNamesFor(
+                        ['courses', 'timetable', 'teachers', 'student_reviews'],
+                        self::READ,
+                    ),
+                    /*
+                    | Settings: **view only, and that is a real limitation rather than a choice.**
+                    | The five `website.*_page_enabled` toggles live in the settings table, and the
+                    | only permission that can write them is `settings.edit` — which also opens the
+                    | SMTP credentials, the security group and the backup configuration. Granting it
+                    | here would hand a content role the mail password to buy five checkboxes.
+                    |
+                    | So today a Website Manager can see that a page is switched off and cannot
+                    | switch it on; an Admin does that once. Recorded as T58: the fix is a narrow
+                    | `settings.edit_website` ability scoped to the `website` group, in the same
+                    | shape as the existing Super-Admin-only `settings.edit_mail`.
+                    */
+                    PermissionRegistry::permissionNamesFor('settings', self::READ),
+                    PermissionRegistry::permissionNamesFor('tasks', self::WORK_ON),
+                    PermissionRegistry::permissionNamesFor('task_comments'),
+                ),
+            ],
+            [
                 'name' => 'SEO Expert',
                 'label' => 'SEO Expert',
                 'description' => 'Blog, SEO metadata, website section and page copy and the media library, plus own tasks.',

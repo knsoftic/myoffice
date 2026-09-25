@@ -10,6 +10,7 @@ use App\Http\Controllers\Admin\ClientController;
 use App\Http\Controllers\Admin\ClientDocumentController;
 use App\Http\Controllers\Admin\Cms\BlogCategoryController;
 use App\Http\Controllers\Admin\Cms\BlogPostController;
+use App\Http\Controllers\Admin\Cms\EventController;
 use App\Http\Controllers\Admin\Cms\BlogTagController;
 use App\Http\Controllers\Admin\Cms\ContactInquiryController;
 use App\Http\Controllers\Admin\Cms\CtaBlockController;
@@ -879,6 +880,26 @@ Route::prefix('admin')
             Route::delete('success-stories/{story}', [SuccessStoryController::class, 'destroy'])->whereNumber('story')->middleware('can:success_stories.delete')->name('success-stories.destroy');
             Route::post('success-stories/{story}/status', [SuccessStoryController::class, 'status'])->whereNumber('story')->middleware('can:success_stories.change_status')->name('success-stories.status');
             Route::post('success-stories/{story}/featured', [SuccessStoryController::class, 'featured'])->whereNumber('story')->middleware('can:success_stories.change_status')->name('success-stories.featured');
+        });
+
+        /*
+        | Events and announcements.
+        |
+        | `status` and `featured` are their own POST endpoints behind `events.change_status`, the
+        | way the success stories above do it — publishing is not editing, and a status field on
+        | the edit form would let `events.edit` alone put something live.
+        */
+        Route::middleware('module:events')->group(function (): void {
+            Route::get('events', [EventController::class, 'index'])->middleware('can:events.view_any')->name('events.index');
+            Route::get('events/create', [EventController::class, 'create'])->middleware('can:events.create')->name('events.create');
+            Route::post('events', [EventController::class, 'store'])->middleware('can:events.create')->name('events.store');
+            Route::get('events/{event}', [EventController::class, 'show'])->whereNumber('event')->middleware('can:events.view')->name('events.show');
+            Route::get('events/{event}/edit', [EventController::class, 'edit'])->whereNumber('event')->middleware('can:events.edit')->name('events.edit');
+            Route::put('events/{event}', [EventController::class, 'update'])->whereNumber('event')->middleware('can:events.edit')->name('events.update');
+            Route::delete('events/{event}', [EventController::class, 'destroy'])->whereNumber('event')->middleware('can:events.delete')->name('events.destroy');
+            Route::post('events/{event}/status', [EventController::class, 'status'])->whereNumber('event')->middleware('can:events.change_status')->name('events.status');
+            Route::post('events/{event}/featured', [EventController::class, 'featured'])->whereNumber('event')->middleware('can:events.change_status')->name('events.featured');
+            Route::post('events/{event}/restore', [EventController::class, 'restore'])->whereNumber('event')->middleware('can:events.restore')->name('events.restore');
         });
 
         // §8.7 Blog posts

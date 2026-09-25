@@ -1062,6 +1062,13 @@ final class Sidebar
                         'permission' => 'blog_posts.view_any',
                     ],
                     [
+                        'label' => 'Events',
+                        'icon' => 'calendar-days',
+                        'route' => 'admin.events.index',
+                        'module' => 'events',
+                        'permission' => 'events.view_any',
+                    ],
+                    [
                         'label' => 'Blog Categories',
                         'icon' => 'folder',
                         'route' => 'admin.blog-categories.index',

@@ -27,6 +27,8 @@ use App\Models\Cms\BlogTag;
 use App\Models\Cms\CmsRevision;
 use App\Models\Cms\ContactInquiry;
 use App\Models\Cms\CtaBlock;
+// Aliased: `Illuminate\Support\Facades\Event` is already imported here and is used below.
+use App\Models\Cms\Event as EventModel;
 use App\Models\Cms\Faq;
 use App\Models\Cms\FaqCategory;
 use App\Models\Cms\JobApplication;
@@ -123,6 +125,7 @@ use App\Policies\Cms\BlogTagPolicy;
 use App\Policies\Cms\CmsRevisionPolicy;
 use App\Policies\Cms\ContactInquiryPolicy;
 use App\Policies\Cms\CtaBlockPolicy;
+use App\Policies\Cms\EventPolicy;
 use App\Policies\Cms\FaqCategoryPolicy;
 use App\Policies\Cms\FaqPolicy;
 use App\Policies\Cms\JobApplicationPolicy;
@@ -232,6 +235,7 @@ use App\Support\Cms\SectionRegistry;
 use App\Support\Cms\Sections\MarketingSectionTypes;
 use App\Support\Cms\Sitemap\BlogCategorySitemapProvider;
 use App\Support\Cms\Sitemap\BlogPostSitemapProvider;
+use App\Support\Cms\Sitemap\EventSitemapProvider;
 use App\Support\Cms\Sitemap\BlogTagSitemapProvider;
 use App\Support\Cms\Sitemap\JobOpeningSitemapProvider;
 use App\Support\Cms\Sitemap\PortfolioSitemapProvider;
@@ -306,6 +310,9 @@ class AppServiceProvider extends ServiceProvider
         BlogCategory::class => BlogCategoryPolicy::class,
         BlogTag::class => BlogTagPolicy::class,
         BlogPost::class => BlogPostPolicy::class,
+        // The events board. Same reason as the fifteen above: `App\Models\Cms\Event` →
+        // `App\Policies\Cms\EventPolicy` is not a discovery path, so it is registered explicitly.
+        EventModel::class => EventPolicy::class,
         JobOpening::class => JobOpeningPolicy::class,
         JobApplication::class => JobApplicationPolicy::class,
         ContactInquiry::class => ContactInquiryPolicy::class,
@@ -757,6 +764,7 @@ class AppServiceProvider extends ServiceProvider
             new ServiceSitemapProvider,
             new PortfolioSitemapProvider,
             new BlogPostSitemapProvider,
+            new EventSitemapProvider,
             new BlogCategorySitemapProvider,
             new BlogTagSitemapProvider,
             new JobOpeningSitemapProvider,
