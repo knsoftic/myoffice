@@ -782,6 +782,44 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-09-25 — The navigation, and two ways a menu change reaches nobody
+
+The header carried three links and the two footer menus were empty. Both are now filled from the
+pages that actually work, and the rule is `WebsiteCmsSeeder`'s own: *"disabled until the phase that
+owns the target ships, so the navigation is never a dead link."* The test applied to each candidate
+was "what does a stranger see when they click this?"
+
+`/courses` and `/fee-structure` are added **only** when courses are published. `/contact` and
+`/request-a-quote` are added unconditionally — they are **forms**, they need no catalogue behind
+them and they work on an install's first day, which is also why the quote page's toggle is switched
+on here while the other five stay off. Services, portfolio, blog, careers, team, events, trainers,
+timetable and student reviews are all skipped: they are empty, and a nav listing nine pages of which
+six are empty is worse than one listing three that work, because the visitor learns the links are
+not worth following.
+
+The header's **Contact** item was repointed rather than merely enabled. It had been created as a
+section anchor to `#contact`, assuming a contact section on the home page that was never placed —
+switching it on as-is would have produced exactly the dead link the original comment guarded
+against.
+
+**Two bugs, both of the same family: a change that lands in the database and reaches nobody.**
+
+The first run added a second **Courses** link beside the existing one. The check matched on the
+column it was about to fill — `route_name` for a route item — while `WebsiteCmsSeeder` had written
+its Courses item as a plain `/courses` URL. One destination written two ways is still one
+destination, and the existence check now knows that: every row carries the aliases that mean the
+same page, and all three link columns are searched.
+
+The second is worth remembering beyond this seeder. **Eight items were added and not one appeared.**
+The resolved menu tree is baked into each section's *published snapshot* rather than read live — it
+is what makes a public page one indexed read instead of a walk down a menu table — so inserting a
+`menu_items` row changes nothing until the header and footer are republished. Bumping the cache
+version does not help either: that discards the stored HTML, and the next render rebuilds it from
+the same stale snapshot, so the nav returns exactly as it was and the change looks like it silently
+failed. The republish is now unconditional, because gating it on "did this run add anything" meant
+a second run reported `0 added` and fixed nothing while the nav stayed as wrong as it was.
+
+
 ### 2026-09-25 — A section view that nothing could reach, and a header that offered a visitor nothing to do
 
 Asked to enhance the landing page's UI. Most of what looked sparse turned out to be configuration
