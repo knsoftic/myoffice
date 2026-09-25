@@ -782,6 +782,28 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-09-25 — The footer's emptiest column now does something
+
+Three changes, all to the same symptom: a footer that was structurally fine and read as mostly air.
+
+`items-start` on the column grid. Grid rows stretch by default, so two short link columns beside a
+tall contact block were being held open to *its* height — the void under COMPANY and EXPLORE was
+the contact block's shadow, not their own.
+
+An action row in the brand column. It held a logo, one line of tagline and then nothing, while the
+one thing a visitor might want to do from down there — message, call, email — sat three columns
+away rendered as plain text. The row is built from the same `contact.*` settings that block already
+prints, so nothing new is stored and nothing is repeated for its own sake: **the point is not
+showing the details again, it is making them pressable.** Each button appears only when its setting
+is filled, so an install without a WhatsApp number does not get a dead one.
+
+And the rhythm tightened — `pt-16` to `pt-14`, `mt-14` to `mt-12` before the bottom bar.
+
+**No map, by request.** `contact.map_embed` already exists and already renders through
+`RichText::sanitize()` with an iframe allowlist; it is empty here and stays that way. Nothing was
+added to enable it.
+
+
 ### 2026-09-25 — The navigation, and two ways a menu change reaches nobody
 
 The header carried three links and the two footer menus were empty. Both are now filled from the
