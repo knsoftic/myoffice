@@ -229,11 +229,20 @@ runs them.
 > /www/server/php/82/bin/php -i | grep disable_functions      # ← the CLI. NOT what the site runs.
 > ```
 >
-> That can print `disable_functions => no value` on a box where php-fpm disables a dozen functions.
-> Confirmed on knsoftic.com: the CLI reported nothing disabled while the site threw
-> `Call to undefined function readlink()` from a dashboard widget and
-> `Unable to guess the MIME type as no guessers are available` from the branding settings screen —
-> both because php-fpm, and only php-fpm, had them disabled.
+> That can print `disable_functions => no value` on a box whose php-fpm disables a dozen functions.
+> Measured on knsoftic.com: `php -i` from the shell reported **no value**, while
+> `/www/server/php/82/etc/php.ini` line 323 carried a thirty-six entry list and php-fpm — asked
+> directly, through the web — reported that same list back. The two SAPIs disagreed about the same
+> box on the same afternoon, which is the whole point of this box.
+>
+> What the site threw on the way there was `Call to undefined function readlink()` from a dashboard
+> widget and `Unable to guess the MIME type as no guessers are available` from the branding
+> settings screen. **Both functions measured enabled when php-fpm was finally asked**, and the
+> panel's list had been edited in between, so the likeliest account is that they were disabled and
+> then re-enabled. That is an inference, not a measurement, and it is recorded as one — the errors
+> are what happened, the cause is what fits. The lesson survives either way: **ask php-fpm.** Had
+> that been done first, the question would have been settled in one request instead of being
+> reasoned about backwards from two stack traces.
 >
 > Artisan runs on the CLI, so **every migration, seeder and console command can pass while the
 > website fails**. The CLI check is worse than no check: it produces a clean result that is about
@@ -282,8 +291,8 @@ Then, in PHP 8.2 → **Settings** → **Disabled functions**, **remove** each of
 |---|---|
 | `proc_open`, `proc_get_status` | **Backups.** `mysqldump` is shelled out to. Also `npm run build` if you build on the server |
 | `putenv` | Laravel and Composer both use it; symptoms are scattered and confusing |
-| `symlink`, `readlink` | `php artisan storage:link`, and **any screen whose widget resolves a path** — on knsoftic.com a disabled `readlink` 500'd the admin dashboard with `Call to undefined function readlink()` from `SystemHealthWidget` |
-| `finfo_open`, `finfo_file`, `finfo_buffer` | **Every upload and every screen that renders one.** Symfony guesses MIME types through `finfo`, and with it gone throws *"Unable to guess the MIME type as no guessers are available"* — which 500'd the branding settings screen on knsoftic.com. `extension_loaded('fileinfo')` can be true while these are disabled, so check the functions, not the extension |
+| `symlink`, `readlink` | `php artisan storage:link`, and **any screen whose widget resolves a path** — knsoftic.com's admin dashboard 500'd with `Call to undefined function readlink()` from `SystemHealthWidget` |
+| `finfo_open`, `finfo_file`, `finfo_buffer` | **Every upload and every screen that renders one.** Symfony guesses MIME types through `finfo`, and with it gone throws *"Unable to guess the MIME type as no guessers are available"* — which 500'd knsoftic.com's branding settings screen. `extension_loaded('fileinfo')` can be true while these are disabled, so check the functions, not the extension |
 | `pcntl_signal`, `pcntl_alarm`, `pcntl_fork`, `pcntl_waitpid`, `pcntl_signal_dispatch` | **The queue worker's graceful restart.** Without these `queue:restart` does not stop a worker cleanly, so a worker keeps serving *old code* after a deploy |
 | `escapeshellarg`, `escapeshellcmd` | argument escaping for the dump — removing these while `proc_open` is on is worse than leaving both off |
 

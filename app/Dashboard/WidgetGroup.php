@@ -36,6 +36,19 @@ final class WidgetGroup
     /** Delivery work: projects, tasks, milestones. */
     public const OPERATIONS = 'operations';
 
+    /**
+     * The front desk's own work queue: applications waiting, inquiries to chase, today's demos,
+     * today's receipts.
+     *
+     * **It sits second, above Operations, because of who reads it.** The Receptionist holds no
+     * finance, security or system permission, so every widget in those groups is invisible to
+     * them — which left that dashboard completely empty before this group existed. For the roles
+     * that *do* see the whole page, front-desk counts are the most perishable numbers on it: an
+     * unreviewed application and an unchased inquiry both decay during the day in a way that a
+     * month's revenue does not.
+     */
+    public const FRONT_DESK = 'front_desk';
+
     /** Institute: admissions, batches, attendance. */
     public const INSTITUTE = 'institute';
 
@@ -49,6 +62,7 @@ final class WidgetGroup
      */
     private const KNOWN = [
         self::OVERVIEW => ['Overview', 100],
+        self::FRONT_DESK => ['Front desk', 150],
         self::OPERATIONS => ['Operations', 200],
         self::INSTITUTE => ['Institute', 300],
         self::FINANCE => ['Finance', 400],

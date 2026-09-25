@@ -782,6 +782,91 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-09-25 — A front desk with every permission it needed and nothing to look at
+
+The request was "build the reception panel". The answer was that **it already exists and had been
+invisible**, and the interesting part is which half was missing.
+
+**The sidebar was already right, and needed no work.** `Receptionist` is a role on the `admin`
+panel — phase-01 §214 places it there and every phase from 03 to 08-09 defines its grants against
+that panel — and the architecture is deliberately five panels, a fact `CLAUDE.md` states in its
+first line and phase-19-23 relies on in the shared meeting, notification and unread-counter code.
+Filtering `Sidebar::adminTree()` by the role's 75 permissions already yields exactly a front desk:
+**All Students, Admissions, Course Inquiries, Applications, Demo Classes, Student Fees, Fee
+Receipts**, plus self-service and a collaborator lookup for picking the referring partner at
+admission. Seven items in two groups, no configuration, no duplication. A sixth panel would have
+meant a second set of controllers and views for screens that already exist, and a `PanelType` case
+that half the shared infrastructure does not know about.
+
+**The dashboard, by contrast, was completely empty for this role — all 38 widgets invisible.** Not
+one of them is gated on a permission a Receptionist holds. Everything sits behind `*.view_reports`,
+`*.view_financial`, `login_history.view_logs`, `settings.view_any` or a module the front desk has
+no grant on. The near-misses are the sharp part: **`fee_collected_today`, `pending_fees` and
+`overdue_fees` are gated on `student_fees.view_reports`, and the front desk holds
+`student_fees` READ_CREATE only** — so the three cards about fee money were hidden from the person
+who physically takes the fee money. `new_inquiries` misses the same way, wanting
+`contact_inquiries.view_any` where the role has `view` alone (phase-04 §9.1.2, deliberately). A
+role can therefore be perfectly configured and still sign in to a blank page, because widget
+permissions were chosen per widget and never checked against the roles that would read them.
+
+**Built: `WidgetGroup::FRONT_DESK` (sort 150, above Operations) and five widgets** in
+`app/Dashboard/Widgets/Reception/`, each gated on a permission the role actually holds:
+
+| Widget | Permission | Answers |
+|---|---|---|
+| `reception_applications_awaiting` | `student_applications.view_any` | how many are waiting, and how long the oldest has waited |
+| `reception_open_inquiries` | `course_inquiries.view_any` | open, follow-up overdue, and never contacted at all |
+| `reception_demos_today` | `demo_classes.view_any` | still to come today, no-shows, and who is next |
+| `reception_fees_today` | `student_fee_payments.view_any` | net taken today, and how much of it by this user |
+| `reception_admissions_range` | `admissions.view_any` | admissions in the period, and how many are stuck short of a class |
+
+Four ignore the dashboard's date range and one honours it, which is a distinction rather than an
+inconsistency: an inbox, a follow-up queue and today's appointments are **states** that mean
+nothing filtered to last month, while "how many admissions did we take" is a **period** question
+somebody compares against the period before. Admissions count on `admission_date`, not
+`created_at` — a walk-in admitted Monday and typed in Wednesday belongs to Monday, and backdated
+entry is normal at a front desk.
+
+`reception_fees_today` is net of refunds: a receipt written for 20,000 and refunded by 5,000 is
+15,000 in the drawer, and the question at six o'clock is whether the drawer agrees with the system.
+Voided and bounced rows are excluded because that money never arrived; a fully refunded row is kept
+because it nets to zero on its own arithmetic and the desk did write that receipt. Every figure is
+summed by the database on `decimal(15,2)` and the single subtraction goes through `Money::sub()` —
+no amount is ever a PHP float (golden rule 4). "Taken by you" splits on `received_by`, the user the
+payment screen stamps, rather than guessing from `created_by`.
+
+No status string is written in any of the five: the open sets are derived from
+`StudentApplicationStatus::isOpen()`, `CourseInquiryStatus::isOpen()` and `AdmissionStage::isLive()`
+so these cards cannot drift away from the list screens they link to (golden rule 8).
+
+**The first version of them broke the dashboard's query budget, and the budget was right.**
+`DashboardQueryBudgetTest` measures `GET /admin` as a Super Admin — who sees every card — and failed
+at **66 against a ceiling of 60**. Twelve queries for five cards: each widget had been written the
+obvious way, asking the table once per number it displays. Two wrong fixes were available and both
+were refused. Raising `PAGE_CEILING` is the D171 antipattern — the test's own note says the ceiling
+"catches a runaway, not a single extra lookup", and a ceiling edited each time it complains stops
+being a ceiling. Marking the widgets `deferred()` is the same dodge wearing a costume: that flag is
+for "a filesystem walk, an `information_schema` lookup", not for ordinary indexed aggregates, and
+deferring the primary content of the front desk's own dashboard would be paying in the one user's
+latency to make a number go down.
+
+**The honest fix was to write the queries properly: twelve down to six.** Every figure on a card is
+an aggregate over the same filtered rows, so each widget now counts them in one pass with
+`SUM(CASE WHEN … END)` — applications 4→1, inquiries 4→1, fees 2→1 (the viewer's own share is a
+conditional sum, not a second round trip), demos 2, admissions 1. Re-measured: **3 passed, 280
+assertions.**
+
+Two things came out of that pass and are worth keeping separately. `whereDate()` was removed from
+`paid_on` and `scheduled_on`: both are already `DATE` columns, and wrapping them in `DATE()` makes
+the comparison unindexable on the two tables that grow with every receipt and every booking. The
+indexes it now reaches were verified to exist — `student_fee_payments.paid_on`,
+`demo_classes['scheduled_on','status']`, `student_applications['status','created_at']`,
+`course_inquiries['status','follow_up_date']`. And the applications card's second line changed from
+"N arrived today" to "N **of them** from today", which costs one query fewer and is the better
+number anyway: a backlog of twelve that all arrived this morning and a backlog of twelve that has
+been accumulating for a fortnight are different problems, and only the second phrasing tells them
+apart.
+
 ### 2026-09-24 — Phase 24 continued: the five commands, and what they found on their first run
 
 **The tools were the deliverable, and then the tools reported.** `security:audit`,
@@ -3345,6 +3430,7 @@ data, all with a named fix:
 | T53 | Four deployment tests the runbooks name do not exist: DEP-17, DEP-18, DEP-19, DEP-20. | med | There is no deployment test directory at all. `docs/{RESTORE,DEPLOY,ROLLBACK}.md` each opened by asserting that one of these enforced its step list — ROLLBACK.md said the per-phase table was "verified, not aspirational" — and none of them had been written. The claims are now stated as contracted-but-unwritten, with the honest consequence spelled out where the reader meets it (D170). The tests themselves remain owed. |
 | T54 | **Parallel agent rounds must not share one test database.** | Running six test-running agents at once produced five concurrent PHPUnit processes against `my_office_test`, each doing `migrate:fresh --seed` and dropping the others tables mid-migration - D157 happening live, and caused by the fan-out rather than by any agent: each had been told never to run two test processes at once, and each obeyed. The agents adapted by creating their own schemas, which is why both primary databases survived; twenty-five probe databases were left behind and dropped afterwards. **The rule for a future round: either give each test-running agent its own `DB_DATABASE` in the prompt, or run those slices one at a time.** `phpunit.xml` sets `DB_DATABASE` without `force="true"`, so an environment variable already overrides it - the mechanism exists and only needs to be assigned. |
 | T55 | **Every documented `queue:work` command omits the `financial` queue, so no commission is ever generated.** | **high** | `PRODUCTION.md` §5, `docs/phases/phase-24-25.md` §6.9.5 and both worker definitions specify `--queue=high,default`; `SystemHealthService::probeQueue()`'s remediation hint says `--queue=high,default,low`, naming a `low` queue that does not exist. The jobs this codebase actually dispatches are `high` (the `ops:heartbeat` stamp), **`financial`** (`ProcessStudentFeeCommission`, `ProcessProjectPaymentCommission`, `ProcessCommissionReversal`, `GenerateMonthlyFeeCharges`, `RecomputeStudentFeeCaches`), `default` (two) and `exports` (`BuildReportExport`). A worker started from any documented command therefore never drains `financial` or `exports`. **It fails silently in the worst possible direction**: the heartbeat rides on `high`, so `ops:health` keeps reporting the queue **ok** while every commission, every reversal and every monthly fee generation accumulates unprocessed in `jobs` — which is verbatim the failure PRODUCTION.md §5 warns about (*"a fee payment is recorded, the commission job is enqueued, and no ledger entry ever appears"*), reached by following PRODUCTION.md's own command. The working form is `--queue=high,financial,default,exports`: heartbeat first so health stays truthful, money second, general work third, bulk exports last. Found while writing `docs/AAPANEL.md`, which documents the correct command and the discrepancy; the four stale spellings are still to be corrected at source, and the queue probe should assert that a worker is listening on `financial` rather than inferring liveness from a heartbeat on another queue. |
+| T57 | **Widget permissions were chosen per widget and never checked against the roles that read them, so a correctly-configured role can sign in to a blank dashboard.** | med | Found while adding the front-desk widgets: of 38 widgets, **not one** was visible to `Receptionist` — a role with 75 permissions. The near-misses are the evidence that this is a mismatch rather than an intention. **`fee_collected_today`, `pending_fees` and `overdue_fees` all require `student_fees.view_reports`, and the front desk holds `student_fees` READ_CREATE** — so the three cards about fee money were hidden from the person who takes the fee money, while `student_fee_payments.view_any`, which that role does hold, gated nothing at all. `new_inquiries` and `inquiry_routing_backlog` miss the same way: they want `contact_inquiries.view_any` where §9.1.2 deliberately grants `view` alone. Five new widgets now cover the front desk, but the **general** gap is unfixed: nothing asserts that every panel-facing role sees at least one widget, so the next role added inherits the same blank page silently. The test to write is a matrix — for each seeded role, `DashboardRegistry::for($user)` must be non-empty — and it belongs beside the existing `DashboardWidgetRegistryTest`. Re-gating the three fee widgets is the separate, more careful question, since widening them touches every other role that sees them. |
 | T56 | **`integrity:verify --suite=all` exits 2, so the nightly integrity run and `composer harden` both fail every time.** | **high** | `IntegrityCheckSuite` has nine cases and no `all`; the command's guard rejects an unknown suite before doing any work and returns 2. Confirmed by running it: `Unknown suite [all]. Known suites: constraints, wallet, schema, routes, isolation, uploads, performance, security, backup.` Omitting `--suite` is what runs all nine (`$requested === null` → `runAll()`). The broken form is live in **`composer.json:84`** (harden step 3, so the gate cannot pass), **`routes/console.php:419`** (`dailyAt('02:15')`, so the daily proof of the money never runs), `docs/INSTALL.md:420` and `DemoSeed.php`. **`GoLiveCheck.php:120` asserts the schedule *contains* `--suite=all`**, so the go-live gate currently requires the broken invocation to be scheduled and would fail if the schedule were fixed alone — both must change together. `ROLLBACK.md` already states the correct usage, which is how the discrepancy was noticed. This is D170's pattern once more: a green scheduler is not evidence the suites ran. |
 
 **Build-time items from the contract audit (BT-1 … BT-10)** — the documentation convergence is **closed** after
