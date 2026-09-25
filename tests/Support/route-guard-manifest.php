@@ -20581,4 +20581,15 @@ return [
         'rationale' => 'Authentication. Public or self-service by nature: a permission check here is either unreachable (nobody is signed in yet) or circular (you would need a permission in order to sign in and acquire your permissions). Breeze-derived, and throttled by the login, password-reset and verification limiters of section 6.3.1.',
         'owner_phase' => 1,
     ],
+    [
+        'route' => 'ops.health',
+        'methods' => ['GET'],
+        'middleware' => ['throttle:health'],
+        'permission' => null,
+        'panel' => 'public',
+        'state_changing' => false,
+        'policy' => null,
+        'rationale' => 'Unauthenticated by design (phase-24-25 section 7.3, DEP-22). A monitoring agent has no account, so the gate is a token rather than a permission: it arrives in an X-Health-Token header or a signed URL, never a query string, and is compared with hash_equals(). A wrong token, a missing token and ops.health_endpoint_enabled = false all answer 404 rather than 403 - a 403 confirms the endpoint exists and is merely closed, which tells a scanner exactly where to come back to. The body carries only counts, ages, booleans and versions: no row, no name, no email, no balance, no path above the base directory. Rate-limited by the health limiter at 30/min/IP.',
+        'owner_phase' => 25,
+    ],
 ];
