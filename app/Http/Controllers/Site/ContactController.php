@@ -45,8 +45,12 @@ final class ContactController extends Controller
     public function index(SiteListRequest $request): Response
     {
         $type = InquiryType::tryFrom((string) $request->validated('type'));
+        // 200, not every published service: the contact form's "what is this about" `<select>` is on a
+        // public, uncached-per-visitor path, and **`Service` is deliberately not a small reference table**
+        // (its categories are — phase-24-25 section 6.4, PRF-05). A catalogue with more than 200 live
+        // services has outgrown a dropdown, not this limit.
         $services = Modules::enabled('services')
-            ? Service::query()->public()->orderBy('sort_order')->orderBy('name')->get(['id', 'name', 'slug'])
+            ? Service::query()->public()->orderBy('sort_order')->orderBy('name')->limit(200)->get(['id', 'name', 'slug'])
             : collect();
 
         $serviceId = $request->validatedId('service');

@@ -50,11 +50,17 @@ final class CareerController extends Controller
             return $this->notFound();
         }
 
+        // 200, not every open vacancy: `public()` narrows to `open` with a live deadline, which is small
+        // today and **bounded by nothing but how many postings somebody leaves open** — a careers page is
+        // a public, cached-by-version response and one runaway import must not turn it into a megabyte
+        // of HTML (phase-24-25 section 6.4, PRF-05). A company with 200 live vacancies needs a paginated
+        // board, which is a screen this phase does not own.
         $openings = JobOpening::query()
             ->public()
             ->orderByDesc('is_featured')
             ->orderBy('sort_order')
             ->orderBy('deadline')
+            ->limit(200)
             ->get()
             ->each(fn (JobOpening $job) => $this->withholdAmounts($job, 'salary_visible', ['salary_min', 'salary_max']));
 

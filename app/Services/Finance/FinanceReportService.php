@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Services\Finance;
 
+use Closure;
+use Illuminate\Http\Request;
 use InvalidArgumentException;
+use WeakMap;
 use App\Enums\AgingBucket;
 use App\Enums\ExpenseStatus;
 use App\Enums\FinanceContext;
@@ -42,6 +45,25 @@ use Illuminate\Support\Carbon;
  */
 class FinanceReportService
 {
+    /**
+     * Results already computed during the request in flight (phase-24-25 section 6.4).
+     *
+     * **One dashboard render asked the database for the same expense rollup four times.** The expenses
+     * card reports this period and the one before it, the expenses-by-category chart reports this
+     * period, and the profit card's statement recomputes both sides of the books — three widgets, one
+     * question. PRF-02's sweep measured the two `expenses` statements at four executions each on
+     * `admin.dashboard`, past the three repeats phase-24-25 section 11.7 allows. Nothing here loops over
+     * rows, so the fix is to answer each distinct question once.
+     *
+     * **Keyed on the `Request` object through a `WeakMap`, never a plain static array**: the entry is
+     * collected with the request that created it, so a memoised figure cannot be handed to the next
+     * request of a long-lived worker or to the next request of a test process. A profit figure that
+     * outlived the money it was counting would be a far worse defect than a repeated query.
+     *
+     * @var WeakMap<Request, array<string, ReportResult>>|null
+     */
+    private static ?WeakMap $memo = null;
+
     public function __construct(
         private readonly DatabaseManager $db,
         private readonly CollaboratorWalletService $wallets,
@@ -50,12 +72,63 @@ class FinanceReportService
 
     public function report(FinanceReportType $type, DateRange $range, ?User $viewer = null, array $filters = []): ReportResult
     {
-        return match ($type) {
+        return $this->once($type, $range, $viewer, $filters, fn (): ReportResult => match ($type) {
             FinanceReportType::Income => $this->income($range, $viewer, $filters),
             FinanceReportType::Expenses => $this->expenses($range, $viewer, $filters),
             FinanceReportType::ProfitLoss => $this->profitAndLoss($range, $viewer, $filters),
             FinanceReportType::ReceivablesAging => $this->receivablesAging($range, $viewer, $filters),
-        };
+        });
+    }
+
+    /**
+     * One computation per distinct question per request.
+     *
+     * The question is the whole of what decides a figure: the report type, the exact range, the reader
+     * (who may not see a source, which changes the total and the omitted list) and the filters. Two
+     * calls that differ in any of them are two questions and both are asked.
+     *
+     * **No route, no memo.** A console command, a queue worker and the scheduler each resolve a Request
+     * built from CLI globals that lives as long as the process and carries no route; memoising against
+     * that one would let the figures of one job answer the next job's question. The guard is what keeps
+     * this a per-request memo rather than a per-process cache.
+     *
+     * @param  array<string, mixed>  $filters
+     * @param  Closure(): ReportResult  $compute
+     */
+    private function once(FinanceReportType $type, DateRange $range, ?User $viewer, array $filters, Closure $compute): ReportResult
+    {
+        $request = request();
+
+        if (! $request instanceof Request || $request->route() === null) {
+            return $compute();
+        }
+
+        ksort($filters);
+
+        $key = implode('|', [
+            $type->value,
+            $range->start()->toIso8601String(),
+            $range->end()->toIso8601String(),
+            $range->timezone(),
+            (string) ($viewer?->getAuthIdentifier() ?? 'guest'),
+            md5(serialize($filters)),
+        ]);
+
+        self::$memo ??= new WeakMap;
+
+        /** @var array<string, ReportResult> $bucket */
+        $bucket = self::$memo[$request] ?? [];
+
+        if (array_key_exists($key, $bucket)) {
+            return $bucket[$key];
+        }
+
+        $result = $compute();
+
+        $bucket[$key] = $result;
+        self::$memo[$request] = $bucket;
+
+        return $result;
     }
 
     /*
@@ -222,8 +295,11 @@ class FinanceReportService
      */
     private function profitAndLoss(DateRange $range, ?User $viewer, array $filters): ReportResult
     {
-        $income = $this->income($range, $viewer, $filters);
-        $expenses = $this->expenses($range, $viewer, $filters);
+        // Through `report()`, not straight at the two private methods: the statement wants exactly the
+        // income and expense reports, and **on a dashboard that also shows those two as their own cards
+        // the memo turns three renders of the same question into one query set** (PRF-02).
+        $income = $this->report(FinanceReportType::Income, $range, $viewer, $filters);
+        $expenses = $this->report(FinanceReportType::Expenses, $range, $viewer, $filters);
 
         $incomeTotal = Money::of((string) ($income->totals['amount'] ?? Money::ZERO));
         $expenseTotal = Money::of((string) ($expenses->totals['amount'] ?? Money::ZERO));

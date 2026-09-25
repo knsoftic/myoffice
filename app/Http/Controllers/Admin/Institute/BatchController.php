@@ -226,12 +226,21 @@ final class BatchController extends Controller
      */
     private function counts(Request $request): array
     {
-        $base = $this->filtered($request);
+        // **One grouped count, not one per case plus a total**: the per-case version ran the same
+        // `count(*)` once per `BatchStatus` case — six identical statements, where phase-24-25
+        // section 11.7 (PRF-02) allows a statement to repeat three times before it is a loop. `all`
+        // is the sum of the groups, which is what the separate seventh query was measuring.
+        $grouped = $this->filtered($request)
+            ->toBase()
+            ->selectRaw('status, COUNT(*) AS total')
+            ->groupBy('status')
+            ->pluck('total', 'status')
+            ->all();
 
-        $counts = ['all' => (clone $base)->count()];
+        $counts = ['all' => array_sum(array_map(static fn (mixed $total): int => (int) $total, $grouped))];
 
         foreach (BatchStatus::cases() as $status) {
-            $counts[$status->value] = (clone $base)->where('status', $status->value)->count();
+            $counts[$status->value] = (int) ($grouped[$status->value] ?? 0);
         }
 
         return $counts;

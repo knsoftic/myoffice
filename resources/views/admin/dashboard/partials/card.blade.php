@@ -129,7 +129,20 @@
                 aria-hidden="true"
             >
                 @if ($widget->skeleton === 'row')
-                    <table class="w-full"><tbody><x-ui.skeleton variant="row" :count="5" :columns="4" /></tbody></table>
+                    {{-- **The skeleton is x-ui.table because the body it stands in for is one.**
+                         This is the branch a widget whose real body is a table lands in, and the
+                         two table-bodied widgets — recent-activity and recent-logins, both
+                         `<x-ui.table dense :flush="true">` — are the shape it has to match.
+                         It used to be a hand-rolled `<table class="w-full">` with no horizontally
+                         scrolling wrapper, so a four-column skeleton in a narrow dashboard card
+                         widened the page instead of itself (CLAUDE.md §6, phase-24-25 §11.6
+                         RSP-04). The component owns the wrapper, so there is nothing left to
+                         forget.
+
+                         `dense` is part of matching those two: x-ui.skeleton's own rule is that a
+                         placeholder of the wrong height is worse than none, because the card
+                         visibly jumps when the real rows land. --}}
+                    <x-ui.table :loading="true" :loading-rows="5" :columns="4" dense :flush="true" />
                 @else
                     <x-ui.skeleton :variant="$widget->skeleton" :count="$widget->skeleton === 'card' ? 2 : 4" />
                 @endif

@@ -50,15 +50,26 @@ final class ResultController extends Controller
             'results' => $results,
             // Over every published result, not over the current page: a summary strip that changed as
             // somebody paged would be worse than no strip at all.
+            // **This total is over every published result, so it must not be capped**: a `limit()` here
+            // would print a wrong percentage rather than a slow one, which is the one outcome a transcript
+            // cannot have. `ResultSummary::of()` folds any iterable, so the rows stream through
+            // `lazyById()` in chunks of 500 and only one chunk is ever resident — phase-24-25 section 6.4's
+            // rule for an aggregate, the same `chunkById` walk the exports use (PRF-05). A student with
+            // fewer than 500 results still costs exactly one query. `id` joins the select list because a
+            // keyset walk pages by it.
             'summary' => ResultSummary::of(
                 ExamResult::query()
                     ->where('student_id', $student->getKey())
                     ->published()
-                    ->get(['exam_id', 'attendance_status', 'obtained_marks', 'total_marks', 'grade_point', 'is_passed']),
+                    ->select(['id', 'exam_id', 'attendance_status', 'obtained_marks', 'total_marks', 'grade_point', 'is_passed'])
+                    ->lazyById(500),
             ),
+            // 50: an owner `where` is not a row bound, and one student's enrolment history grows with
+            // every course they ever buy (phase-24-25 section 6.4, PRF-05).
             'enrollments' => StudentBatchEnrollment::query()
                 ->where('student_id', $student->getKey())
                 ->with(['batch:id,code,name,course_id', 'batch.course:id,name'])
+                ->limit(50)
                 ->get(),
             'showPosition' => (bool) setting('institute.result_card_show_position', true),
         ]);

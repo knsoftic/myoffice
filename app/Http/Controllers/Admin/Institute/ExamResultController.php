@@ -71,8 +71,10 @@ final class ExamResultController extends Controller
 
         return view('admin.exam-results.index', [
             'exams' => $exams,
-            'courses' => Course::query()->orderBy('name')->get(['id', 'name']),
-            'batches' => Batch::query()->orderByDesc('id')->get(['id', 'code', 'name']),
+            // 500, not every row: **a filter `<select>` over a table that grows every term is a page
+            // that grows for ever** (phase-24-25 section 6.4, PRF-05). Same ceiling as the finance pickers.
+            'courses' => Course::query()->orderBy('name')->limit(500)->get(['id', 'name']),
+            'batches' => Batch::query()->orderByDesc('id')->limit(500)->get(['id', 'code', 'name']),
             // Three numbers over the whole board rather than the page, so a coordinator can see what
             // is outstanding without paging to the end to find out.
             'awaitingEntry' => Exam::query()->where('status', ExamStatus::Conducted->value)->count(),

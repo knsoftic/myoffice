@@ -57,8 +57,10 @@ final class StudentIdCardController extends Controller
         return view('admin.student-id-cards.index', [
             'cards' => $cards,
             'statuses' => IdCardStatus::cases(),
-            'courses' => Course::query()->orderBy('name')->get(['id', 'name']),
-            'batches' => Batch::query()->orderByDesc('id')->get(['id', 'code', 'name']),
+            // 500, not every row: **a filter `<select>` over a table that grows every term is a page
+            // that grows for ever** (phase-24-25 section 6.4, PRF-05). Same ceiling as the finance pickers.
+            'courses' => Course::query()->orderBy('name')->limit(500)->get(['id', 'name']),
+            'batches' => Batch::query()->orderByDesc('id')->limit(500)->get(['id', 'code', 'name']),
             'counts' => $this->statusCounts($request),
             // Counted over the whole register, not the page: a badge that changed as somebody paged
             // would be worse than no badge.
@@ -403,15 +405,31 @@ final class StudentIdCardController extends Controller
             });
     }
 
-    /** @return array<string, int> */
+    /**
+     * One grouped count for the filter cards, not one count per case.
+     *
+     * **Six `count(*)`s that differ only in the status they test are a loop, not six screens' worth of
+     * work**: the per-case version ran the same statement once per `IdCardStatus` case and PRF-02's
+     * sweep saw it six times on one request (phase-24-25 section 11.7). Every case is still keyed, zero
+     * included, so the card row keeps its shape when a status is empty.
+     *
+     * @return array<string, int>
+     */
     private function statusCounts(Request $request): array
     {
-        $counts = [];
+        $counts = $this->filtered($request)
+            ->toBase()
+            ->selectRaw('status, COUNT(*) AS total')
+            ->groupBy('status')
+            ->pluck('total', 'status')
+            ->all();
+
+        $out = [];
 
         foreach (IdCardStatus::cases() as $status) {
-            $counts[$status->value] = (clone $this->filtered($request))->where('status', $status->value)->count();
+            $out[$status->value] = (int) ($counts[$status->value] ?? 0);
         }
 
-        return $counts;
+        return $out;
     }
 }

@@ -584,6 +584,18 @@ class AppServiceProvider extends ServiceProvider
                     'route' => Route::currentRouteName() ?? (request()?->path() ?? 'console'),
                     // The captured value, never a fresh read. See the note above.
                     'threshold_ms' => $threshold,
+                    /*
+                    | **The duration, because the threshold alone says nothing.** It is the same
+                    | number on every line, so without this a nine-second query is indistinguishable
+                    | from a 261 ms one — and those are the difference between "tune this when you
+                    | get a chance" and "this is why the site was down". PRF-14 asks for the route
+                    | and the duration by name.
+                    |
+                    | `totalQueryDuration()` is the figure the connection already accumulated to
+                    | decide this handler should fire, so it is a measurement being reported rather
+                    | than a second one being taken.
+                    */
+                    'duration_ms' => round((float) $connection->totalQueryDuration(), 1),
                     // The statements, shapes only. `getQueryLog()` is empty unless logging is on,
                     // which it is in local and testing; in production this is the route and the
                     // threshold, which is what a digest needs.

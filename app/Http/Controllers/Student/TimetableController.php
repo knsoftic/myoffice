@@ -32,10 +32,13 @@ final class TimetableController extends Controller
         $from = Carbon::parse((string) $request->input('from', Carbon::today()->startOfWeek()->toDateString()))->startOfDay();
         $to = $from->copy()->addDays(6)->endOfDay();
 
+        // 50: **an owner `where` is not a row bound** (phase-24-25 section 6.4, PRF-05). Active enrolments
+        // are few, but nothing in the schema says so.
         $enrollments = StudentBatchEnrollment::query()
             ->where('student_id', $student->getKey())
             ->where('status', EnrollmentStatus::Active->value)
             ->with('batch:id,code,name,course_id')
+            ->limit(50)
             ->get();
 
         $batchIds = $enrollments->pluck('batch_id');
@@ -46,12 +49,16 @@ final class TimetableController extends Controller
             'from' => $from,
             'to' => $to,
             'days' => collect(range(0, 6))->map(fn (int $i) => $from->copy()->addDays($i)),
+            // The week is seven days wide, but **neither a date window nor a `whereIn` on a foreign key is
+            // a row bound** (phase-24-25 section 6.4, PRF-05): 50 batches times a day of sessions each is
+            // a number this grid would render in full. 500 is far more than seven days can hold.
             'sessions' => ClassSession::query()
                 ->whereIn('batch_id', $batchIds)
                 ->between($from, $to)
                 ->with(['batch:id,code,name', 'teacher:id,name', 'classroom:id,code,name', 'course:id,name'])
                 ->orderBy('session_date')
                 ->orderBy('start_time')
+                ->limit(500)
                 ->get()
                 ->groupBy(fn (ClassSession $s): string => $s->session_date->toDateString()),
             'weekdays' => Weekday::ordered(),

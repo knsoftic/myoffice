@@ -61,9 +61,15 @@ final class AttendanceController extends Controller
             ->orderBy('name')
             ->get();
 
+        // **The register can display exactly one row per employee, so that count is the ceiling.**
+        // `AttendanceService::rowFor()` is the only place a row is born and it is one row per employee per
+        // date, which is the same assumption `keyBy('employee_id')` below already makes. Written down as a
+        // `limit()` because a `whereIn` on a *foreign* key is not a bound (phase-24-25 section 6.4,
+        // PRF-05): without the date beside it, one employee-id list can match years of rows.
         $rows = Attendance::query()
             ->whereDate('attendance_date', $date->toDateString())
             ->whereIn('employee_id', $employees->modelKeys())
+            ->limit(max(1, $employees->count()))
             ->get()
             ->keyBy('employee_id');
 
@@ -254,32 +260,37 @@ final class AttendanceController extends Controller
 
         $employees = $this->visibleEmployees($request)->pluck('id');
 
-        $rows = Attendance::query()
-            ->with('employee:id,name,employee_code')
-            ->whereBetween('attendance_date', [$month->toDateString(), $end->toDateString()])
-            ->whereIn('employee_id', $employees)
-            ->orderBy('attendance_date')
-            ->get()
-            ->map(fn (Attendance $row): array => [
-                $row->attendance_date->toDateString(),
-                $row->employee?->employee_code,
-                $row->employee?->name,
-                $row->day_type->label(),
-                $row->status->label(),
-                $row->check_in_at?->format('H:i'),
-                $row->check_out_at?->format('H:i'),
-                $row->worked_minutes,
-                $row->late_minutes,
-                $row->early_leave_minutes,
-                $row->overtime_minutes,
-                (string) $row->payable_factor,
-            ])
-            ->all();
-
+        // **A month of attendance for every visible employee is the one export in this module that grows
+        // without limit**: 300 employees is ~9,000 rows and the volume fixture's headcount is far more,
+        // and `->get()->map()->all()` held every one of them in memory before the first byte was written.
+        // `rowsFrom()` walks the query with `lazyById()`, one chunk of 500 resident at a time — what
+        // section 6.4 means by "exports stream (LazyCollection + chunkById), never `->get()`" (PRF-05, and
+        // the 128 MB peak of PRF-03). The explicit `orderBy('attendance_date')` goes with it: a keyset
+        // walk pages by primary key, so the file now comes out in the order the rows were written — day
+        // after day, in practice — and a spreadsheet re-sorts on any column.
         return (new CsvWriter)->download(
             sprintf('attendance-%s.csv', $month->format('Y-m')),
             ['Date', 'Code', 'Employee', 'Day type', 'Status', 'In', 'Out', 'Worked', 'Late', 'Early leave', 'Overtime', 'Payable'],
-            $rows,
+            CsvWriter::rowsFrom(
+                Attendance::query()
+                    ->with('employee:id,name,employee_code')
+                    ->whereBetween('attendance_date', [$month->toDateString(), $end->toDateString()])
+                    ->whereIn('employee_id', $employees),
+                static fn (Attendance $row): array => [
+                    $row->attendance_date->toDateString(),
+                    $row->employee?->employee_code,
+                    $row->employee?->name,
+                    $row->day_type->label(),
+                    $row->status->label(),
+                    $row->check_in_at?->format('H:i'),
+                    $row->check_out_at?->format('H:i'),
+                    $row->worked_minutes,
+                    $row->late_minutes,
+                    $row->early_leave_minutes,
+                    $row->overtime_minutes,
+                    (string) $row->payable_factor,
+                ],
+            ),
         );
     }
 

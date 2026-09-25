@@ -79,7 +79,10 @@ final class FeePaymentController extends Controller
             'methods' => PaymentMethod::cases(),
             'statuses' => ReceivedPaymentStatus::cases(),
             'states' => CommissionProcessingState::cases(),
-            'collaborators' => Collaborator::query()->orderBy('name')->get(['id', 'name', 'company_name', 'collaborator_code']),
+            // 500, not every row: **the collaborator network is a table that grows while the business
+            // works, so an unbounded filter `<select>` is a page that grows with it** (phase-24-25
+            // section 6.4, PRF-05). Same ceiling as the client and project pickers in this module.
+            'collaborators' => Collaborator::query()->orderBy('name')->limit(500)->get(['id', 'name', 'company_name', 'collaborator_code']),
             'range' => $this->range($request),
             'dateColumn' => $this->dateColumn($request),
         ]);

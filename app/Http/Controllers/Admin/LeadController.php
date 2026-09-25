@@ -79,7 +79,13 @@ final class LeadController extends Controller
 
         $leads = $filters
             ->apply(Lead::query()->visibleTo($actor), (int) $actor->getKey())
-            ->with(['assignee:id,name,email', 'service:id,name'])
+            // `avatar_path` is part of the avatar, not an extra: `User::avatarUrl()` reads
+            // `avatar_path`, `name` and `email`, and the row renders `$assignee->avatar_url`.
+            // **Omitting it turns this screen into a 500 the moment one lead has an assignee** —
+            // `Model::shouldBeStrict()` (AppServiceProvider, on outside production) raises
+            // MissingAttributeException from inside the accessor, so the view's `?? null` never
+            // gets to see a null. `admin/projects/index` already selects the same four columns.
+            ->with(['assignee:id,name,email,avatar_path', 'service:id,name'])
             ->orderBy($sort, $direction)
             ->orderByDesc('id')
             ->paginate($this->perPage())
@@ -157,7 +163,10 @@ final class LeadController extends Controller
         $type = is_string($typeValue) ? LeadActivityType::tryFrom($typeValue) : null;
 
         $lead->load([
-            'assignee:id,name,email',
+            // `avatar_path` for the same reason as the index: show.blade.php renders
+            // `$assignee->avatar_url`, and without the column the detail screen 500s on every
+            // assigned lead. The three other users here are rendered as names only.
+            'assignee:id,name,email,avatar_path',
             'assigner:id,name',
             'converter:id,name',
             'creator:id,name',
@@ -201,7 +210,10 @@ final class LeadController extends Controller
     {
         $this->authorize('update', $lead);
 
-        $lead->load('assignee:id,name');
+        // `email` and `avatar_path` as well as the name: partials/form.blade.php renders the owner's
+        // `avatar_url`, whose accessor reads all three. With only `id,name` the edit screen 500s on
+        // every assigned lead — twice over, once for each missing column.
+        $lead->load('assignee:id,name,email,avatar_path');
 
         return view('admin.leads.edit', array_merge($this->formData(), [
             'lead' => $lead,

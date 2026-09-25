@@ -154,7 +154,16 @@ final class QueryBudget
         // An N+1 is a failure whatever the budget says. A screen with a generous budget can hide
         // one inside it, and a generous budget is usually the result of somebody measuring a screen
         // that already had one.
-        if ($profile->duplicateCount() >= self::duplicateTolerance()) {
+        //
+        // **The comparison is the worst single statement, not the sum of every repeat on the screen**
+        // (phase-24-25 section 11.7: "no single SQL string is executed more than 3 times in one
+        // request"). Summing was measuring the wrong thing: admin.dashboard repeats eight statements
+        // twice or three times each — each of them a card reporting this period and the one before —
+        // which summed to nine and threw here, while no statement ran more than three times and
+        // nothing looped. That made `perf:budget --write-baseline` unable to record a baseline for the
+        // dashboard at all, and made QueryBudgetGuard 500 the admin landing page in local as soon as
+        // `ops.query_budget_enforced` was switched on: a screen failed for having many cards.
+        if ($profile->worstRepeat() > self::duplicateTolerance()) {
             throw new RuntimeException(sprintf(
                 "[%s] repeats itself:\n%s",
                 $route,

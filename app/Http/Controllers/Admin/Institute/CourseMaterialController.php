@@ -56,7 +56,10 @@ final class CourseMaterialController extends Controller
 
         return view('admin.course-materials.index', [
             'materials' => $materials,
-            'courses' => Course::query()->orderBy('name')->get(['id', 'name']),
+            // 500, not every row: **a filter `<select>` over a table that grows every term is a page
+            // that grows for ever** (phase-24-25 section 6.4, PRF-05). Same ceiling as the finance
+            // pickers. Branches are a small reference table and load whole.
+            'courses' => Course::query()->orderBy('name')->limit(500)->get(['id', 'name']),
             'branches' => Branch::query()->orderBy('name')->get(['id', 'name']),
             'statuses' => MaterialStatus::cases(),
             'types' => CourseResourceType::cases(),
@@ -287,13 +290,28 @@ final class CourseMaterialController extends Controller
             ->when($request->boolean('trashed'), fn (Builder $q) => $q->onlyTrashed());
     }
 
-    /** @return array<string, int> */
+    /**
+     * One grouped count for the filter cards, not one count per case.
+     *
+     * **Three `count(*)`s that differ only in the status they test are three runs of one statement**,
+     * which is the whole of what phase-24-25 section 11.7 (PRF-02) tolerates — one more `MaterialStatus`
+     * case and this screen would be a loop. Every case is still keyed, zero included.
+     *
+     * @return array<string, int>
+     */
     private function statusCounts(Request $request): array
     {
+        $grouped = $this->filtered($request)
+            ->toBase()
+            ->selectRaw('status, COUNT(*) AS total')
+            ->groupBy('status')
+            ->pluck('total', 'status')
+            ->all();
+
         $counts = [];
 
         foreach (MaterialStatus::cases() as $status) {
-            $counts[$status->value] = (clone $this->filtered($request))->where('status', $status->value)->count();
+            $counts[$status->value] = (int) ($grouped[$status->value] ?? 0);
         }
 
         return $counts;

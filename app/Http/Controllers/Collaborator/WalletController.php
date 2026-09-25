@@ -47,10 +47,15 @@ final class WalletController extends Controller
             'minimum' => Money::of((string) setting('collaborator.minimum_payout', '0.00')),
             'canRequest' => (bool) $request->user()?->can('collaborator_portal.payout_request')
                 && (bool) setting('collaborator.payout_request_enabled', true),
+            // 25, like the ledger strip below: **an owner `where` is not a row bound** (phase-24-25
+            // section 6.4, PRF-05). In-flight means requested-or-approved-not-yet-paid, which is normally
+            // one row, but nothing in the schema stops a collaborator from requesting every week for a
+            // year while an approver looks away.
             'inFlight' => CollaboratorPayout::query()
                 ->where('collaborator_id', $collaborator->getKey())
                 ->inFlight()
                 ->latest('id')
+                ->limit(25)
                 ->get(),
             'recent' => CollaboratorCommissionLedgerEntry::query()
                 ->where('collaborator_id', $collaborator->getKey())

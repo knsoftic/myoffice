@@ -43,9 +43,13 @@ final class DepartmentController extends Controller
                 ->orderBy('name')
                 ->paginate(20)
                 ->withQueryString(),
+            // The "department head" picker, 500 deep rather than every employee on the books:
+            // **headcount grows while the business works** and this `<select>` is rendered on every page
+            // of the register (phase-24-25 section 6.4, PRF-05).
             'employees' => Employee::query()
                 ->whereIn('status', ['active', 'probation'])
                 ->orderBy('name')
+                ->limit(500)
                 ->get(['id', 'name', 'employee_code', 'department_id']),
             'term' => $term,
         ]);

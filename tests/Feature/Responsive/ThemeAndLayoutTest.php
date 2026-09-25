@@ -49,16 +49,32 @@ final class ThemeAndLayoutTest extends TestCase
     use RefreshDatabase;
 
     /**
-     * Basename fragments that mark a view as a paper document.
+     * The two print shells. A view rendered inside one of these is ink on paper.
      *
      * A printed table has nowhere to scroll to, so RSP-04's rule about horizontal overflow does not
-     * apply to it — RSP-06 checks these instead, against the print stylesheet. Matched on the file
-     * name rather than kept as a list of paths, so a new payslip variant is covered the day it is
-     * written instead of the day somebody remembers to add it.
+     * apply to it — RSP-06 checks these instead, against the print stylesheet.
+     *
+     * **The exemption is by layout, never by file name.** It used to be a list of basename
+     * fragments (`print`, `slip`, `receipt`, `voucher`, …) and that list exempted three real screens:
+     * `admin/hr/payslips/{print,show}` and `admin/hr/my/payslip-show` all extend `layouts.admin`, so
+     * they are screens at 360 px that happen to have "slip" in the name, and the payslip's two
+     * figure tables sat outside any scroll container for as long as the fragment list covered for
+     * them. A name is not a layout.
      *
      * @var list<string>
      */
-    private const PAPER_DOCUMENTS = ['print', 'slip', 'receipt', 'voucher', 'certificate', 'id-card', 'result-card'];
+    private const PAPER_LAYOUTS = ['layouts/print.blade.php', 'layouts/document.blade.php'];
+
+    /**
+     * Memoised because the include walk asks for the same two hundred files repeatedly, and reading
+     * them once per question turns a scan into a disk benchmark.
+     *
+     * @var array<string, string>|null
+     */
+    private ?array $bladeSources = null;
+
+    /** @var array<string, list<array{0: string, 1: int}>>|null */
+    private ?array $includeSites = null;
 
     /*
     |--------------------------------------------------------------------------
@@ -276,27 +292,29 @@ final class ThemeAndLayoutTest extends TestCase
     {
         $violations = [];
 
-        foreach ($this->bladeFiles() as $relative => $path) {
-            $source = $this->withoutComments((string) file_get_contents($path));
-
-            if ($this->isPaperDocument($relative, $source)) {
+        foreach ($this->bladeSources() as $relative => $source) {
+            if ($this->isPaperDocument($relative)) {
                 continue;
             }
 
-            if (! preg_match_all('/<table\b/', $source, $matches, PREG_OFFSET_CAPTURE)) {
+            // A `<table` written inside a Blade echo or an @php block is a *string*, not an element:
+            // x-site.prose passes '<table' to str_replace as the needle it rewrites into
+            // '<div class="overflow-x-auto"><table'. Reading that needle as markup reported the one
+            // component in the codebase that wraps every table it prints.
+            $markup = $this->withoutPhpExpressions($source);
+
+            if (! preg_match_all('/<table\b/', $markup, $matches, PREG_OFFSET_CAPTURE)) {
                 continue;
             }
 
             foreach ($matches[0] as $match) {
-                $before = substr($source, 0, (int) $match[1]);
+                $offset = (int) $match[1];
 
-                // Anywhere earlier in the file, not within N characters: the wrapper is frequently the
-                // outermost element of a partial and the table is fifty lines of <thead> below it.
-                if (preg_match('/overflow-x-auto|overflow-auto|overflow-x-scroll/', $before) === 1) {
+                if ($this->scrollsWhenRendered($relative, $offset)) {
                     continue;
                 }
 
-                $violations[] = sprintf('%s:%d', $relative, substr_count($before, "\n") + 1);
+                $violations[] = sprintf('%s:%d', $relative, substr_count(substr($source, 0, $offset), "\n") + 1);
             }
         }
 
@@ -477,22 +495,148 @@ final class ThemeAndLayoutTest extends TestCase
 
     /**
      * Whether a view is ink on paper rather than pixels on a screen.
+     *
+     * Three clauses, each a statement about what renders the view:
+     *
+     *   1. it **is** one of the two print shells;
+     *   2. it **extends** one of them — the fourteen `layouts.print` documents and the three
+     *      `layouts.document` ones;
+     *   3. it is its own complete HTML document and **opens the print dialog on load**. Three
+     *      documents predate the shells and carry their own `@media print` block:
+     *      `admin/payouts/voucher`, `admin/reports/print`, `admin/statements/print`. A document that
+     *      prints itself the moment it opens has no screen use to have.
+     *
+     * Clause 3 needs the *auto* form on purpose. Eight screens carry a Print **button** that calls
+     * `window.print()` on click (`admin/clients/print`, `admin/leads/print`, `admin/hr/payroll/register`,
+     * `admin/hr/payslips/print`, …); those are screens, they extend `layouts.admin`, and this rule
+     * must keep applying to them.
      */
-    private function isPaperDocument(string $relative, string $source): bool
+    private function isPaperDocument(string $relative): bool
     {
+        if (in_array($relative, self::PAPER_LAYOUTS, true)) {
+            return true;
+        }
+
+        $source = $this->bladeSources()[$relative] ?? '';
+
         if (str_contains($source, "@extends('layouts.print'") || str_contains($source, "@extends('layouts.document'")) {
             return true;
         }
 
-        $basename = basename($relative, '.blade.php');
+        return preg_match('/onload="[^"]*window\.print\(\)|addEventListener\(\s*[\'"]load[\'"][^\n]*window\.print\(\)/', $source) === 1;
+    }
 
-        foreach (self::PAPER_DOCUMENTS as $fragment) {
-            if (str_contains($basename, $fragment)) {
-                return true;
+    /**
+     * Whether the table at `$offset` in `$relative` is inside a horizontally scrolling container by
+     * the time a browser sees it.
+     *
+     * A partial is not a page. `admin/reports/finance/_table` holds the six tables of the finance
+     * reports and carries no wrapper of its own, because its two callers each do the right thing for
+     * their medium: `admin/reports/finance/show` wraps the `@include` in `overflow-x-auto`, and
+     * `admin/reports/finance/print` extends `layouts.print`, where a scroll container would risk
+     * clipping the columns off the paper. **Reading one file at a time reported six violations in a
+     * partial whose every caller is already correct**, so the walk follows `@include` upwards and a
+     * partial is compliant only when *every* caller is.
+     *
+     * @param  array<string, true>  $seen
+     */
+    private function scrollsWhenRendered(string $relative, int $offset, array $seen = []): bool
+    {
+        $sources = $this->bladeSources();
+
+        // Anywhere earlier in the file, not within N characters: the wrapper is frequently the
+        // outermost element of a partial and the table is fifty lines of <thead> below it.
+        if (preg_match('/overflow-x-auto|overflow-auto|overflow-x-scroll/', substr($sources[$relative], 0, $offset)) === 1) {
+            return true;
+        }
+
+        // A partial that includes itself, directly or through a cycle, cannot be its own wrapper.
+        if (isset($seen[$relative])) {
+            return false;
+        }
+
+        $seen[$relative] = true;
+
+        $callers = $this->includeSites()[$this->viewName($relative)] ?? [];
+
+        // Nothing includes it: it is a page, and the missing wrapper is its own.
+        if ($callers === []) {
+            return false;
+        }
+
+        foreach ($callers as [$caller, $callOffset]) {
+            if ($this->isPaperDocument($caller)) {
+                continue;
+            }
+
+            if (! $this->scrollsWhenRendered($caller, $callOffset, $seen)) {
+                return false;
             }
         }
 
-        return false;
+        return true;
+    }
+
+    /**
+     * Every `@include` in every view: dotted view name => list of [including file, byte offset].
+     *
+     * `@include`, `@includeIf` and `@includeFirst` are read — a table is on the screen whichever
+     * directive put it there, and `@includeFirst`'s array form is read for its first candidate
+     * onwards.
+     *
+     * `@includeWhen` and `@includeUnless` take the **condition** first, so the pattern below does
+     * not reach their view name and a partial included only that way records no caller at all.
+     * **That gap fails safe and must stay on that side:** no caller means the partial is treated as
+     * a page and has to carry its own wrapper, which is a stricter answer, never a quieter one.
+     * Neither directive is used in this codebase today (`@includeFirst` once, in
+     * `admin/dashboard/partials/body`), so the pattern is left as it is rather than grown a branch
+     * nothing exercises — but a scan that silently stopped following a caller would be the failure
+     * to fear, and this is the note that says it cannot happen from here.
+     *
+     * @return array<string, list<array{0: string, 1: int}>>
+     */
+    private function includeSites(): array
+    {
+        if ($this->includeSites !== null) {
+            return $this->includeSites;
+        }
+
+        $sites = [];
+
+        foreach ($this->bladeSources() as $relative => $source) {
+            if (! preg_match_all('/@include(?:If|When|Unless|First)?\s*\(\s*\[?\s*[\'"]([^\'"]+)[\'"]/', $source, $matches, PREG_OFFSET_CAPTURE)) {
+                continue;
+            }
+
+            foreach ($matches[1] as $index => $name) {
+                $sites[$name[0]][] = [$relative, (int) $matches[0][$index][1]];
+            }
+        }
+
+        return $this->includeSites = $sites;
+    }
+
+    private function viewName(string $relative): string
+    {
+        return str_replace('/', '.', substr($relative, 0, -strlen('.blade.php')));
+    }
+
+    /**
+     * @return array<string, string> relative path => comment-free source
+     */
+    private function bladeSources(): array
+    {
+        if ($this->bladeSources !== null) {
+            return $this->bladeSources;
+        }
+
+        $sources = [];
+
+        foreach ($this->bladeFiles() as $relative => $path) {
+            $sources[$relative] = $this->withoutComments((string) file_get_contents($path));
+        }
+
+        return $this->bladeSources = $sources;
     }
 
     /**
@@ -572,10 +716,43 @@ final class ThemeAndLayoutTest extends TestCase
 
     /**
      * Blade comments hold documentation, and documentation quotes the markup this class forbids.
+     *
+     * Blanked rather than deleted: **every line number in every failure message of this class is
+     * counted from this string**, and a deleted comment block shifted them by its own height — the
+     * old scan pointed at `card.blade.php:116` for a table on line 132, fifteen lines of docblock
+     * away, which is exactly far enough to send the reader to the wrong element.
      */
     private function withoutComments(string $source): string
     {
-        return (string) preg_replace('/\{\{--.*?--\}\}/s', '', $source);
+        return $this->blank($source, '/\{\{--.*?--\}\}/s');
+    }
+
+    /**
+     * Blade's PHP regions blanked: `{{ }}`, `{!! !!}` and `@php … @endphp`.
+     *
+     * Markup never lives inside them, so nothing real is lost, and what is gained is that a quoted
+     * `'<table'` inside an expression stops being read as an element on the page.
+     *
+     * The lookahead excludes the **inline** `@php($x = …)` form, which 56 views use and which has no
+     * `@endphp`: without it the match would run from the first inline directive to the next block's
+     * `@endphp` — in `admin/attendance/reports/monthly.blade.php` that is the whole timetable grid,
+     * and blanking a real table is how a scan stops finding anything.
+     */
+    private function withoutPhpExpressions(string $source): string
+    {
+        return $this->blank($source, '/\{\{.*?\}\}|\{!!.*?!!\}|@php\b(?!\s*\().*?@endphp/s');
+    }
+
+    /**
+     * Replace every match with spaces, keeping newlines, so offsets and line numbers survive.
+     */
+    private function blank(string $source, string $pattern): string
+    {
+        return (string) preg_replace_callback(
+            $pattern,
+            static fn (array $match): string => (string) preg_replace('/[^\n]/', ' ', $match[0]),
+            $source,
+        );
     }
 
     /**

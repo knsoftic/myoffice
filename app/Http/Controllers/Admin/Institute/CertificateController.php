@@ -59,8 +59,10 @@ final class CertificateController extends Controller
         return view('admin.certificates.index', [
             'certificates' => $certificates,
             'statuses' => CertificateStatus::cases(),
-            'courses' => Course::query()->orderBy('name')->get(['id', 'name']),
-            'batches' => Batch::query()->orderByDesc('id')->get(['id', 'code', 'name']),
+            // 500, not every row: **a filter `<select>` over a table that grows every term is a page
+            // that grows for ever** (phase-24-25 section 6.4, PRF-05). Same ceiling as the finance pickers.
+            'courses' => Course::query()->orderBy('name')->limit(500)->get(['id', 'name']),
+            'batches' => Batch::query()->orderByDesc('id')->limit(500)->get(['id', 'code', 'name']),
             'counts' => $this->statusCounts($request),
             'canCreate' => (bool) $request->user()?->can('create', Certificate::class),
         ]);
@@ -517,13 +519,28 @@ final class CertificateController extends Controller
             ->when($request->boolean('trashed'), fn (Builder $q) => $q->onlyTrashed());
     }
 
-    /** @return array<string, int> */
+    /**
+     * One grouped count for the filter cards, not one count per case.
+     *
+     * **Four `count(*)`s that differ only in the status they test are a loop, not four screens' worth
+     * of work** — phase-24-25 section 11.7 (PRF-02) allows a statement to repeat three times. Every
+     * case is still keyed, zero included, so the card row keeps its shape when a status is empty.
+     *
+     * @return array<string, int>
+     */
     private function statusCounts(Request $request): array
     {
+        $grouped = $this->filtered($request)
+            ->toBase()
+            ->selectRaw('status, COUNT(*) AS total')
+            ->groupBy('status')
+            ->pluck('total', 'status')
+            ->all();
+
         $counts = [];
 
         foreach (CertificateStatus::cases() as $status) {
-            $counts[$status->value] = (clone $this->filtered($request))->where('status', $status->value)->count();
+            $counts[$status->value] = (int) ($grouped[$status->value] ?? 0);
         }
 
         return $counts;

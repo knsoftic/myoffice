@@ -33,6 +33,16 @@ final class TaskBoardController extends Controller
 {
     use AuthorizesRequests;
 
+    /**
+     * Cards fetched per board column before the board says "there are more".
+     *
+     * **`completed` is a board column** ({@see TaskStatus::isBoardColumn()}), so an unbounded board is a
+     * screen that grows for every task the team ever finishes — quick in month one and fatal in year three
+     * (phase-24-25 section 6.4, PRF-05). 50 is twice the lead board's default column page
+     * (`crm.kanban_page_size`, 25) and half its hard maximum.
+     */
+    private const CARDS_PER_COLUMN = 50;
+
     public function __construct(private readonly TaskService $tasks) {}
 
     public function index(Request $request): View
@@ -89,6 +99,11 @@ final class TaskBoardController extends Controller
      */
     private function board(Request $request, ?Project $project): array
     {
+        $ceiling = self::CARDS_PER_COLUMN * count(TaskStatus::boardColumns());
+
+        // One fetch for every column, so the ceiling is a whole-board number. **`board_position` is
+        // numbered within a column, so ordering by it first makes the cut fall across the columns**
+        // rather than filling the board from whichever lane happens to sort first.
         $cards = Task::query()
             ->visibleTo($request->user())
             ->when($project !== null, fn (Builder $query) => $query->where('project_id', $project->getKey()))
@@ -100,6 +115,7 @@ final class TaskBoardController extends Controller
             ->with(['project:id,code,name', 'assignee:id,name'])
             ->orderBy('board_position')
             ->orderBy('id')
+            ->limit($ceiling)
             ->get();
 
         $columns = [];
@@ -116,6 +132,10 @@ final class TaskBoardController extends Controller
             'columns' => $columns,
             'projects' => Project::query()->visibleTo($request->user())->orderBy('name')->pluck('name', 'id')->all(),
             'canMove' => $request->user()->can('tasks.change_status'),
+            // A board that quietly drops cards is worse than a board that says it did: the view turns
+            // this into a line pointing at the list view, which paginates.
+            'cardCeiling' => $ceiling,
+            'truncated' => $cards->count() >= $ceiling,
         ];
     }
 }

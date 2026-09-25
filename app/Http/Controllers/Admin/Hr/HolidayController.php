@@ -35,10 +35,16 @@ final class HolidayController extends Controller
         $year = (int) $request->query('year', (string) now()->year);
 
         return view('admin.hr.holidays.index', [
+            // **A year of the holiday calendar, with the year written into the query as a ceiling.** The
+            // `whereYear` alone is not a bound PRF-05 accepts (phase-24-25 section 6.4) and it is right
+            // not to: the table itself accumulates a batch of rows every January for ever, so a screen
+            // that read it whole would slow by a little each year. 400 is a calendar year's 366 dates
+            // plus per-branch duplicates of the same day.
             'holidays' => Holiday::query()
                 ->with('branch:id,name')
                 ->whereYear('holiday_date', $year)
                 ->orderBy('holiday_date')
+                ->limit(400)
                 ->get(),
             'year' => $year,
             'years' => range(now()->year - 2, now()->year + 2),
@@ -53,9 +59,12 @@ final class HolidayController extends Controller
         $year = (int) $request->query('year', (string) now()->year);
 
         return view('admin.hr.holidays.calendar', [
+            // The same one-year ceiling as the register above, for the same reason: the year filter bounds
+            // the window, 400 bounds the table (phase-24-25 section 6.4, PRF-05).
             'holidays' => Holiday::query()
                 ->whereYear('holiday_date', $year)
                 ->orderBy('holiday_date')
+                ->limit(400)
                 ->get()
                 ->groupBy(fn (Holiday $holiday): int => (int) $holiday->holiday_date->month),
             'year' => $year,

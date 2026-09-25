@@ -307,7 +307,14 @@ final class PaginationScanTest extends TestCase
             }
 
             foreach ($matches[0] as $match) {
-                $chain = $this->chainBefore($body, (int) $match[1]);
+                // `->get(` and `->cursor(` match at the `->`, so everything the chain needs is already
+                // behind the offset. `::all(` matches at the `::` itself, which puts the separator the
+                // head pattern below requires *ahead* of the offset: the chain read backwards is a bare
+                // `Student`, the head pattern does not match it, and **`Student::all()` — the plainest
+                // unbounded listing in the language — was skipped in silence.** Re-attaching the
+                // separator rather than shifting the offset keeps `:: all(` working too.
+                $separator = str_starts_with((string) $match[0], '::') ? '::' : '';
+                $chain = $this->chainBefore($body, (int) $match[1]).$separator;
 
                 if (! preg_match('/^[\\\\]?([A-Z][A-Za-z0-9_]*)\s*::/', $chain, $head)) {
                     continue;

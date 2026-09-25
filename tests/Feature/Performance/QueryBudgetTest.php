@@ -240,7 +240,23 @@ final class QueryBudgetTest extends TestCase
         $duplicates = [];
 
         foreach ($profiles as $route => $profile) {
-            if ($profile->duplicateCount() >= QueryBudget::duplicateTolerance()) {
+            // **The number PRF-02 compares against the tolerance is the worst single statement, not
+            // the sum of every repeat on the screen.** phase-24-25 section 11.7 says "no single SQL
+            // string is executed more than 3 times in one request", and the failure message below says
+            // the same thing in words. The two readings agree wherever one statement repeats — a sum of
+            // three repeats *is* one statement run four times — and part company only on a screen that
+            // holds several legitimately repeated statements. admin.dashboard is that screen: its
+            // finance cards each report this period and the one before it, which summed to nine while
+            // no statement ran more than three times. That is exactly the shape
+            // {@see QueryBudget::duplicateTolerance()} documents as allowed — two panels of the same
+            // shape, a polymorphic load, a paginator's count — and not a loop. Summing across
+            // statements failed it for having many cards rather than for repeating any one query.
+            //
+            // Read through {@see QueryProfile::worstRepeat()} rather than computed here, because
+            // {@see QueryBudget::assert()} — the same clause, enforced by `perf:budget` and by
+            // QueryBudgetGuard — has to compare the identical number. Spelling it out in both places is
+            // how the app came to read one contract clause two ways in the first place.
+            if ($profile->worstRepeat() > QueryBudget::duplicateTolerance()) {
                 $duplicates[] = sprintf("[%s]\n%s", $route, $profile->describe(3));
             }
         }

@@ -48,6 +48,24 @@ final readonly class QueryProfile
     }
 
     /**
+     * How many times the **most repeated single statement** ran, or 0 when nothing repeated.
+     *
+     * **This is the number phase-24-25 section 11.7 sets the limit on** — "no single SQL string is
+     * executed more than 3 times in one request" — and {@see self::duplicateCount()} is not, because
+     * it sums repeats across statements that have nothing to do with each other. The two agree
+     * wherever one statement repeats and part company on a screen holding several legitimately
+     * repeated statements: admin.dashboard summed to nine over eight statements while no statement
+     * ran more than three times, which is the shape {@see QueryBudget::duplicateTolerance()} documents
+     * as allowed — two panels of the same shape, a polymorphic load, a paginator's count — and not a
+     * loop. It lives here, once, so the budget guard and the PRF-02 sweep cannot drift into reading the
+     * clause two ways.
+     */
+    public function worstRepeat(): int
+    {
+        return $this->duplicates === [] ? 0 : max($this->duplicates);
+    }
+
+    /**
      * A readable account of what happened, for a test failure or a log line.
      */
     public function describe(int $limit = 5): string
@@ -62,9 +80,14 @@ final readonly class QueryProfile
             return implode("\n", $lines);
         }
 
-        $lines[] = sprintf('  %d duplicate quer%s — this is what an N+1 looks like:',
+        // Both numbers, because only one of them is the one the limit is set on. Saying "9 duplicate
+        // queries — this is what an N+1 looks like" over eight unrelated statements is what sent a
+        // reader looking for a loop on admin.dashboard that was never there; the worst single
+        // statement is the figure {@see self::worstRepeat()} compares, so it is printed beside it.
+        $lines[] = sprintf('  %d duplicate quer%s, worst single statement ×%d:',
             $this->duplicateCount(),
             $this->duplicateCount() === 1 ? 'y' : 'ies',
+            $this->worstRepeat(),
         );
 
         $shown = 0;

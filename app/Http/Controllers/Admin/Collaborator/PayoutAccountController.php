@@ -35,11 +35,15 @@ final class PayoutAccountController extends Controller
     {
         return view('admin.payout-accounts.index', [
             'collaborator' => $collaborator,
+            // 50, the same ceiling the collaborator's own screen uses: **an owner `where` is not a row
+            // bound** (phase-24-25 section 6.4, PRF-05), and an account is never deleted once money has
+            // gone to it.
             'accounts' => CollaboratorPayoutAccount::query()
                 ->where('collaborator_id', $collaborator->getKey())
                 ->with('verifier:id,name')
                 ->orderByDesc('is_default')
                 ->orderBy('label')
+                ->limit(50)
                 ->get(),
             'verificationRequired' => (bool) setting('collaborator.payout_account_verification_required', true),
         ]);

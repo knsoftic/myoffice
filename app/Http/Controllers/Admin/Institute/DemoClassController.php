@@ -66,12 +66,16 @@ final class DemoClassController extends Controller
         return view('admin.demo-classes.calendar', [
             'from' => $from,
             'to' => $to,
+            // The week is seven days wide whatever `from` says, but **a date window is not a row bound**
+            // (phase-24-25 section 6.4, PRF-05): one branch could have any number of demos on one day, and
+            // this grid renders every one it is handed. 500 is more than a week of slots can hold.
             'demos' => DemoClass::query()
                 ->forBranch($request->user()?->branch_id === null ? null : (int) $request->user()->branch_id)
                 ->between($from, $to)
                 ->with(['course:id,name'])
                 ->orderBy('scheduled_on')
                 ->orderBy('start_time')
+                ->limit(500)
                 ->get()
                 ->groupBy(fn (DemoClass $demo): string => $demo->scheduled_on->toDateString()),
             'days' => collect(range(0, 6))->map(fn (int $i) => $from->copy()->addDays($i)),

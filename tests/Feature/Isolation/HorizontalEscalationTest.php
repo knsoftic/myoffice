@@ -129,14 +129,7 @@ final class HorizontalEscalationTest extends TestCase
             ->get(route('client.invoices.show', $invoiceB, absolute: false))
             ->assertNotFound();
 
-        $this->actingAs($userA)
-            ->post(route('client.notifications.read', $notificationB, absolute: false))
-            ->assertNotFound();
-
-        $this->assertNull(
-            DB::table('notifications')->where('id', $notificationB)->value('read_at'),
-            'A refused request still marked another tenant’s notification read.',
-        );
+        $this->assertMarkingReadIsANoOp($userA, 'client.notifications.read', $notificationB);
 
         // A forged `client_id` on a legitimate write: the ticket, if it is created at all, belongs to
         // the session's client and never to B. `TicketService::create()` derives `client_id` from
@@ -176,10 +169,12 @@ final class HorizontalEscalationTest extends TestCase
     */
 
     /**
-     * ESC-02 — A opens B's receipt, B's fee slip and B's notification: 404 every time, nothing written.
+     * ESC-02 — A opens B's receipt and B's fee slip (404 both times) and tries to mark B's notification
+     * read (a no-op). Nothing written, either way.
      *
      * A receipt is the highest-value target on this panel: it names an amount, a date and a person,
-     * and its id is sequential.
+     * and its id is sequential. The notification is the exception to this file's 404 convention and
+     * {@see assertMarkingReadIsANoOp()} says why.
      */
     #[Test]
     public function test_student_a_cannot_act_as_student_b(): void
@@ -209,9 +204,7 @@ final class HorizontalEscalationTest extends TestCase
             ->get(route('student.payments.receipt', $paymentB, absolute: false))
             ->assertNotFound();
 
-        $this->actingAs($userA)
-            ->post(route('student.notifications.read', $this->notificationFor($userB), absolute: false))
-            ->assertNotFound();
+        $this->assertMarkingReadIsANoOp($userA, 'student.notifications.read', $this->notificationFor($userB));
 
         $this->assertNothingWritten($before, 'a student read another student’s money rows');
     }
@@ -521,10 +514,19 @@ final class HorizontalEscalationTest extends TestCase
      * evidence is a 403 in a web-server log nobody reads next to ten thousand others. The refusals are
      * the cheapest intrusion signal this system could have.
      *
-     * Closing it means a listener plus its registration, and registration is in
-     * `AppServiceProvider`/`bootstrap` — files this slice may not touch. The snippet is in the slice
-     * report. Un-skip by writing the listener; do not weaken this into "some activity row exists",
-     * which every request already produces.
+     * **The blocker is a design decision, not a missing file, and the earlier reason on this skip named
+     * the wrong obstacle.** It said registration lives in "`AppServiceProvider`/`bootstrap`", which one
+     * `ls app/Providers` falsifies: listeners are registered in `EventListenerServiceProvider`'s
+     * `$listen` map, which is not out of bounds for this slice at all. The real obstacle is *where a
+     * route-level denial can be observed*. `Illuminate\Auth\Access\Events\GateEvaluated` and
+     * `Gate::after` fire for **every** ability check in a request, and the sidebar alone checks one per
+     * menu entry — for an Accountant most of those are denials, so a listener on either would write
+     * dozens of `activity_log` rows per page view and the signal this exists to create would be the
+     * first casualty. Distinguishing "the route's own `can:` refused" from "a `@can` hid a button"
+     * needs the `AuthorizationException` renderer or a global response middleware, and both are
+     * registered in `bootstrap/app.php` — which this slice may not touch. The snippet is in the slice
+     * report. Un-skip by shipping that; do not weaken this into "some activity row exists", which every
+     * request already produces.
      */
     #[Test]
     public function test_vertical_escalation_is_impossible_too_and_is_recorded(): void
@@ -532,12 +534,19 @@ final class HorizontalEscalationTest extends TestCase
         $this->markTestSkipped(
             'phase-24-25 section 11.4 ESC-06 requires a refused financial or administrative attempt to '
             .'leave an activity row. No listener records an authorisation denial anywhere in this '
-            .'application: app/Listeners holds RecordFailedLogin, RecordLogout and RecordSuccessfulLogin '
-            .'and nothing else, and no handler writes activity_log on AuthorizationException. Asserting '
+            .'application: the only security listeners in app/Listeners are RecordFailedLogin, RecordLogout '
+            .'and RecordSuccessfulLogin (the rest of that directory — Cms/, Collaborator/, Crm/, Finance/, '
+            .'Support/ — is domain work), and grepping app/Providers, app/Listeners, app/Exceptions and '
+            .'bootstrap for Illuminate\\Auth\\Access\\Events, Gate::after or AuthorizationException returns '
+            .'nothing, so nothing writes activity_log on a denial. Asserting '
             .'it today would fail on every one of the six attempts in the test above; asserting "an '
-            .'activity row exists" instead would pass on rows an ordinary request writes anyway. Owner: '
-            .'whoever ships the denial listener and its registration (AppServiceProvider is outside this '
-            .'slice).'
+            .'activity row exists" instead would pass on rows an ordinary request writes anyway. '
+            .'Blocked on a decision plus a registration this slice may not make: a listener on '
+            .'GateEvaluated / Gate::after sees every @can the sidebar evaluates, not just the route’s own '
+            .'refusal, so recording there would write dozens of rows per page view for exactly the roles '
+            .'this test cares about. Observing only route-level denials means the AuthorizationException '
+            .'renderer or a global response middleware, and both are registered in bootstrap/app.php. '
+            .'Owner: whoever rules on which denials are recorded, then ships the recorder and registers it.'
         );
     }
 
@@ -573,11 +582,24 @@ final class HorizontalEscalationTest extends TestCase
         return User::query()->findOrFail((int) $client->user_id);
     }
 
+    /**
+     * An invoice B can actually see, so A's 404 on it is a refusal rather than an accident.
+     *
+     * **`issue()` alone leaves the invoice a draft.** phase-13 §2.3 defines the column — `sent_at`
+     * "**NULL ⇒ draft**" — and `InvoiceService::statusFor()` implements it, while
+     * `InvoicesSection::query()` filters `status <> draft`. An issued-but-unsent invoice is therefore
+     * 404 for *its own owner*, which would make ESC-01's central assertion pass without ever reaching
+     * the ownership check it exists to make. `markSent()` issues first when still a draft.
+     */
     private function issuedInvoice(Client $client)
     {
         $invoice = $this->draftInvoice($client, [$this->line('25000.00')]);
 
-        return app(InvoiceService::class)->issue($invoice, $this->createSuperAdmin());
+        return app(InvoiceService::class)->markSent(
+            $invoice,
+            ['buyer@example.test'],
+            $this->createSuperAdmin(),
+        );
     }
 
     /**
@@ -685,6 +707,55 @@ final class HorizontalEscalationTest extends TestCase
     | Assertions
     |--------------------------------------------------------------------------
     */
+
+    /**
+     * A foreign notification id posted at `*.notifications.read`: **the row does not move.**
+     *
+     * **The contract's claim on this route is ownership, not a status code, and the two are not the
+     * same assertion.** Section 11.3 ISO-11 asks that "marking one read re-asserts ownership"; the
+     * routes sections 11.4 ESC-01 and ESC-02 require to answer 404/422 are named individually — a
+     * comment, a file upload, a ticket, a meeting acceptance, an invoice view, an assignment, a
+     * receipt, a certificate, attendance and a charge — and this is not one of them.
+     *
+     * `NotificationService::markRead()` is a single scoped `UPDATE` whose `WHERE` carries
+     * `notifiable_id = this user`, and its docblock states the contract it keeps: "Returns false when
+     * the row is not this person's — never an exception". `NotificationController::read()` then
+     * redirects back whatever it returned. **That answer discloses strictly less than a 404 would**:
+     * it cannot distinguish "not yours" from "already read" from "no such id", which on a bell whose
+     * ids travel in e-mail links is the better property, not a weaker one. Demanding 404 here would be
+     * extending a convention the contract stopped short of, and {@see \App\Http\Controllers\Support\NotificationController::go()}
+     * — the route that *does* disclose, because it follows a deep link — does answer 404 and is
+     * asserted at ISO-11 in `TenantScopeTest`.
+     *
+     * So what is asserted is the thing that must be true: `read_at` is untouched. The login-redirect
+     * guard is what stops that from being vacuous — a 302 to `/login` would mean the POST never
+     * reached the controller and the probe proved nothing at all.
+     */
+    private function assertMarkingReadIsANoOp(User $actor, string $route, string $notification): void
+    {
+        $response = $this->actingAs($actor)->post(route($route, $notification, absolute: false));
+
+        $status = $response->getStatusCode();
+
+        $this->assertContains(
+            $status,
+            [302, 404],
+            sprintf('%s answered %d for another tenant’s notification id.', $route, $status),
+        );
+
+        if ($status === 302) {
+            $this->assertNotSame(
+                '/login',
+                (string) parse_url((string) $response->headers->get('Location'), PHP_URL_PATH),
+                sprintf('%s bounced the POST to the login page, so nothing about ownership was tested.', $route),
+            );
+        }
+
+        $this->assertNull(
+            DB::table('notifications')->where('id', $notification)->value('read_at'),
+            'A refused mark-as-read still stamped another tenant’s notification.',
+        );
+    }
 
     /**
      * A foreign id arriving as a **field** is refused — 422 on a JSON-shaped response, or the 302 with

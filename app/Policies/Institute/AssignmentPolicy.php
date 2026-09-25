@@ -39,9 +39,29 @@ final class AssignmentPolicy
             && $this->sharesBranch($user, $this->branchOf($assignment));
     }
 
+    /**
+     * **A teacher setting work on their own batch holds `teacher_portal.assignments`, not
+     * `assignments.create`.**
+     *
+     * Without the second clause the teacher panel's whole write path is dead for every teacher in the
+     * system: `routes/teacher.php` guards `teacher.assignments.store` with `can:teacher_portal.assignments`
+     * and `tests/Support/route-guard-manifest.php` records that route as `permission =>
+     * teacher_portal.assignments, policy => null` — but `StoreAssignmentRequest::authorize()` asks this
+     * policy, `RoleSeeder` grants the Teacher role only `PermissionRegistry::permissionNamesFor('teacher_portal')`,
+     * and so every submission of `teacher/assignments/create` answered **403** before the controller ran.
+     * The "Set work" button led to a form that could never be saved, and nothing noticed, because no test
+     * had ever posted it (phase-24-25 section 11.4 ESC-04 is the first).
+     *
+     * The clause grants **entry, not reach**. `AssignmentController::store()` still refuses a batch that
+     * is not the teacher's with `abort_unless(in_array($batchId, TeacherScope::batchIds($teacher)), 404)`
+     * — permission at the door, ownership in the controller, which is the split this module was written
+     * with. It cannot widen the admin side either: `admin.assignments.*` sits behind `panel:admin`, which
+     * no holder of a `teacher_portal.*` permission passes.
+     */
     public function create(User $user): bool
     {
-        return $this->holds($user, self::MODULE, Ability::Create);
+        return $this->holds($user, self::MODULE, Ability::Create)
+            || $this->onTeacherPortal($user);
     }
 
     /**
@@ -132,6 +152,18 @@ final class AssignmentPolicy
     {
         return $this->holds($user, self::MODULE, Ability::ViewLogs)
             && $this->sharesBranch($user, $this->branchOf($assignment));
+    }
+
+    /**
+     * The teacher panel's own grant for this module.
+     *
+     * Named for one panel rather than "any portal" on purpose: a student holds `student_portal.assignments`
+     * and must never be able to set work, so the wildcard `onAPortal()` shape used by `ConversationPolicy`
+     * — where every panel legitimately opens a thread — would be the wrong borrowing here.
+     */
+    private function onTeacherPortal(User $user): bool
+    {
+        return $user->can('teacher_portal.'.self::MODULE);
     }
 
     private function branchOf(Assignment $assignment): ?int

@@ -295,6 +295,15 @@ final class TicketController extends Controller
     {
         return User::query()
             ->orderBy('name')
+            // phase-24-25 section 6.4. **`can()` asks each user for its roles and its direct
+            // permissions, so uneager-loaded this filter ran two statements per user** — eighteen staff
+            // meant thirty-five extra queries to fill the assignee filter, and PRF-02's sweep caught it
+            // on admin.tickets.index. Eager-loaded it is three, whatever the headcount grows to.
+            //
+            // `can()` stays rather than spatie's `permission()` scope: the scope reads the grant tables
+            // directly and would miss what Gate::before decides — the Super Admin bypass, and the
+            // module-disabled deny that outranks it.
+            ->with(['roles:id,name', 'roles.permissions:id,name', 'permissions:id,name'])
             ->get(['id', 'name', 'status', 'branch_id'])
             ->filter(static fn (User $user): bool => $user->can('support_tickets.view_any'))
             ->values();

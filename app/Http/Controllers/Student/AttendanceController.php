@@ -32,10 +32,14 @@ final class AttendanceController extends Controller
     {
         $student = $this->student($request);
 
+        // 50: **an owner `where` is not a row bound** (phase-24-25 section 6.4, PRF-05). One student's
+        // enrolment history grows with every course they ever buy, and this strip renders all of it above
+        // the paginated register.
         $enrollments = StudentBatchEnrollment::query()
             ->where('student_id', $student->getKey())
             ->with(['batch:id,code,name,course_id', 'course:id,name'])
             ->orderByDesc('enrolled_on')
+            ->limit(50)
             ->get();
 
         $rows = StudentAttendance::query()

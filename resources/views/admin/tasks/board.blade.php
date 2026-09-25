@@ -31,6 +31,18 @@
 @endsection
 
 @section('content')
+    {{--
+        The board is bounded (phase-24-25 section 6.4, PRF-05) and says so when the bound bites: a card
+        that is silently missing from a Kanban column reads as a task that does not exist.
+    --}}
+    @if ($truncated ?? false)
+        <p role="status"
+           class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+            Showing the first {{ app_number((float) $cardCeiling, 0) }} cards. Narrow the board to one project, or use the
+            <a href="{{ route('admin.tasks.index') }}" class="font-medium underline">list view</a> to page through everything.
+        </p>
+    @endif
+
     <div
         x-data="taskBoard({ moveUrl: '{{ url('admin/tasks') }}', csrf: '{{ csrf_token() }}', canMove: {{ $canMove ? 'true' : 'false' }} })"
         class="flex gap-4 overflow-x-auto pb-4">

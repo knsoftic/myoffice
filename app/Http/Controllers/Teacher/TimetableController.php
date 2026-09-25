@@ -43,20 +43,26 @@ final class TimetableController extends Controller
             'from' => $from,
             'to' => $to,
             'days' => collect(range(0, 6))->map(fn (int $i) => $from->copy()->addDays($i)),
+            // The week is seven days wide, but **neither a date window nor an owner `where` is a row bound**
+            // (phase-24-25 section 6.4, PRF-05) — `from` is whatever the query string says and a teacher's
+            // day has no cap on sessions. 500 is far more than seven days of teaching can hold.
             'sessions' => ClassSession::query()
                 ->where('teacher_id', $teacher->getKey())
                 ->between($from, $to)
                 ->with(['batch:id,code,name', 'classroom:id,code,name', 'course:id,name'])
                 ->orderBy('session_date')
                 ->orderBy('start_time')
+                ->limit(500)
                 ->get()
                 ->groupBy(fn (ClassSession $s): string => $s->session_date->toDateString()),
-            // The weekly pattern beside the dated week, so "every Monday" is still visible.
+            // The weekly pattern beside the dated week, so "every Monday" is still visible. 100: a pattern
+            // is seven days of slots, and `active()` is a status, not a ceiling.
             'entries' => TimetableEntry::query()
                 ->active()
                 ->where('teacher_id', $teacher->getKey())
                 ->with(['batch:id,code,name', 'classroom:id,code'])
                 ->orderBy('start_time')
+                ->limit(100)
                 ->get()
                 ->groupBy(fn (TimetableEntry $e): string => $e->day_of_week->value),
             'weekdays' => Weekday::ordered(),

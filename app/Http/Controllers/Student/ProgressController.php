@@ -27,24 +27,32 @@ final class ProgressController extends Controller
     {
         $student = $this->student($request);
 
+        // 50 enrolments, and one progress row per enrolment: **an owner `where` is not a row bound**
+        // (phase-24-25 section 6.4, PRF-05), and this screen renders every row it is handed — there is no
+        // paginator underneath it to stop at a page.
         $enrollments = StudentBatchEnrollment::query()
             ->where('student_id', $student->getKey())
             ->with(['batch:id,code,name,course_id', 'course:id,name'])
             ->orderByDesc('enrolled_on')
+            ->limit(50)
             ->get();
 
         $progressRows = StudentCourseProgress::query()
             ->where('student_id', $student->getKey())
             ->with(['moduleProgress', 'topicProgress'])
+            ->limit(50)
             ->get()
             ->keyBy('student_batch_enrollment_id');
 
-        // The outline, per course, so a module heading has topics under it rather than ids.
+        // The outline, per course, so a module heading has topics under it rather than ids. **A `whereIn`
+        // on a foreign key inherits nothing**: 50 courses times a syllabus of any depth is 500 here, which
+        // is more modules than the outline of fifty courses can plausibly hold.
         $modules = CourseModule::query()
             ->whereIn('course_id', $enrollments->pluck('course_id')->filter()->unique())
             ->where('is_active', true)
             ->with(['topics' => static fn ($q) => $q->where('is_active', true)->orderBy('sort_order')])
             ->orderBy('sort_order')
+            ->limit(500)
             ->get()
             ->groupBy('course_id');
 

@@ -72,8 +72,11 @@ final class ProjectPaymentController extends Controller
             'methods' => PaymentMethod::cases(),
             'statuses' => ReceivedPaymentStatus::cases(),
             'states' => CommissionProcessingState::cases(),
-            'clients' => Client::query()->orderBy('name')->get(['id', 'name', 'client_code']),
-            'collaborators' => Collaborator::query()->orderBy('name')->get(['id', 'name', 'company_name', 'collaborator_code']),
+            // 500, not every row: **the client list and the collaborator network both grow while the
+            // business works, so an unbounded filter `<select>` is a page that grows with them**
+            // (phase-24-25 section 6.4, PRF-05). Same ceiling as this module's invoice and income pickers.
+            'clients' => Client::query()->orderBy('name')->limit(500)->get(['id', 'name', 'client_code']),
+            'collaborators' => Collaborator::query()->orderBy('name')->limit(500)->get(['id', 'name', 'company_name', 'collaborator_code']),
             'range' => $this->range($request),
             'dateColumn' => $this->dateColumn($request),
         ]);

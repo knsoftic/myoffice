@@ -9,6 +9,7 @@ use App\Models\Support\Conversation;
 use App\Models\User;
 use App\Policies\Support\Concerns\ChecksSupportPermissions;
 use App\Support\MessagingMatrix;
+use Illuminate\Auth\Access\Response;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -41,10 +42,28 @@ final class ConversationPolicy
             || $this->onAPortal($user);
     }
 
-    public function view(User $user, Conversation $conversation): bool
+    /**
+     * **404, never 403, for a non-participant.**
+     *
+     * phase-19-23 §7.11 annotates this very gate — `can:view,conversation` **(404 for a
+     * non-participant)** — and PH22-32 states it as a test: "A non-participant gets **404** on a
+     * conversation and on a message attachment." A 403 would answer the question the thread is being
+     * protected from: it confirms that conversation id exists, which turns a sequential key into a
+     * roster of who is talking to whom. That matters most between two portal logins of the *same*
+     * company, where the id is one apart from a thread the reader legitimately holds
+     * (phase-24-25 section 11.3 ISO-11).
+     *
+     * `Response::denyAsNotFound()` is how every other scoped gate in this application says it
+     * ({@see \App\Policies\Crm\ClientPolicy::viewOwn()}, `CollaboratorPolicy`, `ClientPortalPolicy`),
+     * and it answers 404 through the route middleware and `Gate::authorize()` alike.
+     *
+     * The boolean predicate stays available as {@see canRead()} because {@see close()} composes it with
+     * `&&`, and a `Response` object is truthy — a deny expressed only as a Response would silently let
+     * a non-participant holding `messages.change_status` close somebody else's thread.
+     */
+    public function view(User $user, Conversation $conversation): Response|bool
     {
-        return $this->isLiveParticipant($user, $conversation)
-            || $this->holds($user, self::MODULE, Ability::ViewAny);
+        return $this->canRead($user, $conversation) ? true : Response::denyAsNotFound();
     }
 
     public function create(User $user): bool
@@ -97,7 +116,10 @@ final class ConversationPolicy
     {
         return $conversation->getAttribute('closed_at') === null
             && $this->holds($user, self::MODULE, Ability::ChangeStatus)
-            && $this->view($user, $conversation);
+            // `canRead()`, not `view()`: `view()` now returns a `Response` on a deny, and every object
+            // is truthy — `&& $response` would evaluate to true and hand a non-participant the close
+            // button.
+            && $this->canRead($user, $conversation);
     }
 
     /**
@@ -117,6 +139,18 @@ final class ConversationPolicy
     }
 
     // ===============================================================================================
+
+    /**
+     * May this user read the thread at all — the boolean behind {@see view()}.
+     *
+     * Separate from `view()` so callers that compose the answer with `&&` get a boolean rather than the
+     * truthy `Response` that carries the 404.
+     */
+    private function canRead(User $user, Conversation $conversation): bool
+    {
+        return $this->isLiveParticipant($user, $conversation)
+            || $this->holds($user, self::MODULE, Ability::ViewAny);
+    }
 
     /**
      * The one clause every scope in §9.4 shares — and `left_at IS NULL` is half of it.

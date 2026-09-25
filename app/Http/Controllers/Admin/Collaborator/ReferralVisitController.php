@@ -39,7 +39,10 @@ final class ReferralVisitController extends Controller
                 ->paginate(30)
                 ->withQueryString(),
             'outcomes' => $this->outcomeOptions(),
-            'collaborators' => Collaborator::query()->orderBy('name')->get(['id', 'name', 'company_name', 'collaborator_code']),
+            // 500, not every row: **the collaborator network is a table that grows while the business
+            // works, so an unbounded filter `<select>` is a page that grows with it** (phase-24-25
+            // section 6.4, PRF-05). Same ceiling as the finance pickers.
+            'collaborators' => Collaborator::query()->orderBy('name')->limit(500)->get(['id', 'name', 'company_name', 'collaborator_code']),
             'seesRawIp' => $seesRawIp,
             'range' => $this->range($request),
         ]);

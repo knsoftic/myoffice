@@ -162,6 +162,16 @@ final class IntegrityRequirementsTest extends TestCase
      * The moment the first one lands, the skip stops firing and every remaining absence becomes a hard
      * failure naming the missing method. That is the property the contract actually asks for: the
      * §120 suite can never be *quietly reduced*. It can only be wholesale absent, which is not quiet.
+     *
+     * **One of those hard failures is already known, and it is a real gap rather than a rename.** Eight
+     * of the nine exist at service level and five of the six exist at HTTP level; the one that exists
+     * nowhere is **PH18-06 / §120.9, `test_payout_of_20000_against_50000_wallet`, in
+     * `tests/Feature/Institute/Fees/`**. `grep -rn payout tests/Feature/Institute/Fees/` matches a
+     * single comment in `FeeDiscountTest.php` and no test, so phase-18 §11.1 — which lists PH18-01..06
+     * as "tests 1 to 5 and 9, by name" — is short by its ninth. Whoever performs the rename should
+     * expect this test to go red on exactly that one line and should write the missing HTTP-level
+     * payout scenario rather than trim `self::FEES_SUBSET` to five, which would be the quiet reduction
+     * FIN-01 exists to prevent.
      */
     #[Test]
     #[Group(self::SUITE)]
@@ -437,12 +447,15 @@ final class IntegrityRequirementsTest extends TestCase
             'phase-24-25 section 11.5.2 FIN-18 sweeps every column whose NAME matches '
             .'`amount|fee|salary|price|budget|balance|total|paid|discount|tax|value|commission` and requires '
             .'an allowlist file closed to exactly three entries (`progress`, `rating`, `*_marks`). Run as a '
-            .'plain substring match against the current schema that regex returns ~80 legitimate columns — '
-            .'`settings.value` and `cache.value` (longtext), `holidays.is_paid` and `leave_types.is_paid` '
+            .'plain substring match against the current schema that regex matches 279 columns, of which '
+            .'**104** are not decimal(15,2) or decimal(8,4) and are all legitimate — `settings.value` '
+            .'(longtext) and `cache.value` (mediumtext), `holidays.is_paid` and `leave_types.is_paid` '
             .'(boolean), `tasks.subtask_total` and `student_course_progress.topics_total` (counters), '
             .'`contact_inquiries.budget` (free text on a public form), `clients.tax_number` (varchar), plus '
-            .'every `commission_*` and `*_fee_id` foreign key — so the three-entry allowlist the contract '
-            .'closes is only reachable with a whole-word/suffix predicate written alongside it. That file '
+            .'every `commission_*` and `*_fee_id` foreign key — and, most tellingly, '
+            .'`assignment_submissions.feedback` (text), which matches only because "fee" is a substring of '
+            .'"feedback". So the three-entry allowlist the contract closes is only reachable with a '
+            .'whole-word/suffix predicate written alongside it. That file '
             .'(tests/Support/money-column-allowlist.php) does not exist and this slice may create only the '
             .'four files section 11.3/11.4/11.5 name. The convention-based half of FIN-18 runs above and is '
             .'green: `*_amount`, `*_rate|_percentage|_pct`, and no float/double/real anywhere.'
@@ -655,11 +668,21 @@ final class IntegrityRequirementsTest extends TestCase
         return sprintf(
             'phase-24-25 section 11.5.1 FIN-01 pins nine method names that do not exist yet. All nine '
             .'scenarios DO exist and pass under the descriptive names the earlier phases gave them — %d of '
-            .'the %d legacy names were found in %s on this run — and no test anywhere in the suite carries a '
-            ."#[Group] attribute, so `--group=%s` currently selects nothing.\n\n"
-            ."To un-skip: rename each of the nine to the name in self::REQUIRED, add #[Group('%s')] to it and "
-            .'to its six PH18-01..PH18-06 counterparts in %s, and register the suite in phpunit.xml. Those are '
-            ."shared files this slice does not own; the exact edits are in the slice report.\n\n"
+            ."the %d legacy names were found in %s on this run, in StudentCommissionEngineTest (5), "
+            ."ProjectCommissionEngineTest (3) and PayoutTest (1).\n\n"
+            ."No test in this repository carries #[Group('%s')] except this file, so `--group=%s` selects "
+            .'only the pin and none of the nine scenarios it pins. (Other group names are in use — '
+            ."`security`, `perf`, `isolation`, `idor`, `financial` — so the gap is this one suite, not "
+            ."grouping as such.)\n\n"
+            ."To un-skip: rename each of the nine to the name in self::REQUIRED and add #[Group('%s')] to it "
+            .'and to its six PH18-01..PH18-06 counterparts in %s. PHPUnit reads groups from the attribute, so '
+            ."nothing has to be registered in phpunit.xml for `--group=%s` to work; the exact renames are in "
+            ."the slice report.\n\n"
+            .'One of the six has no counterpart to rename: PH18-06 / §120.9 '
+            .'`test_payout_of_20000_against_50000_wallet` does not exist at HTTP level under any name — '
+            .'`grep -rn payout tests/Feature/Institute/Fees/` matches one comment in FeeDiscountTest.php and '
+            .'no test. Expect this pin to go red on that single line after the rename, and write the '
+            ."scenario; do not shorten self::FEES_SUBSET to five.\n\n"
             .'This skip fires only while NONE of the nine has been renamed. After the first rename every '
             .'remaining absence is a hard failure naming the method, which is the guarantee the contract '
             .'asks for: the §120 suite can never be quietly reduced.',
@@ -668,7 +691,9 @@ final class IntegrityRequirementsTest extends TestCase
             self::SERVICE_DIR,
             self::SUITE,
             self::SUITE,
+            self::SUITE,
             self::HTTP_DIR,
+            self::SUITE,
         );
     }
 

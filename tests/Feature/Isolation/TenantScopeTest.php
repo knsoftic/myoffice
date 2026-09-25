@@ -4,19 +4,31 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Isolation;
 
+use App\DataObjects\Crm\ActivityData;
+use App\DataObjects\Crm\ConvertLeadData;
+use App\DataObjects\Crm\FollowUpData;
+use App\DataObjects\Crm\LeadData;
 use App\Enums\ClientStatus;
+use App\Enums\LeadActivityType;
+use App\Enums\LeadFollowUpType;
+use App\Enums\LeadStatus;
 use App\Enums\PanelType;
 use App\Enums\PayoutMethod;
 use App\Models\Collaborator\Collaborator;
 use App\Models\Collaborator\CollaboratorCommissionLedgerEntry;
 use App\Models\Crm\Client;
+use App\Models\Crm\Lead;
+use App\Models\Crm\LeadFollowUp;
 use App\Models\Institute\Student;
 use App\Models\Institute\Teacher;
 use App\Models\Support\Conversation;
 use App\Models\User;
+use App\Services\Crm\LeadConversionService;
+use App\Services\Crm\LeadService;
 use App\Services\Finance\InvoiceService;
 use App\Services\Institute\StudentService;
 use App\Services\Support\ConversationService;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -141,9 +153,10 @@ final class TenantScopeTest extends TestCase
      * ISO-02 — Client A over the invoice screens: own rows only, B's id is a 404, and the body carries
      * none of the internal columns.
      *
-     * The invoice is **issued** rather than left a draft on purpose: `client.invoices.*` filters
-     * `status <> draft`, so a draft would 404 for the owner too and the test would pass without ever
-     * reaching the ownership check.
+     * The invoice is **issued and sent** rather than left a draft on purpose: `client.invoices.*`
+     * filters `status <> draft`, so a draft would 404 for the owner too and the test would pass without
+     * ever reaching the ownership check. See {@see issuedInvoice()} for why "issued" is not the same
+     * thing as "not a draft" in this application.
      */
     #[Test]
     public function test_client_panel_isolation(): void
@@ -366,11 +379,15 @@ final class TenantScopeTest extends TestCase
      * 403 is the assertion that keeps the two from collapsing into one.
      *
      * Three of the contract's six clauses run here. **The project ones — `.project_value`,
-     * `.project_payments`, `.project_client` — are not asserted**, because no fixture under `tests/`
-     * builds a referred project with a received payment (`BuildsFinancialFixtures` stops at student
-     * fees), and this slice may not add one to another phase's concerns directory. They are named here
-     * rather than left to be inferred from a method that quietly covers half its title. Owner: whoever
-     * ships `tests/Feature/Financial/Concerns/BuildsProjectFixtures.php`.
+     * `.project_payments`, `.project_client` — are not asserted**, and the reason is reuse, not
+     * absence: `BuildsFinancialFixtures` stops at student fees, and the only builder for a referred
+     * project with a received payment is private to
+     * `tests/Feature/Financial/ProjectCommissionEngineTest` (`projectPartner()`, `project()`, `pay()`
+     * at lines 267-346), which this file cannot call. Promoting those four methods into
+     * `tests/Feature/Financial/Concerns/BuildsProjectFixtures.php` is what unblocks the three clauses,
+     * and it edits a phase-10-12 test this slice does not own. They are named here rather than left to
+     * be inferred from a method that quietly covers half its title. Owner: whoever promotes that
+     * builder.
      */
     #[Test]
     public function test_collaborator_money_columns_are_permission_gated(): void
@@ -686,31 +703,156 @@ final class TenantScopeTest extends TestCase
         );
     }
 
-    /** ISO-08 — branch scoping (D11). */
+    /**
+     * ISO-08 — branch scoping (D11).
+     *
+     * **This skip is blocked on a decision, not on a fixture**, and the earlier reason on it was wrong
+     * in the way this file's own preamble warns about: it claimed no two-branch fixture existed, which
+     * `grep -rn "Branch::query()->create" tests/` disproves in one command.
+     */
     #[Test]
     public function test_branch_scoping(): void
     {
         $this->markTestSkipped(
-            'phase-24-25 section 11.3 ISO-08 needs a two-branch institute fixture: a user with '
-            .'users.branch_id = 1 seeing only `branch_id = 1 OR branch_id IS NULL`, a branch-2 student, '
-            .'charge, receipt, batch and timetable entry each 404, and the fee-structure generator '
-            .'stamping branch_id from the student rather than the form. No fixture builder under tests/ '
-            .'creates a second branch, and this slice may not add one to tests/Feature/Institute/Concerns '
-            .'(those files belong to phases 14-17). Owner: whoever ships the branch fixture.'
+            'phase-24-25 section 11.3 ISO-08 asks that a branch-2 student, charge, receipt, batch and '
+            .'timetable entry each answer **404** to a user whose users.branch_id = 1. Two-branch '
+            .'fixtures already exist and already run: tests/Feature/Institute/AdmissionAuthorizationTest.php '
+            .'lines 244-265 (student list + student by id) and tests/Feature/Institute/SchedulingAuthorizationTest.php '
+            .'lines 174-203 (batch list + batch by id) both build Lahore/Karachi and both assert the '
+            .'branch-2 row by id is **403** (assertForbidden), not 404 — and they pass. So ISO-08 cannot '
+            .'be written here without either contradicting two green suites from phases 14-17 or '
+            .'asserting a status the contract does not give: the 403-vs-404 conflict needs a decision '
+            .'record, not a third test. Still uncovered by anything: a branch-2 charge, receipt and '
+            .'timetable entry by id, the fee-structure generator stamping branch_id from the student '
+            .'rather than the form, and "collaborator ledger, wallet and payouts are global". Owner: the '
+            .'decision that settles 403 vs 404 for branch scoping, then phases 14-17 + 18.'
         );
     }
 
-    /** ISO-09 — pipeline visibility (Phase 5 [D-P5-8]). */
+    /*
+    |--------------------------------------------------------------------------
+    | ISO-09 — pipeline visibility
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * ISO-09 — `leads.view` without `leads.view_any`: only the leads this person owns, and every child
+     * row hanging off somebody else's lead is a **404** (Phase 5 [D-P5-8], D30).
+     *
+     * **This cell used to be a skip, and its stated reason was false.** It read: "tests/Feature/Crm
+     * ships only CrmSmokeTest.php and no lead fixture builder, so this test would have to hand-build
+     * the pipeline — which would test a shape LeadService never produces." Nothing below is hand-built:
+     * the lead, its activity, its follow-up and its conversion all come out of `LeadService`,
+     * `LeadFollowUpService` (through `LeadData::$followUp`) and `LeadConversionService` — exactly as
+     * this file already builds students through `StudentService`, invoices through `InvoiceService` and
+     * threads through `ConversationService`. A missing *fixture trait* is not a missing *service*, and
+     * this file's own preamble condemns a skip a reader can disprove in one command.
+     *
+     * **One predicate carries all four rows, which is why the cell is worth its cost.**
+     * `LeadPolicy::reaches()` answers `Response::denyAsNotFound()` for a lead the viewer neither owns
+     * nor was assigned, and `LeadActivityPolicy::view()`, `LeadFollowUpPolicy::view()` and
+     * `LeadConversionPolicy::view()` each delegate to it rather than re-deriving ownership. So a single
+     * forgotten delegation leaks a child row while the lead screen above it stays perfectly correct —
+     * the failure is invisible from the one screen anybody looks at.
+     *
+     * The three child routes are POST/PUT/PATCH and are probed with an **empty body on purpose**:
+     * `can:` is route middleware and runs before the controller resolves its Form Request, so a 404
+     * here is the policy's answer and not a validation accident. Each row is then re-counted, which is
+     * what stops "404" from quietly meaning "no such id".
+     */
     #[Test]
     public function test_pipeline_visibility_scope(): void
     {
-        $this->markTestSkipped(
-            'phase-24-25 section 11.3 ISO-09 asserts that `leads.view` without `leads.view_any` shows '
-            .'only leads where assigned_to or created_by is the user, and 404s their activities, '
-            .'follow-ups and conversions by id. tests/Feature/Crm ships only CrmSmokeTest.php and no '
-            .'lead fixture builder, so this test would have to hand-build the pipeline — which would '
-            .'test a shape LeadService never produces. Owner: Phase 5’s own suite, cited here so the '
-            .'matrix cell is not silently empty.'
+        $owner = $this->createUserWithRole('Sales Executive');
+
+        // The viewer: `leads.view` and nothing else. One permission is the whole difference between
+        // this list and the whole pipeline, and the route is gated on `leads.view` — not `view_any`
+        // (phase-05 [D-P5-8] narrows *within* the screen), so a 403 here would be the wrong failure.
+        $viewer = $this->createUserWithPermissions(['leads.view']);
+
+        // Every lead is created as somebody else, so `created_by` can never make one of them the
+        // viewer's by accident: [D-P5-8] reaches a lead by `assigned_to` **or** `created_by`, and a
+        // fixture built while signed in as the viewer would satisfy the second half and prove nothing
+        // about the first.
+        $this->actingAs($this->createSuperAdmin());
+
+        $mine = $this->lead($viewer, 'Pipeline Alpha Prospect');
+        $theirs = $this->lead($owner, 'Pipeline Beta Prospect');
+        $converted = $this->lead($owner, 'Pipeline Gamma Prospect', LeadStatus::Won);
+
+        $activity = app(LeadService::class)->recordActivity($theirs, new ActivityData(
+            type: LeadActivityType::Note,
+            subject: 'Pipeline probe',
+            body: 'A manual row, so the policy reaches its ownership branch rather than the system seal.',
+        ));
+
+        $followUp = LeadFollowUp::query()->where('lead_id', $theirs->getKey())->firstOrFail();
+
+        $conversion = app(LeadConversionService::class)
+            ->convert($converted, new ConvertLeadData)
+            ->conversion;
+
+        $index = $this->actingAs($viewer)
+            ->get(route('admin.leads.index', absolute: false))
+            ->assertOk();
+
+        $index->assertSee('Pipeline Alpha Prospect');
+        $index->assertDontSee('Pipeline Beta Prospect');
+        $index->assertDontSee('Pipeline Gamma Prospect');
+
+        // Their own row opens, or "404 for everything" would satisfy every refusal below.
+        $this->actingAs($viewer)
+            ->get(route('admin.leads.show', $mine, absolute: false))
+            ->assertOk();
+
+        $before = [
+            'lead_activities' => (int) DB::table('lead_activities')->count(),
+            'lead_follow_ups' => (int) DB::table('lead_follow_ups')->count(),
+            'lead_conversions' => (int) DB::table('lead_conversions')->count(),
+        ];
+
+        $this->actingAs($viewer)
+            ->get(route('admin.leads.show', $theirs, absolute: false))
+            ->assertNotFound();
+
+        $this->actingAs($viewer)
+            ->put(route('admin.leads.activities.update', [$theirs, $activity], absolute: false))
+            ->assertNotFound();
+
+        $this->actingAs($viewer)
+            ->patch(route('admin.leads.follow-ups.complete', [$theirs, $followUp], absolute: false))
+            ->assertNotFound();
+
+        $this->actingAs($viewer)
+            ->post(route('admin.leads.conversions.supersede', $conversion, absolute: false))
+            ->assertNotFound();
+
+        foreach ($before as $table => $count) {
+            $this->assertSame(
+                $count,
+                (int) DB::table($table)->count(),
+                sprintf('A refused write on somebody else’s lead still changed `%s`.', $table),
+            );
+        }
+
+        // And the three rows are still exactly as they were — so every 404 above meant "not yours" and
+        // never "no such id". Read with the query builder, past every global scope and soft delete, for
+        // the same reason the tenant bindings are: this has to see the row the *database* holds.
+        $this->assertSame(
+            1,
+            (int) DB::table('lead_activities')->where('id', $activity->getKey())->count(),
+            'The activity a 404 was issued for is not in the table, so the 404 said nothing about ownership.',
+        );
+
+        $this->assertSame(
+            'pending',
+            (string) DB::table('lead_follow_ups')->where('id', $followUp->getKey())->value('status'),
+            'A refused complete still moved another owner’s follow-up out of `pending`.',
+        );
+
+        $this->assertNull(
+            DB::table('lead_conversions')->where('id', $conversion->getKey())->value('superseded_at'),
+            'A refused supersede still retired another owner’s conversion.',
         );
     }
 
@@ -908,13 +1050,26 @@ final class TenantScopeTest extends TestCase
     }
 
     /**
-     * An issued (never draft) invoice for this client.
+     * An invoice this client can actually see: numbered **and sent**.
+     *
+     * **`issue()` alone is not enough, and the difference is a status, not a detail.** phase-13 §2.3
+     * spells the rule out on the `sent_at` column — "**NULL ⇒ draft**" — and `InvoiceService::statusFor()`
+     * implements exactly that, so an invoice that has a number, an `issued_at` and an `issued_by` is
+     * still `draft` until somebody sends it. `InvoicesSection::query()` filters `status <> draft`
+     * (phase-24-25 section 11.3 ISO-02: "invoices (never `draft`)"), so an issued-but-unsent invoice is
+     * correctly invisible to the client — and a fixture that stopped at `issue()` made ISO-02 fail on
+     * the *owner's* row before it ever reached the question it exists to ask, which is whether B's row
+     * is a 404 for A. `markSent()` issues first when still a draft, so this is one call, not two.
      */
     private function issuedInvoice(Client $client)
     {
         $invoice = $this->draftInvoice($client, [$this->line('25000.00')]);
 
-        return app(InvoiceService::class)->issue($invoice, $this->createSuperAdmin());
+        return app(InvoiceService::class)->markSent(
+            $invoice,
+            ['buyer@example.test'],
+            $this->createSuperAdmin(),
+        );
     }
 
     /**
@@ -995,6 +1150,33 @@ final class TenantScopeTest extends TestCase
             'name' => $name,
             'phone' => '0377'.str_pad((string) random_int(1, 9999999), 7, '0', STR_PAD_LEFT),
         ]);
+    }
+
+    /**
+     * One lead in the pipeline, owned by `$owner`, carrying a pending follow-up.
+     *
+     * Through `LeadService::create()` rather than `Lead::create()`: the row it writes carries a
+     * `lead_no` from the numbering service, a creation activity, an assignment stamp and — when a
+     * `FollowUpData` is passed — a `pending` follow-up under `uq_lfu_open`. A hand-inserted lead would
+     * have none of those, and the child rows ISO-09 probes are exactly the ones that would be missing.
+     *
+     * `status` is honoured by `create()` directly (it is the branch an import's default status uses),
+     * which is how the conversion fixture starts life `won` without walking the §2.11 transition table
+     * through three `changeStatus()` calls.
+     */
+    private function lead(User $owner, string $name, ?LeadStatus $status = null): Lead
+    {
+        return app(LeadService::class)->create(new LeadData(
+            name: $name,
+            email: Str::slug($name).'@pipeline.test',
+            phone: '0376'.str_pad((string) random_int(1, 9999999), 7, '0', STR_PAD_LEFT),
+            assignedTo: $owner->getKey(),
+            status: $status,
+            followUp: new FollowUpData(
+                type: LeadFollowUpType::Call,
+                scheduledAt: CarbonImmutable::now()->addDays(2),
+            ),
+        ));
     }
 
     /**
