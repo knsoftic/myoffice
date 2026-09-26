@@ -9,6 +9,7 @@ use App\Dashboard\WidgetGroup;
 use App\Enums\DemoClassStatus;
 use App\Models\Institute\DemoClass;
 use App\Support\DateRange;
+use App\Support\Format;
 use Illuminate\Support\Carbon;
 use Throwable;
 
@@ -81,7 +82,7 @@ final class DemoClassesTodayWidget extends Widget
     public function data(DateRange $range): array
     {
         try {
-            $today = Carbon::now(config('app.timezone'))->toDateString();
+            $today = Carbon::now(Format::timezone())->toDateString();
 
             $counts = DemoClass::query()
                 ->toBase()

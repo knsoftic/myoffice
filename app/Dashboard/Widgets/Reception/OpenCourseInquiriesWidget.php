@@ -9,6 +9,7 @@ use App\Dashboard\WidgetGroup;
 use App\Enums\CourseInquiryStatus;
 use App\Models\Institute\CourseInquiry;
 use App\Support\DateRange;
+use App\Support\Format;
 use Illuminate\Support\Carbon;
 use Throwable;
 
@@ -89,7 +90,7 @@ final class OpenCourseInquiriesWidget extends Widget
                 ),
             );
 
-            $today = Carbon::now(config('app.timezone'))->toDateString();
+            $today = Carbon::now(Format::timezone())->toDateString();
 
             // **One query, not four.** All four figures are aggregates over the same open rows.
             // `contact_attempts = 0` means zero calls made — the follow-up flow increments it — and

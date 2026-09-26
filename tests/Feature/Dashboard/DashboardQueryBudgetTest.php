@@ -31,8 +31,33 @@ final class DashboardQueryBudgetTest extends TestCase
     use InteractsWithRbac;
     use RefreshDatabase;
 
-    /** Ceiling for the whole GET /admin request: session, auth, RBAC, settings, shell and every card. */
-    private const PAGE_CEILING = 60;
+    /**
+     * Ceiling for the whole GET /admin request: session, auth, RBAC, settings, shell and every card.
+     *
+     * **Raised from 60 to 90 when the registry went from 38 widgets to 58**, and the number is the
+     * only honest part of this comment — the reasoning is what matters, because "the test failed so
+     * I raised the limit" is exactly how a ceiling stops meaning anything.
+     *
+     * What was checked before touching it:
+     *
+     *   · **The growth check passes.** With the ceiling lifted out of the way, `$large <= $small`
+     *     held — the count does not move when every table a widget reads grows by an order of
+     *     magnitude. That is the assertion that catches an N+1, and it is untouched at zero growth.
+     *   · **Every widget already costs one query.** The fifteen added in this round each fold their
+     *     figures into a single conditional-aggregate pass; there is no waste left to remove. The
+     *     previous breach (66 against 60) was different in kind — five widgets were spending twelve
+     *     queries and the fix was to write them properly, not to move the line.
+     *   · **The arithmetic no longer fits.** 58 cards that each cost one query cannot render inside
+     *     60 total alongside session, auth, RBAC, settings and the shell. Measured: 77.
+     *
+     * So this ceiling tracks the product rather than a moment in it, and 90 leaves room for roughly
+     * a dozen more cards before it asks the question again — which is the point of a ceiling that is
+     * allowed to complain. **It catches a runaway, not growth**; the growth check catches the rest.
+     *
+     * If it is ever raised again, the same three things are what justify it. A raise without them is
+     * the scan being quietened (see `DEVELOPMENT_LOG.md` D171).
+     */
+    private const PAGE_CEILING = 90;
 
     /** Ceiling for one widget's JSON. */
     private const WIDGET_CEILING = 20;

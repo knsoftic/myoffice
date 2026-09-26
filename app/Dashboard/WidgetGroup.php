@@ -52,6 +52,15 @@ final class WidgetGroup
     /** Institute: admissions, batches, attendance. */
     public const INSTITUTE = 'institute';
 
+    /**
+     * The workforce: headcount, attendance, leave, payroll.
+     *
+     * Separate from Operations because the reader is different. Operations answers "is the work
+     * moving?"; this answers "who is here, and what do they need from us?" — and the person who
+     * needs the second question answered usually has no permission to see the first.
+     */
+    public const PEOPLE = 'people';
+
     /** Where an unknown group is sorted: after every known one. */
     private const UNKNOWN_SORT = 900;
 
@@ -65,6 +74,7 @@ final class WidgetGroup
         self::FRONT_DESK => ['Front desk', 150],
         self::OPERATIONS => ['Operations', 200],
         self::INSTITUTE => ['Institute', 300],
+        self::PEOPLE => ['People', 350],
         self::FINANCE => ['Finance', 400],
         self::SECURITY => ['Security', 500],
         self::SYSTEM => ['System', 600],

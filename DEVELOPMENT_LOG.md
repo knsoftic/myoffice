@@ -782,6 +782,75 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-09-26 — T57 closed: four blank dashboards, fifteen widgets, and a ceiling that had stopped tracking the product
+
+T57 was recorded when `Receptionist` turned out to hold 75 permissions and see **none** of the 38
+registered widgets. Measuring the rest found it was not one role's problem:
+
+| Role | Permissions | Widgets |
+|---|---|---|
+| Project Manager | 94 | **0** |
+| Support Agent | 39 | **0** |
+| Developer | 37 | **0** |
+| Designer | 37 | **0** |
+| HR | 176 | 2 |
+| Course Coordinator | 98 | 2 |
+
+Four people signing in to nothing, and the one who runs the entire people side of the business
+getting two cards. Fifteen widgets now cover them — **People** (headcount, attendance today, leave
+approvals, hiring), **Operations** (active projects, task load, milestones due, hours logged; ticket
+queue, my open tasks, my time this week, my meetings) and **Institute** (classes today, attendance
+gaps, active batches). Registry: 43 to 58.
+
+**Four judgements worth keeping.** Attendance counts *from `employees`*, not from `attendances` — a
+row is only born when somebody punches, so counting attendance rows silently answers a different
+question, and the LEFT JOIN is what makes "not marked yet" expressible at all. "Marked" is
+`attendance_marked_at IS NULL`, read from the migration rather than inferred from the presence of
+rows: **a register where everybody was absent is a marked register with zero present rows.** Tasks
+and milestones join to live projects, because cancelling a project does not touch its tasks and
+without the join an archived project's open rows sit in the total for ever. And `hr_hiring` runs its
+candidate query only behind `job_applications.view_any` — `jobs.view_any` is permission to see
+adverts, not applicants.
+
+**The three "my" widgets scope through the owning column, never a request parameter** — and
+`time_entries.user_id`, the worker, deliberately not `recorded_by`: when a manager keys time for
+somebody the two differ, and scoping to the recorder would show the manager their own admin and hide
+the worker's week. With no authenticated user they return zeros, never an unscoped query. A widget
+that falls back to "everybody" when it cannot identify the viewer is a data leak with a friendly
+face.
+
+**A latent bug in my own Reception widgets, found by a review agent.** They computed "today" from
+`config('app.timezone')` while their docblocks claimed the institute's timezone.
+`ConfigureFromSettings` says outright that `localization.timezone` is display-only and deliberately
+not copied onto `app.timezone`, because copying it re-interprets every row already written. The
+application reads the display timezone through `Format::timezone()` in 77 places. So the day
+somebody changed that setting, a deadline would have been red on the card and black on the list it
+links to — and nothing would have been logged. Eleven occurrences across nine files, now zero.
+
+**`PAGE_CEILING` raised 60 to 90, and the evidence matters more than the number.** The page measured
+**77**. Three things were checked first, and are written into the constant's docblock so the next
+raise has to earn it the same way:
+
+- **The growth check passes.** With the ceiling lifted out of the way the whole file went green, so
+  the count does not move when every table a widget reads grows by an order of magnitude. That is
+  the assertion which catches an N+1, and it is untouched at zero growth.
+- **Every widget already costs one query.** There is no waste left to remove. The previous breach
+  (66 against 60) was different in kind: five widgets were spending twelve queries between them, and
+  the fix was to write them properly rather than to move the line.
+- **The arithmetic no longer fits.** 58 cards at one query each cannot render inside 60 alongside
+  session, auth, RBAC, settings and the shell.
+
+**And the test T57 asked for.** `EveryRoleSeesADashboardTest` asserts that every seeded admin role
+sees at least one widget, and that no widget is gated on a permission only Super Admin holds. The
+second found exactly one: `modules_enabled`, the module kill switch — deliberately restricted, and
+now a documented exception rather than a failure people learn to ignore. The first assertion is
+deliberately weak (*at least one*): it is a floor, not a design review. It cannot tell a good
+dashboard from a poor one; it can only refuse to let a role end up with nothing, which is the
+failure that kept happening.
+
+Dashboard suite: **35 passed, 757 assertions.**
+
+
 ### 2026-09-25 — Seven services, and the line a seeder does not cross
 
 The seven service names are the client's own — they were given as the "software house" pages the
@@ -3738,7 +3807,7 @@ data, all with a named fix:
 | T55 | **Every documented `queue:work` command omits the `financial` queue, so no commission is ever generated.** | **high** | `PRODUCTION.md` §5, `docs/phases/phase-24-25.md` §6.9.5 and both worker definitions specify `--queue=high,default`; `SystemHealthService::probeQueue()`'s remediation hint says `--queue=high,default,low`, naming a `low` queue that does not exist. The jobs this codebase actually dispatches are `high` (the `ops:heartbeat` stamp), **`financial`** (`ProcessStudentFeeCommission`, `ProcessProjectPaymentCommission`, `ProcessCommissionReversal`, `GenerateMonthlyFeeCharges`, `RecomputeStudentFeeCaches`), `default` (two) and `exports` (`BuildReportExport`). A worker started from any documented command therefore never drains `financial` or `exports`. **It fails silently in the worst possible direction**: the heartbeat rides on `high`, so `ops:health` keeps reporting the queue **ok** while every commission, every reversal and every monthly fee generation accumulates unprocessed in `jobs` — which is verbatim the failure PRODUCTION.md §5 warns about (*"a fee payment is recorded, the commission job is enqueued, and no ledger entry ever appears"*), reached by following PRODUCTION.md's own command. The working form is `--queue=high,financial,default,exports`: heartbeat first so health stays truthful, money second, general work third, bulk exports last. Found while writing `docs/AAPANEL.md`, which documents the correct command and the discrepancy; the four stale spellings are still to be corrected at source, and the queue probe should assert that a worker is listening on `financial` rather than inferring liveness from a heartbeat on another queue. |
 | T59 | **A code deploy does not invalidate the public page cache, so a fix can land completely and change nothing a visitor sees.** | **high** | `CachePublicResponse` stores rendered public pages under a `CacheVersion` stamp that a **publish** bumps — a section saved, a page put live. A `git pull` bumps nothing, because from the cache's point of view nothing was published. Observed on knsoftic.com within an hour of the feature shipping: `/trainers` went out without its settings guard and answered 200 on a site that had never enabled it; the guard was added, deployed, `route:cache` and `view:cache` rebuilt and php-fpm reloaded, and **it still answered 200**. Every instinct said the fix had not deployed. It had — the response was minted before the guard existed and the cache had no reason to think otherwise. `cache:clear` and the next request was a 404. **The symptom argues convincingly for the wrong cause**, which is what makes it worth a number: the operator re-reads correct code, re-runs a correct deploy, and concludes the code is wrong. `docs/AAPANEL.md` §15.3 now carries the step and the story. The proper fix is for the deploy to bump the stamp — a `site:cache-flush` command, or `CacheVersion::bump()` from a deploy hook — so the blunt `cache:clear` (which also drops the settings and module caches) stops being the only lever. |
 | T58 | **There is no narrow way to grant the website's own settings, so the Website Manager role cannot switch its own pages on.** | med | The five `website.*_page_enabled` toggles decide whether `/fee-structure`, `/timetable`, `/trainers`, `/student-reviews` and `/request-a-quote` exist at all, and they live in the settings table. The only ability that can write a setting is `settings.edit`, which is all-or-nothing: granting it to a content role to buy five checkboxes would also hand over the SMTP credentials, the security group, the trusted-proxy list and the backup configuration. So the new role holds `settings` READ — it can see that a page is switched off and cannot switch it on, and an Admin does that once per page. **The fix is a narrow ability, not a wider grant**: `settings.edit_website`, scoped to the `website` settings group, in exactly the shape of the existing Super-Admin-only `settings.edit_mail` (§4.3's precedent for a single guarded operation). Until then the limitation is real but small — five one-time toggles, not day-to-day work — which is why the role shipped with it rather than waiting. |
-| T57 | **Widget permissions were chosen per widget and never checked against the roles that read them, so a correctly-configured role can sign in to a blank dashboard.** | med | Found while adding the front-desk widgets: of 38 widgets, **not one** was visible to `Receptionist` — a role with 75 permissions. The near-misses are the evidence that this is a mismatch rather than an intention. **`fee_collected_today`, `pending_fees` and `overdue_fees` all require `student_fees.view_reports`, and the front desk holds `student_fees` READ_CREATE** — so the three cards about fee money were hidden from the person who takes the fee money, while `student_fee_payments.view_any`, which that role does hold, gated nothing at all. `new_inquiries` and `inquiry_routing_backlog` miss the same way: they want `contact_inquiries.view_any` where §9.1.2 deliberately grants `view` alone. Five new widgets now cover the front desk, but the **general** gap is unfixed: nothing asserts that every panel-facing role sees at least one widget, so the next role added inherits the same blank page silently. The test to write is a matrix — for each seeded role, `DashboardRegistry::for($user)` must be non-empty — and it belongs beside the existing `DashboardWidgetRegistryTest`. Re-gating the three fee widgets is the separate, more careful question, since widening them touches every other role that sees them. |
+| T57 | **Widget permissions were chosen per widget and never checked against the roles that read them, so a correctly-configured role can sign in to a blank dashboard.** | **Resolved 2026-09-26** | Found while adding the front-desk widgets: of 38 widgets, **not one** was visible to `Receptionist` — a role with 75 permissions. The near-misses are the evidence that this is a mismatch rather than an intention. **`fee_collected_today`, `pending_fees` and `overdue_fees` all require `student_fees.view_reports`, and the front desk holds `student_fees` READ_CREATE** — so the three cards about fee money were hidden from the person who takes the fee money, while `student_fee_payments.view_any`, which that role does hold, gated nothing at all. `new_inquiries` and `inquiry_routing_backlog` miss the same way: they want `contact_inquiries.view_any` where §9.1.2 deliberately grants `view` alone. Five new widgets now cover the front desk, but the **general** gap is unfixed: nothing asserts that every panel-facing role sees at least one widget, so the next role added inherits the same blank page silently. The test to write is a matrix — for each seeded role, `DashboardRegistry::for($user)` must be non-empty — and it belongs beside the existing `DashboardWidgetRegistryTest`. Re-gating the three fee widgets is the separate, more careful question, since widening them touches every other role that sees them. |
 | T56 | **`integrity:verify --suite=all` exits 2, so the nightly integrity run and `composer harden` both fail every time.** | **high** | `IntegrityCheckSuite` has nine cases and no `all`; the command's guard rejects an unknown suite before doing any work and returns 2. Confirmed by running it: `Unknown suite [all]. Known suites: constraints, wallet, schema, routes, isolation, uploads, performance, security, backup.` Omitting `--suite` is what runs all nine (`$requested === null` → `runAll()`). The broken form is live in **`composer.json:84`** (harden step 3, so the gate cannot pass), **`routes/console.php:419`** (`dailyAt('02:15')`, so the daily proof of the money never runs), `docs/INSTALL.md:420` and `DemoSeed.php`. **`GoLiveCheck.php:120` asserts the schedule *contains* `--suite=all`**, so the go-live gate currently requires the broken invocation to be scheduled and would fail if the schedule were fixed alone — both must change together. `ROLLBACK.md` already states the correct usage, which is how the discrepancy was noticed. This is D170's pattern once more: a green scheduler is not evidence the suites ran. |
 
 **Build-time items from the contract audit (BT-1 … BT-10)** — the documentation convergence is **closed** after

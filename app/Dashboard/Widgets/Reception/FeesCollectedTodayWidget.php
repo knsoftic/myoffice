@@ -9,6 +9,7 @@ use App\Dashboard\WidgetGroup;
 use App\Enums\ReceivedPaymentStatus;
 use App\Models\Institute\StudentFeePayment;
 use App\Support\DateRange;
+use App\Support\Format;
 use App\Support\Money;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -88,7 +89,7 @@ final class FeesCollectedTodayWidget extends Widget
     public function data(DateRange $range): array
     {
         try {
-            $today = Carbon::now(config('app.timezone'))->toDateString();
+            $today = Carbon::now(Format::timezone())->toDateString();
 
             // Money that actually arrived. Voided and bounced rows are not cash.
             $holding = [

@@ -9,6 +9,7 @@ use App\Dashboard\WidgetGroup;
 use App\Enums\StudentApplicationStatus;
 use App\Models\Institute\StudentApplication;
 use App\Support\DateRange;
+use App\Support\Format;
 use Illuminate\Support\Carbon;
 use Throwable;
 
@@ -110,7 +111,7 @@ final class ApplicationsAwaitingReviewWidget extends Widget
                     [
                         StudentApplicationStatus::Submitted->value,
                         StudentApplicationStatus::UnderReview->value,
-                        Carbon::now(config('app.timezone'))->toDateString(),
+                        Carbon::now(Format::timezone())->toDateString(),
                     ],
                 )
                 ->first();
