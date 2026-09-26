@@ -14,7 +14,9 @@ use App\Models\User;
 use App\Services\Institute\Exceptions\CourseRuleException;
 use App\Support\Money;
 use Illuminate\Database\DatabaseManager;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 
 /**
  * §68's admission pipeline, one public method per step (phase-14-17 §6.6, §2.30.5, §2.31).
@@ -34,6 +36,14 @@ use Illuminate\Support\Carbon;
  * `figures_locked_at` is set, because a commission has been computed from those numbers by then and
  * money may already have moved. A correction after the lock is a fee adjustment, which leaves its own
  * row in Phase 18's discount table.
+ *
+ * **A basket of courses is N admissions, not one admission with N courses ([D172]).** `createMany()`
+ * exists because the operator ticks several courses on one screen and quotes one figure; what it
+ * creates is still one admission per course, because everything downstream is per course. A batch
+ * belongs to exactly one course (`batches.course_id` NOT NULL), `admissions.batch_id` is one scalar,
+ * `completed_on` is one date, a certificate is drafted from one enrolment, and `uq_sadm_live` is
+ * `(student_id, course_id, active_guard)` - a row covering three courses would make the first three
+ * unanswerable and the fourth unenforceable. So the screen totals; the database does not.
  *
  * **This service writes no fee row and no enrollment row.** `requestFees()` delegates to Phase 18's
  * `StudentFeeService::generateStructure()` and `assignBatch()` to Phase 16's `BatchEnrollmentService`;
@@ -66,6 +76,86 @@ final class AdmissionService
     */
 
     /**
+     * A basket: one admission per course, all of them or none of them.
+     *
+     * **The whole point is the transaction.** `create()` opens its own, and its duplicate guard runs
+     * *before* it - so calling `create()` in a loop commits each course separately, and a basket whose
+     * third course is already live leaves two admissions standing with their own numbers, their own
+     * student-status transition and no record anywhere of what the operator meant to do. The failure
+     * looks like "nothing was saved", because it comes back as a field error on the form they just
+     * submitted. This method does the work once, inside one transaction, and refuses the whole basket.
+     *
+     * **Every course is checked before any row is written**, and every conflict is reported together.
+     * Checking inside the loop would name the first clash and hide the rest, so the operator would fix
+     * one course, resubmit, and meet the next one.
+     *
+     * **The discount is agreed on the basket and stored per course, pro-rata.** One typed figure has
+     * to land in N `discount_amount` columns, each with its own CHECK ceiling. `Money::allocate()`
+     * splits it by each line's gross with largest-remainder placement, so the shares sum back to
+     * exactly what was typed - no paisa invented, none lost - and each share stays under its line's
+     * ceiling because the split is proportional to that ceiling.
+     *
+     * **`admission_fee` and `registration_fee` are charged once for the basket by default.** They are
+     * per-student heads in practice: `register()` itself issues one registration number per student.
+     * Prefilling them from every course would triple what a three-course student is quoted, silently.
+     * Pass `fees_once => false` to charge them per course.
+     *
+     * The money consequence to know about, because no screen shows it: a partner commission is
+     * resolved **per admission**, and `max_commission_amount` and a `fixed` amount are applied per
+     * entitlement. A basket of three earns a fixed rule three times, and - the mirror - can split one
+     * sale into three releases that each fall under `collaborator.commission_min_entry_amount` and are
+     * skipped. Neither is new: creating three admissions by hand has always done this. What is new is
+     * that one click does it, which is why it is written down here rather than left to be discovered.
+     *
+     * @param  list<array<string, mixed>>  $lines  one per course, each with a `course_id` and any of
+     *                                             `course_fee`, `admission_fee`, `registration_fee`,
+     *                                             `monthly_fee` overriding that course's catalogue price
+     * @param  array<string, mixed>  $shared  what the basket agrees once: `admission_date`,
+     *                                        `counselor_id`, `delivery_mode`, `preferred_timing`,
+     *                                        `discount_amount`, `scholarship_amount`,
+     *                                        `discount_reason`, `notes`, `branch_id`, `fees_once`
+     * @return Collection<int, StudentAdmission>
+     */
+    public function createMany(Student $student, array $lines, array $shared = [], ?User $actor = null): Collection
+    {
+        $lines = $this->resolveLines($lines);
+        $this->assertNoLiveAdmissions($student, array_column($lines, 'course'));
+
+        $lines = $this->spreadBasketFigures($lines, $shared);
+
+        try {
+            return $this->db->transaction(function () use ($student, $lines, $shared, $actor): Collection {
+                $created = new Collection;
+
+                foreach ($lines as $line) {
+                    /** @var Course $course */
+                    $course = $line['course'];
+
+                    $created->push($this->insertAdmission(
+                        $student,
+                        $course,
+                        array_merge($shared, $line['overrides']),
+                        null,
+                        $actor,
+                    ));
+                }
+
+                // Once, not once per course: the student moves to `applied` because they applied.
+                $this->moveStudentToApplied($student, $actor);
+
+                return $created;
+            }, 3);
+        } catch (UniqueConstraintViolationException) {
+            // `assertNoLiveAdmissions()` is a SELECT, so two submits of the same basket can both pass
+            // it and race into `uq_sadm_live`. The database is the real guard; this turns its 1062
+            // into the sentence the operator would have got a moment earlier.
+            throw CourseRuleException::refuse('course_ids',
+                'One of these courses was admitted a moment ago - most likely this form was submitted '
+                .'twice. Nothing was saved by this attempt. Reload the student to see what exists.');
+        }
+    }
+
+    /**
      * Create the admission from an application (or from a walk-in, with `$application` null).
      *
      * @param  array<string, mixed>  $overrides  the agreed figures, where they differ from the course
@@ -80,36 +170,63 @@ final class AdmissionService
         $this->assertNoLiveAdmission($student, $course);
 
         return $this->db->transaction(function () use ($student, $course, $overrides, $application, $actor): StudentAdmission {
-            $figures = $this->figuresFrom($course, $overrides);
-
-            $admission = new StudentAdmission;
-            $admission->forceFill(array_merge($figures, [
-                'admission_number' => $this->numbers->nextAdmissionNumber(),
-                'student_id' => $student->getKey(),
-                'course_id' => $course->getKey(),
-                'branch_id' => $overrides['branch_id'] ?? $student->branch_id ?? $course->branch_id,
-                'student_application_id' => $application?->getKey(),
-                'course_inquiry_id' => $application?->course_inquiry_id ?? ($overrides['course_inquiry_id'] ?? null),
-                'stage' => AdmissionStage::Application->value,
-                'admission_date' => $overrides['admission_date'] ?? Carbon::now()->toDateString(),
-                'counselor_id' => $overrides['counselor_id'] ?? $actor?->getKey(),
-                'delivery_mode' => $overrides['delivery_mode'] ?? $application?->preferred_delivery_mode?->value ?? $course->delivery_mode?->value,
-                'preferred_timing' => $overrides['preferred_timing'] ?? $application?->preferred_timing?->value,
-                'monthly_fee' => $overrides['monthly_fee'] ?? $course->monthly_fee,
-                'payment_method' => $overrides['payment_method'] ?? null,
-                'discount_reason' => $overrides['discount_reason'] ?? null,
-                'notes' => $overrides['notes'] ?? null,
-                'created_by' => $actor?->getKey(),
-            ]))->save();
+            $admission = $this->insertAdmission($student, $course, $overrides, $application, $actor);
 
             // The student follows the admission: §2.31 step 3 puts them at `applied`.
-            if ($student->status === StudentStatus::Inquiry || $student->status === StudentStatus::Dropped
-                || $student->status === StudentStatus::Completed) {
-                $this->students->changeStatus($student, StudentStatus::Applied, null, $actor);
-            }
+            $this->moveStudentToApplied($student, $actor);
 
-            return $admission->refresh();
+            return $admission;
         }, 3);
+    }
+
+    /**
+     * The insert itself, with no transaction and no student-status side effect.
+     *
+     * Extracted so `create()` and `createMany()` write the row exactly the same way. The two things it
+     * deliberately does NOT do are the two that must not happen once per course: opening a transaction
+     * (the basket needs one around all of them) and moving the student (which happens once).
+     *
+     * @param  array<string, mixed>  $overrides
+     */
+    private function insertAdmission(
+        Student $student,
+        Course $course,
+        array $overrides,
+        ?StudentApplication $application,
+        ?User $actor,
+    ): StudentAdmission {
+        $figures = $this->figuresFrom($course, $overrides);
+
+        $admission = new StudentAdmission;
+        $admission->forceFill(array_merge($figures, [
+            'admission_number' => $this->numbers->nextAdmissionNumber(),
+            'student_id' => $student->getKey(),
+            'course_id' => $course->getKey(),
+            'branch_id' => $overrides['branch_id'] ?? $student->branch_id ?? $course->branch_id,
+            'student_application_id' => $application?->getKey(),
+            'course_inquiry_id' => $application?->course_inquiry_id ?? ($overrides['course_inquiry_id'] ?? null),
+            'stage' => AdmissionStage::Application->value,
+            'admission_date' => $overrides['admission_date'] ?? Carbon::now()->toDateString(),
+            'counselor_id' => $overrides['counselor_id'] ?? $actor?->getKey(),
+            'delivery_mode' => $overrides['delivery_mode'] ?? $application?->preferred_delivery_mode?->value ?? $course->delivery_mode?->value,
+            'preferred_timing' => $overrides['preferred_timing'] ?? $application?->preferred_timing?->value,
+            'monthly_fee' => $overrides['monthly_fee'] ?? $course->monthly_fee,
+            'payment_method' => $overrides['payment_method'] ?? null,
+            'discount_reason' => $overrides['discount_reason'] ?? null,
+            'notes' => $overrides['notes'] ?? null,
+            'created_by' => $actor?->getKey(),
+        ]))->save();
+
+        return $admission->refresh();
+    }
+
+    /** §2.31 step 3. Guarded rather than blind: `applied -> applied` is not a transition. */
+    private function moveStudentToApplied(Student $student, ?User $actor): void
+    {
+        if ($student->status === StudentStatus::Inquiry || $student->status === StudentStatus::Dropped
+            || $student->status === StudentStatus::Completed) {
+            $this->students->changeStatus($student, StudentStatus::Applied, null, $actor);
+        }
     }
 
     /**
@@ -492,6 +609,193 @@ final class AdmissionService
                     $allowed,
                 )).'.',
         ));
+    }
+
+    /**
+     * Turn the submitted lines into `['course' => Course, 'overrides' => array]`, in submitted order.
+     *
+     * Order is load-bearing: the basket's admission and registration fees land on the FIRST line, so
+     * whichever course the operator ticked first is the one that carries them. Any order would do; a
+     * stable one is what lets the screen's preview agree with what gets stored.
+     *
+     * @param  list<array<string, mixed>>  $lines
+     * @return list<array{course: Course, overrides: array<string, mixed>}>
+     */
+    private function resolveLines(array $lines): array
+    {
+        if ($lines === []) {
+            throw CourseRuleException::refuse('course_ids', 'Pick at least one course.');
+        }
+
+        $resolved = [];
+        $seen = [];
+
+        foreach ($lines as $line) {
+            $courseId = (int) ($line['course_id'] ?? 0);
+
+            if (isset($seen[$courseId])) {
+                // Not merely tidiness: two lines for one course would both pass the pre-check and then
+                // collide on `uq_sadm_live` mid-transaction, which reads to the operator as a database
+                // error rather than as the duplicate tick it is.
+                throw CourseRuleException::refuse('course_ids',
+                    'The same course is in this basket twice. One admission per course is what the rest '
+                    .'of the system is built on, so pick it once.');
+            }
+
+            $course = Course::query()->find($courseId);
+
+            if (! $course instanceof Course) {
+                throw CourseRuleException::refuse('course_ids', 'One of the chosen courses no longer exists.');
+            }
+
+            $seen[$courseId] = true;
+
+            $overrides = array_filter(
+                [
+                    'course_fee' => $line['course_fee'] ?? null,
+                    'admission_fee' => $line['admission_fee'] ?? null,
+                    'registration_fee' => $line['registration_fee'] ?? null,
+                    'monthly_fee' => $line['monthly_fee'] ?? null,
+                ],
+                static fn (mixed $value): bool => $value !== null && $value !== '',
+            );
+
+            $resolved[] = ['course' => $course, 'overrides' => $overrides];
+        }
+
+        return $resolved;
+    }
+
+    /**
+     * Every course in the basket, checked before a single row is written.
+     *
+     * `assertNoLiveAdmission()` throws on the first clash. Used in a loop over a basket that is about
+     * to be inserted, that would name one course, leave the operator to fix it, resubmit, and meet the
+     * next one. One query, every conflict, one sentence.
+     *
+     * @param  list<Course>  $courses
+     */
+    private function assertNoLiveAdmissions(Student $student, array $courses): void
+    {
+        $ids = array_map(static fn (Course $course): int => (int) $course->getKey(), $courses);
+
+        $live = StudentAdmission::query()
+            ->live()
+            ->where('student_id', $student->getKey())
+            ->whereIn('course_id', $ids)
+            ->get(['id', 'course_id', 'admission_number', 'stage']);
+
+        if ($live->isEmpty()) {
+            return;
+        }
+
+        $names = [];
+
+        foreach ($courses as $course) {
+            $clash = $live->firstWhere('course_id', (int) $course->getKey());
+
+            if ($clash instanceof StudentAdmission) {
+                $names[] = sprintf('%s (%s, %s)', $course->name, $clash->admission_number, $clash->stage->label());
+            }
+        }
+
+        throw CourseRuleException::refuse('course_ids', sprintf(
+            '%s already has a live admission to %s. Nothing was saved. Finish, cancel or withdraw %s '
+            .'before starting another, or untick %s here.',
+            $student->name,
+            implode('; ', $names),
+            count($names) === 1 ? 'it' : 'them',
+            count($names) === 1 ? 'it' : 'them',
+        ));
+    }
+
+    /**
+     * Spread what the basket agreed once across the lines that have to store it.
+     *
+     * Two separate jobs, and both of them exist because the columns are per admission while the
+     * conversation with the student was about a package.
+     *
+     * **The one-off heads.** `admission_fee` and `registration_fee` go on the first line and are
+     * zeroed on the rest, unless `fees_once` is false. Left alone they would default from each course
+     * and triple what a three-course student is quoted, with nothing on the screen saying so.
+     *
+     * **The discount and the scholarship.** Each is split by line gross with `Money::allocate()`, so
+     * the shares sum back to exactly the figure that was typed. Two properties matter and neither is
+     * obvious: largest-remainder placement means no paisa is invented or lost, and a split proportional
+     * to gross cannot push a line past its own `chk_sadm_discount_ceiling`, because a share of a whole
+     * that is within the total is within that line's part of it.
+     *
+     * The basket total is checked here, before the transaction, so the operator gets one sentence about
+     * the package rather than `figuresFrom()`'s per-line refusal about a course they never typed into.
+     *
+     * @param  list<array{course: Course, overrides: array<string, mixed>}>  $lines
+     * @param  array<string, mixed>  $shared
+     * @return list<array{course: Course, overrides: array<string, mixed>}>
+     */
+    private function spreadBasketFigures(array $lines, array $shared): array
+    {
+        $once = ! array_key_exists('fees_once', $shared) || (bool) $shared['fees_once'];
+
+        $grossByLine = [];
+
+        foreach ($lines as $index => $line) {
+            /** @var Course $course */
+            $course = $line['course'];
+            $overrides = $line['overrides'];
+
+            $courseFee = Money::of((string) ($overrides['course_fee'] ?? $course->course_fee ?? '0.00'));
+
+            if ($once && $index > 0) {
+                $admissionFee = Money::zero();
+                $registrationFee = Money::zero();
+            } else {
+                $admissionFee = Money::of((string) ($overrides['admission_fee'] ?? $course->admission_fee ?? '0.00'));
+                $registrationFee = Money::of((string) ($overrides['registration_fee'] ?? $course->registration_fee ?? '0.00'));
+            }
+
+            $lines[$index]['overrides']['course_fee'] = $courseFee;
+            $lines[$index]['overrides']['admission_fee'] = $admissionFee;
+            $lines[$index]['overrides']['registration_fee'] = $registrationFee;
+
+            $grossByLine[$index] = Money::sum($courseFee, $admissionFee, $registrationFee);
+        }
+
+        $basketGross = Money::sum(array_values($grossByLine));
+        $discount = Money::of((string) ($shared['discount_amount'] ?? '0.00'));
+        $scholarship = Money::of((string) ($shared['scholarship_amount'] ?? '0.00'));
+        $reductions = Money::add($discount, $scholarship);
+
+        if (Money::compare($reductions, $basketGross) > 0) {
+            throw CourseRuleException::refuse('discount_amount', sprintf(
+                'A discount of %s and a scholarship of %s come to more than the %s this basket of %d '
+                .'course(s) charges. Nothing is sold below free.',
+                money($discount),
+                money($scholarship),
+                money($basketGross),
+                count($lines),
+            ));
+        }
+
+        // Every weight zero means a basket of free courses. There is nothing to split and nothing to
+        // split it by, so `Money::allocate()` would throw on the zero weights - and it is right to.
+        if (Money::isZero($basketGross)) {
+            foreach (array_keys($lines) as $index) {
+                $lines[$index]['overrides']['discount_amount'] = Money::zero();
+                $lines[$index]['overrides']['scholarship_amount'] = Money::zero();
+            }
+
+            return $lines;
+        }
+
+        $discountShares = Money::allocate($discount, $grossByLine);
+        $scholarshipShares = Money::allocate($scholarship, $grossByLine);
+
+        foreach (array_keys($lines) as $index) {
+            $lines[$index]['overrides']['discount_amount'] = $discountShares[$index];
+            $lines[$index]['overrides']['scholarship_amount'] = $scholarshipShares[$index];
+        }
+
+        return $lines;
     }
 
     private function assertNoLiveAdmission(Student $student, Course $course): void

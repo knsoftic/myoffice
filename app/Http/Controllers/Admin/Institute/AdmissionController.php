@@ -8,6 +8,7 @@ use App\Enums\AdmissionStage;
 use App\Enums\DeliveryMode;
 use App\Enums\PreferredTiming;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\Institute\StoreAdmissionRequest;
 use App\Models\Institute\Course;
 use App\Models\Institute\Student;
 use App\Models\Institute\StudentAdmission;
@@ -18,7 +19,6 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
-use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -63,10 +63,26 @@ final class AdmissionController extends Controller
     {
         return view('admin.admissions.create', [
             'students' => Student::query()->orderByDesc('id')->limit(50)->get(['id', 'name', 'student_code', 'phone']),
-            'courses' => Course::query()->published()->orderBy('name')->get([
-                'id', 'name', 'course_fee', 'admission_fee', 'registration_fee', 'monthly_fee',
-                'installment_available', 'max_installments',
-            ]),
+            /*
+            | The category name comes back on this same statement, by join.
+            |
+            | `admin.admissions.create` carries a measured `query_budget` of 20 in
+            | tests/Support/screen-manifest.php, and PRF-01 compares against it as a ceiling. Eager
+            | loading the relation would be a second query for a label; a left join is a wider row on
+            | the query that was already being run. 34 courses across 8 categories is a list worth
+            | grouping, and it costs nothing to group it.
+            */
+            'courses' => Course::query()
+                ->published()
+                ->leftJoin('course_categories', 'course_categories.id', '=', 'courses.course_category_id')
+                ->orderBy('course_categories.name')
+                ->orderBy('courses.name')
+                ->get([
+                    'courses.id', 'courses.name', 'courses.course_fee', 'courses.admission_fee',
+                    'courses.registration_fee', 'courses.monthly_fee', 'courses.installment_available',
+                    'courses.max_installments',
+                    'course_categories.name as category_name',
+                ]),
             'modes' => DeliveryMode::options(),
             'timings' => PreferredTiming::options(),
             'counselors' => User::query()->permission('admissions.create')->orderBy('name')->pluck('name', 'id'),
@@ -76,36 +92,45 @@ final class AdmissionController extends Controller
         ]);
     }
 
-    public function store(Request $request): RedirectResponse
+    /**
+     * One student, one or more courses, one submit ([D172]).
+     *
+     * `createMany()` holds every rule; this method's only judgement is where to send the operator
+     * afterwards. One course behaves exactly as it did before — that admission's own page — because
+     * with one admission there is nothing to compare and the stepper is the next thing they want.
+     * Several go to the list filtered to the student, which is the only screen that can show a basket.
+     */
+    public function store(StoreAdmissionRequest $request): RedirectResponse
     {
-        $validated = $request->validate([
-            'student_id' => ['required', 'integer', Rule::exists('students', 'id')->whereNull('deleted_at')],
-            'course_id' => ['required', 'integer', Rule::exists('courses', 'id')->whereNull('deleted_at')],
-            'admission_date' => ['nullable', 'date'],
-            'counselor_id' => ['nullable', 'integer', Rule::exists('users', 'id')],
-            'delivery_mode' => ['nullable', Rule::enum(DeliveryMode::class)],
-            'preferred_timing' => ['nullable', Rule::enum(PreferredTiming::class)],
-            'course_fee' => ['nullable', 'numeric', 'min:0'],
-            'admission_fee' => ['nullable', 'numeric', 'min:0'],
-            'registration_fee' => ['nullable', 'numeric', 'min:0'],
-            'discount_amount' => ['nullable', 'numeric', 'min:0'],
-            'scholarship_amount' => ['nullable', 'numeric', 'min:0'],
-            'discount_reason' => ['nullable', 'string', 'max:255'],
-            'monthly_fee' => ['nullable', 'numeric', 'min:0'],
-            'notes' => ['nullable', 'string', 'max:5000'],
-        ]);
+        $student = Student::query()->findOrFail($request->integer('student_id'));
 
-        $admission = $this->admissions->create(
-            Student::query()->findOrFail($validated['student_id']),
-            Course::query()->findOrFail($validated['course_id']),
-            $validated,
-            null,
+        $admissions = $this->admissions->createMany(
+            $student,
+            $request->lines(),
+            $request->shared(),
             $request->user(),
         );
 
+        if ($admissions->count() === 1) {
+            $only = $admissions->first();
+
+            return redirect()
+                ->route('admin.admissions.show', $only)
+                ->with('toast', ['type' => 'success', 'message' => sprintf('Admission %s started.', $only->admission_number)]);
+        }
+
         return redirect()
-            ->route('admin.admissions.show', $admission)
-            ->with('toast', ['type' => 'success', 'message' => sprintf('Admission %s started.', $admission->admission_number)]);
+            ->route('admin.admissions.index', ['q' => $student->student_code])
+            ->with('toast', [
+                'type' => 'success',
+                'message' => sprintf(
+                    '%d admissions started for %s: %s. Each one has its own fee, batch and certificate, '
+                    .'and its own steps to walk through.',
+                    $admissions->count(),
+                    $student->name,
+                    $admissions->pluck('admission_number')->implode(', '),
+                ),
+            ]);
     }
 
     public function show(Request $request, StudentAdmission $admission): View
