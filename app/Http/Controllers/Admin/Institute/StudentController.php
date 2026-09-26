@@ -149,9 +149,24 @@ final class StudentController extends Controller
             ]);
         }
 
+        // The screen used to say "the password was sent" whatever happened. It is only allowed to
+        // say that when the send actually went out, because the operator is the only person who can
+        // start a reset and they will not do it if they were told everything worked.
+        if ($this->students->credentialsMailFailed()) {
+            return back()->with('toast', [
+                'type' => 'warning',
+                'message' => sprintf(
+                    'The login for %s was created, but the email carrying the password could not be sent. '
+                    .'The password is not recoverable — issue a password reset for this account, and check '
+                    .'Settings → Email.',
+                    $user->email,
+                ),
+            ]);
+        }
+
         return back()->with('toast', [
             'type' => 'success',
-            'message' => sprintf('Login created for %s. The password was sent to them and is not shown here.', $user->email),
+            'message' => sprintf('Login created. The password has been emailed to %s and is not shown here.', $user->email),
         ]);
     }
 

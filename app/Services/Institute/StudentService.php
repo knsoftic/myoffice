@@ -9,10 +9,13 @@ use App\Enums\UserStatus;
 use App\Models\Branch;
 use App\Models\Institute\Student;
 use App\Models\User;
+use App\Notifications\Institute\PortalLoginCreatedNotification;
 use App\Services\Institute\Exceptions\CourseRuleException;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * The student record itself (§66, phase-14-17 §6.6).
@@ -48,10 +51,25 @@ final class StudentService
     /** Moves somebody has to answer for. */
     private const REASON_REQUIRED = ['dropped', 'suspended'];
 
+    /**
+     * Whether the last `createLogin()` call created the account but failed to deliver the password.
+     *
+     * The account is real either way, so the mail failure must not throw — but the operator standing
+     * at the desk has to be told, because the password is now gone and only they can start a reset.
+     * A success toast over a failed send is the exact shape of the bug this whole change fixes.
+     */
+    private bool $credentialsMailFailed = false;
+
     public function __construct(
         private readonly DatabaseManager $db,
         private readonly StudentNumberService $numbers,
     ) {}
+
+    /** True when the login was created but its credentials email did not go out. */
+    public function credentialsMailFailed(): bool
+    {
+        return $this->credentialsMailFailed;
+    }
 
     /**
      * @param  array<string, mixed>  $data
@@ -174,7 +192,7 @@ final class StudentService
                 'updated_by' => $actor?->getKey(),
             ])->save();
 
-            $this->syncLoginTo($student->refresh(), $to);
+            $this->syncLoginTo($student->refresh(), $to, $actor);
 
             return $student;
         }, 3);
@@ -185,11 +203,17 @@ final class StudentService
      *
      * Returns the existing user when there already is one — being called twice must not produce a
      * second account for one student, and `uq_st_user` would refuse it anyway.
+     *
+     * The generated password leaves here only by `PortalLoginCreatedNotification`. Check
+     * `credentialsMailFailed()` afterwards: a `true` means the account exists and nobody can sign
+     * in to it until somebody resets it.
      */
     public function createLogin(Student $student, ?User $actor = null): ?User
     {
         if ($student->user_id !== null) {
-            return $student->user;
+            // `loadMissing`, not `->user`: strict mode turns a lazy read into an exception, and this
+            // branch is reached from `changeStatus()` where the relation was never loaded.
+            return $student->loadMissing('user')->user;
         }
 
         if (! (bool) setting('institute.auto_create_student_login', true)) {
@@ -204,6 +228,14 @@ final class StudentService
             return null;
         }
 
+        /*
+        | Reset here and not at the top of the method, so that the three early returns above leave
+        | the previous result alone. `activate()` calls this twice — once through `changeStatus()`,
+        | once directly — and the second call short-circuits; resetting on the way through would
+        | erase the first call's failure and hand the operator a success they did not get.
+        */
+        $this->credentialsMailFailed = false;
+
         return $this->db->transaction(function () use ($student, $email, $actor): ?User {
             if (User::query()->where('email', $email)->exists()) {
                 throw CourseRuleException::refuse('email', sprintf(
@@ -215,11 +247,17 @@ final class StudentService
             }
 
             $user = new User;
+            /*
+            | Held in a local only long enough to mail it. Never returned by this method, never
+            | logged, never written anywhere but the hash below — so the message sent after this
+            | transaction commits is genuinely the only copy that ever exists.
+            */
+            $plainPassword = Str::password(16, true, true, false, false);
+
             $user->forceFill([
                 'name' => $student->name,
                 'email' => $email,
-                // Never returned, never logged: the notification is the only thing that sees it.
-                'password' => Str::password(16, true, true, false, false),
+                'password' => $plainPassword,
                 'status' => UserStatus::Active->value,
                 'must_change_password' => true,
                 'branch_id' => $student->branch_id,
@@ -233,6 +271,38 @@ final class StudentService
                 'user_id' => $user->getKey(),
                 'updated_by' => $actor?->getKey(),
             ])->save();
+
+            /*
+            | **After the commit, not inside it.**
+            |
+            | Sent inside the transaction, a later failure would roll the account back while the
+            | student keeps an e-mail holding credentials for a user that no longer exists — and
+            | they would spend a morning trying to sign in to nothing. Sent after, the worst case
+            | is an account that exists and an e-mail that did not arrive, which a password reset
+            | fixes.
+            |
+            | The send is not allowed to undo the account either: if mail is misconfigured the
+            | login is still real, still resettable, and the failure belongs in the log rather than
+            | in a rolled-back transaction the operator cannot interpret.
+            */
+            $this->db->afterCommit(function () use ($user, $student, $plainPassword): void {
+                try {
+                    $user->notify(new PortalLoginCreatedNotification(
+                        $plainPassword,
+                        (string) $student->name,
+                        'student portal',
+                        'see your courses, timetable, attendance, results and fee history',
+                    ));
+                } catch (Throwable $e) {
+                    $this->credentialsMailFailed = true;
+
+                    Log::error('Student login created but the credentials email failed', [
+                        'student_id' => $student->getKey(),
+                        'user_id' => $user->getKey(),
+                        'message' => $e->getMessage(),
+                    ]);
+                }
+            });
 
             return $user;
         }, 3);
@@ -248,11 +318,23 @@ final class StudentService
      * A student who is suspended or dropped must not be able to sign in, and one reinstated must.
      * Phase 1's `active` middleware reads `users.status`, so this is where the two agree.
      */
-    private function syncLoginTo(Student $student, StudentStatus $status): void
+    private function syncLoginTo(Student $student, StudentStatus $status, ?User $actor = null): void
     {
-        $user = $student->user;
+        $user = $student->loadMissing('user')->user;
 
         if (! $user instanceof User) {
+            /*
+            | **The second door into activation.** The class docblock says the login is created at
+            | activation, and `AdmissionService::activate()` did that — but a student activated from
+            | the Students screen never goes through an admission, so they reached Active with no
+            | account and nobody noticed until they tried to sign in. This is the same rule applied
+            | at the other door, not a new one: identical guards, identical setting, and
+            | `createLogin()` is idempotent, so the admission path's own call still short-circuits.
+            */
+            if ($status === StudentStatus::Active) {
+                $this->createLogin($student, $actor);
+            }
+
             return;
         }
 

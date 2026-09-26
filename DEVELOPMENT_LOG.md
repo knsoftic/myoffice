@@ -782,6 +782,96 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-09-26 — The credentials email that was never written, and the screen that said it had been sent
+
+A student login was created on the live site and no email arrived. The account was real, the toast
+said *"The password was sent to them and is not shown here"*, and the student could not sign in.
+
+**`StudentService::createLogin()` sent nothing.** It generated a 16-character password, saved its
+hash, and returned. Above the generator sat this comment:
+
+```php
+// Never returned, never logged: the notification is the only thing that sees it.
+```
+
+There was no notification. Not misrouted, not queued, not disabled — **the class did not exist.**
+`grep` for `->notify(`, for `Notification::send`, and for anything under `app/Notifications/Institute/`
+all came back empty. `TeacherService::createLogin()` carried the identical comment and the identical
+absence. So from the moment either method returned, the password existed nowhere in the universe,
+and every login made that way was unusable by the one person it belonged to.
+
+**Both halves of the toast were false.** Nothing was sent, and the password was not merely "not
+shown here" — it was gone. This is **D170** again, in its purest form: the artefact that vouches
+for itself is where a false claim does most damage, because the operator who could have fixed it was
+told there was nothing to fix. They would have kept creating logins.
+
+**Why nothing caught it.** The service tests asserted a `users` row appeared and was linked to the
+student; it did, and it was. The screen tests asserted a success toast; it showed. The bug lived
+entirely in what was **absent**, and an absent side effect is invisible to every test that only
+inspects the rows that are present. `PortalCredentialsEmailTest` is the test that was owed, and it
+asserts the send rather than the row.
+
+**The notification, and three decisions inside it.**
+
+- **Mail only, never `database`.** A database notification is a row in `notifications` holding its
+  payload as JSON. Putting the password there would store in plain text the one value the service
+  goes out of its way not to keep. `toArray()` is *absent*, not empty — there is no safe rendering
+  of this into a stored record, and the test asserts the method does not exist.
+- **Not `ShouldQueue`, which is the subtler half.** A queued notification is serialised into `jobs`
+  before it is sent, and into `failed_jobs` indefinitely if it fails. The password would sit in
+  plain text in one or both. So it is sent inline: the caller waits for the mail attempt, which is
+  the right trade for a message whose whole value is that it is the only copy.
+- **A password, not a set-password link.** `ClientPortalInvitation` sends a link, and for a client
+  that is better. It is wrong here: the reset broker expires in **sixty minutes**
+  (`config/auth.php`), and a student registered at the front desk may not open their mail until that
+  evening. A link that has already died teaches them the institute's email does not work. The
+  password is temporary in practice — `must_change_password` is set, so the first sign-in goes
+  straight to choosing their own.
+
+**Sent after the commit, not inside it.** Inside the transaction, a later failure would roll the
+account back while the student keeps an email holding credentials for a user that no longer exists,
+and they would spend a morning signing in to nothing. After it, the worst case is an account that
+exists and an email that did not arrive — which a password reset fixes. The send is also not
+allowed to undo the account: a mail server that is down must not destroy a login that is correct.
+
+**The screen now reports what happened.** `credentialsMailFailed()` on both services is read by both
+controllers. On a delivery failure the toast is a warning that says the password is **not
+recoverable**, names the reset as the remedy, and points at Settings → Email. A success toast over
+a failed send is the exact bug this whole change is about, and re-introducing it one level down
+would have been the easy mistake.
+
+**The second door into activation.** The class docblock says the login is created at activation, and
+`AdmissionService::activate()` did that. But a student activated from the Students screen never
+passes through an admission — `changeStatus()` called `syncLoginTo()`, which returned early when
+there was no user to sync. So that student reached **Active with no account at all**, and nobody
+found out until they tried to sign in. `syncLoginTo()` now creates the login on the move to Active:
+the same rule at the other door, with identical guards and the identical setting. `createLogin()` is
+idempotent, so the admission path's own call still short-circuits.
+
+That idempotence is why the `credentialsMailFailed` reset moved off the top of the method and down
+to just before the transaction. `activate()` now calls `createLogin()` twice — once through
+`changeStatus()`, once directly — and the second short-circuits; resetting on the way through would
+have erased the first call's failure and handed the operator a success they did not get.
+
+Two smaller things fixed on the way: `$student->user` and `$teacher->user` were read lazily in a
+branch `changeStatus()` now reaches, which strict mode turns into an exception everywhere but
+production (`loadMissing`), and the actor is threaded into the new activation path so `created_by`
+is filled.
+
+**What is still required of the operator.** `mail.mailer` is `log` on the live site, so until
+**Settings → Email** is switched to SMTP the notification renders into `storage/logs/laravel.log`
+— a plain-text password in a file with no access control on it. Gmail needs an **App Password**
+(not the account password), `smtp.gmail.com`, port `587`, TLS, and a `from_address` equal to the
+Gmail account. The **Send test email** button on that screen is the check, and it now means
+something it did not mean yesterday.
+
+One more thing the render exposed: the **Sign in** button is built with `url('/login')`, so it
+inherits `APP_URL`. Rendered locally it points at `http://localhost:8000/login`. A live site with a
+stale `APP_URL` therefore emails every student a button to a host that does not exist — the mail
+arrives, the password is correct, and the link is useless. Worth checking once, alongside the SMTP
+settings, and it is already part of the deploy checklist in `docs/AAPANEL.md`.
+
+
 ### 2026-09-26 — T57 closed: four blank dashboards, fifteen widgets, and a ceiling that had stopped tracking the product
 
 T57 was recorded when `Receptionist` turned out to hold 75 permissions and see **none** of the 38

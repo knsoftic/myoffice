@@ -146,9 +146,28 @@ final class TeacherController extends Controller
     {
         $user = $this->teachers->createLogin($teacher, $request->user());
 
-        return back()->with('toast', $user === null
-            ? ['type' => 'info', 'message' => 'No login was created: teacher logins are switched off, or this teacher has no email address.']
-            : ['type' => 'success', 'message' => 'A login has been created. The password was sent to '.$user->email.' and must be changed on first sign-in.']);
+        if ($user === null) {
+            return back()->with('toast', [
+                'type' => 'info',
+                'message' => 'No login was created: teacher logins are switched off, or this teacher has no email address.',
+            ]);
+        }
+
+        // Only claimed when it is true — see StudentController::createLogin().
+        if ($this->teachers->credentialsMailFailed()) {
+            return back()->with('toast', [
+                'type' => 'warning',
+                'message' => 'The login for '.$user->email.' was created, but the email carrying the password '
+                    .'could not be sent. The password is not recoverable — issue a password reset for this '
+                    .'account, and check Settings → Email.',
+            ]);
+        }
+
+        return back()->with('toast', [
+            'type' => 'success',
+            'message' => 'A login has been created. The password has been emailed to '.$user->email
+                .' and must be changed on first sign-in.',
+        ]);
     }
 
     public function linkEmployee(Request $request, Teacher $teacher): RedirectResponse

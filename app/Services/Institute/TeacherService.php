@@ -9,11 +9,14 @@ use App\Enums\TeacherStatus;
 use App\Enums\UserStatus;
 use App\Models\Institute\Teacher;
 use App\Models\User;
+use App\Notifications\Institute\PortalLoginCreatedNotification;
 use App\Services\Institute\Exceptions\CourseRuleException;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * The teacher record (§72, phase-14-17 §6.11).
@@ -40,10 +43,24 @@ final class TeacherService
         TeacherStatus::Resigned->value,
     ];
 
+    /**
+     * Whether the last `createLogin()` call created the account but failed to deliver the password.
+     *
+     * Same contract as `StudentService`: the account is real either way, so a mail failure must not
+     * throw — but the operator has to be told, because the password is now gone.
+     */
+    private bool $credentialsMailFailed = false;
+
     public function __construct(
         private readonly DatabaseManager $db,
         private readonly StudentNumberService $numbers,
     ) {}
+
+    /** True when the login was created but its credentials email did not go out. */
+    public function credentialsMailFailed(): bool
+    {
+        return $this->credentialsMailFailed;
+    }
 
     /**
      * @param  array<string, mixed>  $data
@@ -302,10 +319,15 @@ final class TeacherService
     |--------------------------------------------------------------------------
     */
 
+    /**
+     * The generated password leaves here only by `PortalLoginCreatedNotification`. Check
+     * `credentialsMailFailed()` afterwards: a `true` means the account exists and nobody can sign
+     * in to it until somebody resets it.
+     */
     public function createLogin(Teacher $teacher, ?User $actor = null): ?User
     {
         if ($teacher->user_id !== null) {
-            return $teacher->user;
+            return $teacher->loadMissing('user')->user;
         }
 
         if (! (bool) setting('institute.auto_create_teacher_login', true)) {
@@ -326,13 +348,23 @@ final class TeacherService
             ));
         }
 
+        // Reset here, not at the top: the early returns above must leave the previous result alone.
+        $this->credentialsMailFailed = false;
+
         return $this->db->transaction(function () use ($teacher, $email, $actor): User {
             $user = new User;
+
+            /*
+            | Held in a local only long enough to mail it. Never returned by this method, never
+            | logged, never written anywhere but the hash below — so the message sent after this
+            | transaction commits is genuinely the only copy that ever exists.
+            */
+            $plainPassword = Str::password(16, true, true, false, false);
+
             $user->forceFill([
                 'name' => $teacher->name,
                 'email' => $email,
-                // Never returned, never logged: the notification is the only thing that sees it.
-                'password' => Str::password(16, true, true, false, false),
+                'password' => $plainPassword,
                 'status' => UserStatus::Active->value,
                 'must_change_password' => true,
                 'branch_id' => $teacher->branch_id,
@@ -346,6 +378,32 @@ final class TeacherService
                 'user_id' => $user->getKey(),
                 'updated_by' => $actor?->getKey(),
             ])->save();
+
+            /*
+            | **After the commit, not inside it.** Sent inside, a later failure would roll the
+            | account back while the teacher keeps an email holding credentials for a user that no
+            | longer exists. Sent after, the worst case is an account that exists and an email that
+            | did not arrive, which a password reset fixes — and which `credentialsMailFailed()`
+            | tells the operator about instead of leaving them to find out from the teacher.
+            */
+            $this->db->afterCommit(function () use ($user, $teacher, $plainPassword): void {
+                try {
+                    $user->notify(new PortalLoginCreatedNotification(
+                        $plainPassword,
+                        (string) $teacher->name,
+                        'teacher portal',
+                        'see your timetable, classes, registers and the students in each batch',
+                    ));
+                } catch (Throwable $e) {
+                    $this->credentialsMailFailed = true;
+
+                    Log::error('Teacher login created but the credentials email failed', [
+                        'teacher_id' => $teacher->getKey(),
+                        'user_id' => $user->getKey(),
+                        'message' => $e->getMessage(),
+                    ]);
+                }
+            });
 
             return $user;
         }, 3);
