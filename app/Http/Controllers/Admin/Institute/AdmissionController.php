@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -196,10 +197,13 @@ final class AdmissionController extends Controller
 
     public function batch(Request $request, StudentAdmission $admission): RedirectResponse
     {
+        // `overbook_reason`, not `reason`: that is the key `BatchEnrollmentService::resolveCapacity()`
+        // reads, and the batch screen's own modal already sends it. The service still accepts the old
+        // spelling so nothing that posts `reason` breaks.
         $validated = $request->validate([
-            'batch_id' => ['required', 'integer'],
+            'batch_id' => ['required', 'integer', Rule::exists('batches', 'id')->whereNull('deleted_at')],
             'overbook' => ['nullable', 'boolean'],
-            'reason' => ['nullable', 'string', 'max:255'],
+            'overbook_reason' => ['nullable', 'string', 'max:255'],
         ]);
 
         $this->admissions->assignBatch($admission, (int) $validated['batch_id'], $validated, $request->user());

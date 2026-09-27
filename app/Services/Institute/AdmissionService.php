@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace App\Services\Institute;
 
+use App\DataObjects\Institute\FeeStructureData;
 use App\Enums\AdmissionStage;
+use App\Enums\StudentFeeType;
 use App\Enums\StudentStatus;
+use App\Models\Institute\Batch;
 use App\Models\Institute\Course;
 use App\Models\Institute\Student;
 use App\Models\Institute\StudentAdmission;
@@ -350,7 +353,7 @@ final class AdmissionService
         }
 
         return $this->db->transaction(function () use ($admission, $plan, $installments, $service, $actor): StudentAdmission {
-            app($service)->generateStructure($admission, $plan, $actor);
+            app($service)->generateStructure($admission, $this->structureFrom($admission, $plan), $actor);
 
             $admission->forceFill([
                 'stage' => AdmissionStage::FeeCollection->value,
@@ -382,7 +385,30 @@ final class AdmissionService
         }
 
         return $this->db->transaction(function () use ($admission, $batchId, $options, $service, $actor): StudentAdmission {
-            app($service)->enroll($admission->student, $batchId, $admission, $options, $actor);
+            /*
+            | `enroll()` takes a `Batch`, not an id, and `loadMissing('student')` rather than
+            | `->student`.
+            |
+            | Both of those were bugs, and the same two bugs the fee step above had: a scalar handed to
+            | a parameter that wants an object under `strict_types`, and a relation read lazily on a
+            | route-bound model while `Model::shouldBeStrict()` is on outside production. This method
+            | threw on every call, and because `batch_assignment` is the only stage that may become
+            | `active`, and this is the only way into `batch_assignment`, **no admission has ever been
+            | activated through the stepper.** Nothing caught it: no test posts to
+            | `admin.admissions.batch` and nothing calls `assignBatch()`.
+            |
+            | The extra read costs one query. `enroll()` re-reads the row under `lockForUpdate()`
+            | anyway, because capacity is only real while the row is locked.
+            */
+            $batch = Batch::query()->findOrFail($batchId);
+
+            app($service)->enroll(
+                $admission->loadMissing('student')->student,
+                $batch,
+                $admission,
+                $this->enrolmentOptions($options),
+                $actor,
+            );
 
             $admission->forceFill([
                 'stage' => AdmissionStage::BatchAssignment->value,
@@ -392,6 +418,67 @@ final class AdmissionService
 
             return $admission->refresh();
         }, 3);
+    }
+
+    /**
+     * The charge set an admission's own agreed figures describe.
+     *
+     * `requestFees()` used to hand its `array $plan` straight to
+     * `StudentFeeService::generateStructure(StudentAdmission, FeeStructureData, ?User)`, which under
+     * `strict_types` is a `TypeError` on every call -- a full-page 500 that navigated the operator off
+     * the admission, inside a transaction that then rolled the stage back, so the same click failed
+     * for ever. `FeeStructureData` has no static factory, so this is where the array becomes the DTO.
+     *
+     * The three heads are the three columns that *are* `total_amount`, which is why the generated
+     * structure balances against `net_payable` -- the assertion `generateStructure()` makes and aborts
+     * on. `copyAdmissionDiscount` is left at its default so the reductions travel through Phase 18's
+     * own cascade rather than being re-derived here.
+     *
+     * No `idempotencyKey`: the real duplicate guard is the INSERT on
+     * `generation_key = structure:{admission}:{head}` against `uq_sf_generation`, so a double click
+     * creates nothing twice whether a key is passed or not.
+     *
+     * @param  array<string, mixed>  $plan
+     */
+    private function structureFrom(StudentAdmission $admission, array $plan): FeeStructureData
+    {
+        $amounts = [
+            StudentFeeType::AdmissionFee->value => (string) $admission->admission_fee,
+            StudentFeeType::RegistrationFee->value => (string) $admission->registration_fee,
+            StudentFeeType::CourseFee->value => (string) $admission->course_fee,
+        ];
+
+        $dueDates = [];
+        $firstDue = trim((string) ($plan['first_due_date'] ?? ''));
+
+        if ($firstDue !== '') {
+            // The course fee is the head the operator means by "the first due date"; the two one-off
+            // heads fall back to `institute.fee_due_days` in the fee service, as they should.
+            $dueDates[StudentFeeType::CourseFee->value] = Carbon::parse($firstDue);
+        }
+
+        return new FeeStructureData(amounts: $amounts, dueDates: $dueDates);
+    }
+
+    /**
+     * The option keys `BatchEnrollmentService` actually reads.
+     *
+     * The stepper's controller validates `reason`; `resolveCapacity()` reads `overbook_reason`. So
+     * overbooking from the stepper could never succeed -- it reached the third of the three yeses
+     * overbooking takes and threw `overbookingNeedsAReason()` on an empty string, however carefully the
+     * operator had typed one. The batch screen's own modal uses the right key, which is why the bug
+     * lived only on this path.
+     *
+     * @param  array<string, mixed>  $options
+     * @return array<string, mixed>
+     */
+    private function enrolmentOptions(array $options): array
+    {
+        if (! array_key_exists('overbook_reason', $options) && array_key_exists('reason', $options)) {
+            $options['overbook_reason'] = $options['reason'];
+        }
+
+        return $options;
     }
 
     /** Step 7: the student becomes active — the one place §68's ordering rule is applied. */
