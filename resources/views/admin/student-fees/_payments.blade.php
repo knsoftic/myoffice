@@ -88,6 +88,13 @@
             <x-ui.modal name="refund-{{ $payment->id }}" :title="'Refund '.$payment->receipt_no.'?'" icon="arrow-uturn-left">
                 <form method="POST" action="{{ route('admin.fee-payments.refund', $payment) }}" class="space-y-4">
                     @csrf
+                    {{--
+                        `type` and `idempotency_key` are both required by `refund()` and were both
+                        absent, so every click of this button was a 422 the operator never saw: the
+                        errors bag came back keyed on fields the page does not render, the page
+                        reloaded, and nothing said the refund had not happened.
+                    --}}
+                    <input type="hidden" name="idempotency_key" value="{{ (string) \Illuminate\Support\Str::ulid() }}">
                     <p class="text-sm text-slate-600 dark:text-slate-300">
                         Money going back. The commission this receipt earned is reversed by the same
                         proportion, so any number of partial refunds sums to at most what was credited —
@@ -97,6 +104,17 @@
                                      :max="$payment->refundableRemaining()"
                                      :value="$payment->refundableRemaining()"
                                      :help="money($payment->refundableRemaining()).' can still be returned.'" />
+                    <x-ui.form.select name="type" label="What kind of reversal" required>
+                        @foreach ([
+                            \App\Enums\ReversalType::PartialRefund,
+                            \App\Enums\ReversalType::FullRefund,
+                            \App\Enums\ReversalType::BouncedInstrument,
+                            \App\Enums\ReversalType::Cancellation,
+                            \App\Enums\ReversalType::Correction,
+                        ] as $reversalType)
+                            <option value="{{ $reversalType->value }}">{{ $reversalType->label() }}</option>
+                        @endforeach
+                    </x-ui.form.select>
                     <x-ui.form.textarea name="reason" label="Why?" required rows="2" />
                     <div class="flex justify-end gap-2">
                         <x-ui.button type="button" variant="ghost" x-on:click="$dispatch('close-modal', 'refund-{{ $payment->id }}')">Cancel</x-ui.button>

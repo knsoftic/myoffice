@@ -783,6 +783,75 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-09-27 — The button that dispatched to nobody: the dialog that takes the money
+
+`admin/student-fees/show` has rendered a **Collect payment** button since the screen shipped, firing
+`$dispatch('open-modal', 'collect-payment')`. `grep -rn "collect-payment" resources/` matched exactly
+that one line. **Nothing listened.** Behind it the whole write path was finished — eight routes, a
+Form Request, a DTO, five ordered guards, a unique-indexed idempotency column, a CHECK set, a BEFORE
+DELETE trigger and a passing service test — and `admin.fee-payments.store` had zero callers outside
+`tests/`. You could refund a receipt and void a receipt. You could not take one.
+
+That is the other half of why a student could not be activated at all through the admin panel:
+`institute.require_fee_before_activation` defaults to `any_payment`, and no screen could produce the
+payment it asks for. Yesterday's two `TypeError`s were the first half.
+
+**Four defects found while building it, each verified before it was fixed.**
+
+- **Three `catch (UniqueConstraintViolationException)` blocks in `PaymentService` were dead.** The
+  class was never imported, so the unqualified name resolved to
+  `App\Services\Finance\UniqueConstraintViolationException`, which does not exist, and PHP never
+  matched the catch. The sequential replay — a double-clicked Save arriving after the first commit
+  — is caught earlier by the idempotency pre-read, which is what the existing tests exercise, **so
+  the suite passed and the hole stayed invisible.** The concurrent case, two submits reaching the
+  INSERT together, fell through as a 500 for money that had just been taken. A dialog makes that race
+  routine rather than theoretical.
+- **The Refund button on the same page had never worked.** The form posts `amount` and `reason`;
+  `refund()` also requires `type` and `idempotency_key`. Because both were absent from the DOM, the
+  422 came back keyed on fields the page does not render — the operator saw a reload, no message
+  anywhere, and no refund. Fixed in the same pass rather than later: one working money dialog beside
+  one that silently does nothing is worse than either alone.
+- **`store()` redirected into a 403 for the user most likely to be using it.** It sent everyone to
+  `admin.fee-payments.show`, gated on `student_fee_payments.view`. A cashier holding only `.create`
+  took the money and was then refused by their own redirect, with no way to tell whether the receipt
+  had been written. It is `back()` now — and deliberately not the charge screen, which was my first
+  answer and wrong: `admin.student-fees.show` is `can:view,fee` and runs `StudentFeePolicy::view`,
+  so that would have traded one 403 for another.
+- **Four money forms on one page shared one error bag.** `admin.student-fees.show` renders this
+  dialog, the discount modal, a waive modal per open installment and a refund modal per receipt —
+  all with a field called `amount`. `x-ui.form.input` reads its error state from
+  `$errors->getBag($errorBag)->has($name)`, keyed on the field NAME alone, so a refusal on one lit up
+  the amount field on forms the operator never touched. The dialog gets `collectPayment`, and the
+  controller re-bags the service's `PaymentRuleException` into it so the duplicate refusal — the one
+  an operator is meant to override — is readable where the override lives.
+
+**Four things the dialog deliberately does not do.**
+
+- **No `max` on the amount.** Over-payment is a first-class state here: the surplus lands as an
+  advance, `deriveStatus()` has an `Overpaid` arm, `chk_sf_nonneg` deliberately excludes
+  `balance_amount`, and the collection screen has a whole tab for advances. A client-side cap tied to
+  the balance would make that unreachable from the till.
+- **No arithmetic.** Money never touches a float (CLAUDE.md §4). Figures are rendered from the
+  columns as strings and compared with bcmath on the server; there is no running total in the view.
+- **`confirm_duplicate` is two-step and appears only after a refusal.** The service refuses a second
+  receipt matching an earlier one on the same charge, amount and day, and names it. Sometimes that is
+  a double click and sometimes the student really did pay twice — only the person at the counter
+  knows. Rendering the checkbox from the start would turn the guard into a box people tick out of
+  habit.
+- **It does not claim the student was told.** The only listener on `StudentFeePaymentRecorded` is the
+  commission job; the `NotifyStudentOfFeePayment` its docblock advertises does not exist. The dialog
+  says so rather than implying a message went out.
+
+**And the one that decides whether any of this works in production:** `ProcessStudentFeeCommission`
+is `onQueue('financial')`, while every documented `queue:work` command omits that queue (**T55**, still
+open). The dialog will look correct and no commission will ever be generated until the deployed worker
+drains `financial`.
+
+`CollectPaymentDialogTest`: 10 tests, including the replay, the missing key, the future date, the
+overpayment-becomes-an-advance case, the named bag, and the cashier who may take money but not read
+the register.
+
+
 ### 2026-09-27 — The admission pipeline had never once been completed through its own screen
 
 The operator said the Student Admissions concept was too hard. Three readers measured the flow before
@@ -4044,6 +4113,7 @@ data, all with a named fix:
 | T53 | Four deployment tests the runbooks name do not exist: DEP-17, DEP-18, DEP-19, DEP-20. | med | There is no deployment test directory at all. `docs/{RESTORE,DEPLOY,ROLLBACK}.md` each opened by asserting that one of these enforced its step list — ROLLBACK.md said the per-phase table was "verified, not aspirational" — and none of them had been written. The claims are now stated as contracted-but-unwritten, with the honest consequence spelled out where the reader meets it (D170). The tests themselves remain owed. |
 | T54 | **Parallel agent rounds must not share one test database.** | Running six test-running agents at once produced five concurrent PHPUnit processes against `my_office_test`, each doing `migrate:fresh --seed` and dropping the others tables mid-migration - D157 happening live, and caused by the fan-out rather than by any agent: each had been told never to run two test processes at once, and each obeyed. The agents adapted by creating their own schemas, which is why both primary databases survived; twenty-five probe databases were left behind and dropped afterwards. **The rule for a future round: either give each test-running agent its own `DB_DATABASE` in the prompt, or run those slices one at a time.** `phpunit.xml` sets `DB_DATABASE` without `force="true"`, so an environment variable already overrides it - the mechanism exists and only needs to be assigned. |
 | T55 | **Every documented `queue:work` command omits the `financial` queue, so no commission is ever generated.** | **high** | `PRODUCTION.md` §5, `docs/phases/phase-24-25.md` §6.9.5 and both worker definitions specify `--queue=high,default`; `SystemHealthService::probeQueue()`'s remediation hint says `--queue=high,default,low`, naming a `low` queue that does not exist. The jobs this codebase actually dispatches are `high` (the `ops:heartbeat` stamp), **`financial`** (`ProcessStudentFeeCommission`, `ProcessProjectPaymentCommission`, `ProcessCommissionReversal`, `GenerateMonthlyFeeCharges`, `RecomputeStudentFeeCaches`), `default` (two) and `exports` (`BuildReportExport`). A worker started from any documented command therefore never drains `financial` or `exports`. **It fails silently in the worst possible direction**: the heartbeat rides on `high`, so `ops:health` keeps reporting the queue **ok** while every commission, every reversal and every monthly fee generation accumulates unprocessed in `jobs` — which is verbatim the failure PRODUCTION.md §5 warns about (*"a fee payment is recorded, the commission job is enqueued, and no ledger entry ever appears"*), reached by following PRODUCTION.md's own command. The working form is `--queue=high,financial,default,exports`: heartbeat first so health stays truthful, money second, general work third, bulk exports last. Found while writing `docs/AAPANEL.md`, which documents the correct command and the discrepancy; the four stale spellings are still to be corrected at source, and the queue probe should assert that a worker is listening on `financial` rather than inferring liveness from a heartbeat on another queue. |
+| T63 | **The fee-collection screen still has no way to take a payment from a row, and the fee-structure controller still has no screen at all.** | med | The `collect-payment` dialog now exists on `admin.student-fees.show`, which is one charge at a time. `resources/views/admin/fee-collection/index.blade.php` — the four-tab Due today / Next 7 days / Overdue / Advances screen a cashier actually works from — still offers no Collect action on any row, and its own subtitle says "Collecting happens through the payment dialog". Adding one is not a copy-paste: a row there is a `StudentFeeInstallment`, not a `StudentFee`, so the form action needs `$line->fee` for the route parameter and the line id for `student_fee_installment_id` — getting it backwards posts against the wrong charge. Each rendered dialog also needs its **own** `idempotency_key`, not one shared across the list. Separately, `FeeStructureController` remains fully built with no UI: `store()` is idempotent, `preview()` returns a live proof, `slip()` prints, and `resources/views/admin/fee-structures/` does not exist — §8.8 step 4 asks for that charge form embedded in the admission stepper. Both are planned work, recorded here so the gap is a number rather than a memory. | 
 | T62 | **`assignBatch()` raised the same `TypeError` as T60, and because it is the only door into `batch_assignment`, no admission had ever reached `active` through the stepper.** | **Resolved 2026-09-27** | `AdmissionService::assignBatch(StudentAdmission, int $batchId, …)` called `BatchEnrollmentService::enroll(Student $student, Batch $batch, …)` with the `int`. Under `strict_types` that is never coerced. `TRANSITIONS['batch_assignment'] = ['active']` and `assignBatch()` is the only way into `batch_assignment`, so `activate()` — and the portal credentials e-mail behind it — was unreachable from the screen built to reach it. Two further defects in the same lines: `$admission->student` was read lazily on a route-bound model (`Model::shouldBeStrict()` makes that an exception outside production), and the controller sent `reason` while `resolveCapacity()` reads `overbook_reason`, so an overbooked seat was refused for want of a reason the operator had just typed. Found by the §8.8 design survey, not by a test — nothing posted to `admin.admissions.batch` and nothing called `assignBatch()`. `AdmissionStepperTest` now walks charge → seat → activate end to end. | 
 | T61 | **Four manifest rows carry an `owner_phase` that no phase test owns, and the failure message blames the wrong thing.** | med | `AdmissionManifestTest` and `SchedulingManifestTest` each end by walking their manifest and asserting every row tagged with their phase is a route that phase registers. Four rows fail it: `student.assignments.brief` and `student.assignments.index` are tagged `owner_phase => 15`, `teacher.assignments.create` and its sibling `owner_phase => 16`, in both `route-guard-manifest.php` and `screen-manifest.php`. **The message says "which Phase 15 no longer registers", and that is not what is wrong.** The routes exist — `php artisan route:list` lists them. What is wrong is the tag: each test builds its route set from a `PREFIXES` list, Phase 15's is `admin.students.`, `admin.admissions.` and five more, Phase 16's is its own, and **`student.assignments.` and `teacher.assignments.` are in neither**. Those are portal assignment routes, owned by the phase that shipped assignments, and tagged 15 and 16 by hand. So a correct route with a mislabelled row reads as a deleted route, and an engineer following the message goes looking for a registration that was never missing. Confirmed twice: 19 failures in `tests/Feature/Institute` both before and after the D172 work, with `git status` clean on `routes/` and `tests/Support/` — so this predates it and is not caused by it. **Not fixed here on purpose**: moving `owner_phase` to the right phase hands those rows to that phase's manifest test, which may then find drift of its own, and that is a change worth making deliberately rather than as a side effect of an admissions feature. The message should also say "is not a route this phase owns" rather than "no longer registers". | 
 | T60 | **`POST admin.admissions.fees` — the "Request fees" button on every admission's stepper — raises a `TypeError` on every call.** | **Resolved 2026-09-27** | `AdmissionService::requestFees()` ends with `app($service)->generateStructure($admission, $plan, $actor)` where `$plan` is an `array`, and `StudentFeeService::generateStructure()` declares `generateStructure(StudentAdmission $admission, FeeStructureData $data, ?User $actor = null)`. Under `declare(strict_types=1)` an array is never coerced to a DTO, so the call throws before it reaches the fee service at all. The stage guard passes, the route passes, the permission passes; the failure is in the last line of the method. Confirmed by reading both signatures. **The working path is a different screen**: `FeeStructureController::store()` builds a `FeeStructureData` and is what the fee wizard posts to — which is why this has survived, and why nobody reported it. Found by the D172 survey, not by a test: nothing in `tests/` posts to `admin.admissions.fees`. The fix is for `requestFees()` to build the DTO (or to stop offering the button and send the operator to the wizard), and the test that was owed is one POST to that route. | 

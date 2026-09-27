@@ -24,6 +24,21 @@ use Illuminate\Validation\Rule;
  */
 final class RecordFeePaymentRequest extends FormRequest
 {
+    /**
+     * Errors go in their own bag, because `admin.student-fees.show` renders four money forms at once.
+     *
+     * `x-ui.form.input` resolves its error state from `$errors->getBag($errorBag)->has($name)`, keyed
+     * on the field NAME alone. That page already renders `name="amount"` in the discount modal, in a
+     * waive modal per open installment, and in a refund modal per receipt — so a refusal on one lights
+     * up the amount field in all of them, on forms the operator never touched. The collect dialog is
+     * the fourth, and it is the one that takes money, so it gets a bag of its own rather than joining
+     * the pile. The dialog reads the same name back, and opens itself only when THIS bag has errors.
+     */
+    public const ERROR_BAG = 'collectPayment';
+
+    /** @var string */
+    protected $errorBag = self::ERROR_BAG;
+
     public function authorize(): bool
     {
         return true;

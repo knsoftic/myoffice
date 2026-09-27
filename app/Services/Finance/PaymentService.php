@@ -49,6 +49,13 @@ use App\Support\Money;
 use Carbon\CarbonInterface;
 use Closure;
 use Illuminate\Database\DatabaseManager;
+// Three `catch (UniqueConstraintViolationException)` blocks in this file were dead without this line:
+// the unqualified name resolved to `App\Services\Finance\UniqueConstraintViolationException`, which
+// does not exist, so PHP never matched the catch. The sequential replay is caught earlier by the
+// idempotency pre-read, which is what the tests exercise — so the suite passed and the hole stayed
+// invisible. The concurrent case, two submits reaching the INSERT together, fell through as a 500 for
+// money that had just been taken. A dialog makes that race routine rather than theoretical.
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 
 /**

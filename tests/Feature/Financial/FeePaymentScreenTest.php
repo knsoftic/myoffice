@@ -8,6 +8,7 @@ use App\Enums\CommissionStatus;
 use App\Enums\PaymentMethod;
 use App\Enums\ReceivedPaymentStatus;
 use App\Enums\ReversalType;
+use App\Http\Requests\Admin\Finance\RecordFeePaymentRequest;
 use App\Models\Collaborator\CollaboratorCommissionLedgerEntry;
 use App\Models\Institute\StudentFeePayment;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -103,7 +104,10 @@ final class FeePaymentScreenTest extends TestCase
                 'payment_method' => PaymentMethod::Cash->value,
                 'paid_on' => '2026-03-10',
             ])
-            ->assertSessionHasErrors('idempotency_key');
+            // The bag is named now: `admin.student-fees.show` renders four money forms sharing a
+            // field called `amount`, and `x-ui.form.input` reads its error state by field name alone,
+            // so a refusal in the shared bag lit up forms the operator never touched.
+            ->assertSessionHasErrors('idempotency_key', null, RecordFeePaymentRequest::ERROR_BAG);
 
         $this->assertSame(0, StudentFeePayment::query()->count(),
             'Without the guard nothing is written — a retry would otherwise take the money twice.');
@@ -123,7 +127,7 @@ final class FeePaymentScreenTest extends TestCase
                 'paid_on' => Carbon::now()->addWeek()->toDateString(),
                 'idempotency_key' => (string) Str::ulid(),
             ])
-            ->assertSessionHasErrors('paid_on');
+            ->assertSessionHasErrors('paid_on', null, RecordFeePaymentRequest::ERROR_BAG);
 
         $this->assertSame(0, StudentFeePayment::query()->count());
     }

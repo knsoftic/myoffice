@@ -16,6 +16,7 @@ use App\Http\Requests\Admin\Finance\RecordFeePaymentRequest;
 use App\Models\Collaborator\Collaborator;
 use App\Models\Institute\StudentFee;
 use App\Models\Institute\StudentFeePayment;
+use App\Services\Finance\Exceptions\PaymentRuleException;
 use App\Services\Finance\PaymentService;
 use App\Services\Institute\FeeSlipBuilder;
 use App\Support\CsvWriter;
@@ -149,10 +150,39 @@ final class FeePaymentController extends Controller
 
     public function store(RecordFeePaymentRequest $request, StudentFee $fee): RedirectResponse
     {
-        $result = $this->payments->recordStudentFeePayment($fee, $request->toPaymentData());
+        try {
+            $result = $this->payments->recordStudentFeePayment($fee, $request->toPaymentData());
+        } catch (PaymentRuleException $exception) {
+            /*
+            | The dialog that raised the refusal is the dialog that shows it.
+            |
+            | Five of the service's guards throw `PaymentRuleException`, which extends
+            | `ValidationException` and therefore lands in the `default` bag — while the Form Request's
+            | own rules land in `collectPayment`. Left alone, "that receipt already exists, tick the box
+            | to confirm" would appear on the discount modal's amount field and not on the one the
+            | cashier is looking at. The duplicate refusal is the one an operator is meant to override,
+            | so it has to be readable where the override lives.
+            */
+            $exception->errorBag = RecordFeePaymentRequest::ERROR_BAG;
 
-        return redirect()
-            ->route('admin.fee-payments.show', $result->payment)
+            throw $exception;
+        }
+
+        /*
+        | `fee-payments.show` is gated on `student_fee_payments.view`, which a cashier holding only
+        | `.create` does not have: they would take the money and then be 403'd by their own redirect,
+        | with no way to tell whether the receipt had been written.
+        |
+        | The fallback is `back()`, not the charge screen. `admin.student-fees.show` is `can:view,fee`
+        | and runs `StudentFeePolicy::view`, which wants `student_fees.view` AND a matching branch --
+        | sending them there would have traded one 403 for another. Wherever they came from is by
+        | definition somewhere they could reach.
+        */
+        $destination = $request->user()?->can('student_fee_payments.view') === true
+            ? redirect()->route('admin.fee-payments.show', $result->payment)
+            : back();
+
+        return $destination
             ->with('toast', [
                 'type' => $result->created ? 'success' : 'info',
                 'message' => $result->created

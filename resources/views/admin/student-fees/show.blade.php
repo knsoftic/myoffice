@@ -133,4 +133,17 @@
     @can('fee_discounts.create')
         @include('admin.student-fees._discount-modal', ['charge' => $charge])
     @endcan
+
+    {{--
+        Deliberately here, at the end of the section and OUTSIDE `x-data="uiTabs(...)"`.
+
+        The "Collect payment" button lives in the page header, so the modal it dispatches to must live
+        somewhere the header can reach. Put inside a tab pane it would be under an `x-show`, which
+        hides the whole subtree — the button would open a dialog nobody can see. The refund and waive
+        modals get away with sitting in their panes only because their triggers sit there too.
+
+        Its own `@can('student_fee_payments.create')` is inside the partial, beside the ability that
+        guards the trigger.
+    --}}
+    @include('admin.student-fees._payment-modal', ['charge' => $charge, 'installments' => $installments])
 @endsection
