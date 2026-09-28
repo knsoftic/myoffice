@@ -2719,6 +2719,36 @@ return [
     ],
 
     [
+        'route' => 'admin.students.register',
+        'panel' => 'admin',
+        'kind' => 'wizard',
+        'params' => static fn (?object $fixture = null): array => [],
+        'permissions' => ['students.create'],
+        'module' => 'students',
+        'owner_phase' => 15,
+        // Unmeasured on purpose: `perf:budget --write-baseline` fills this in. A number invented by
+        // hand is a ceiling nobody measured, and PRF-01 counts and reports the skip.
+        'query_budget' => null,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+    [
+        'route' => 'admin.students.register.courses',
+        'panel' => 'admin',
+        'kind' => 'wizard',
+        'params' => static fn (?object $fixture = null): array => ['student' => $fixture?->student?->id ?? 1],
+        'permissions' => ['students.edit', 'admissions.create'],
+        'module' => 'students',
+        'owner_phase' => 15,
+        'query_budget' => null,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => 'student'],
+        'response' => 'html',
+    ],
+    [
         'route' => 'admin.students.create',
         'panel' => 'admin',
         'kind' => 'form',

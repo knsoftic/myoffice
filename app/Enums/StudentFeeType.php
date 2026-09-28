@@ -26,6 +26,8 @@ enum StudentFeeType: string
     case Installment = 'installment';
     case ExamFee = 'exam_fee';
     case CertificateFee = 'certificate_fee';
+    case ExtraFee = 'extra_fee';
+    case Tax = 'tax';
     case Other = 'other';
 
     public function label(): string
@@ -38,6 +40,8 @@ enum StudentFeeType: string
             self::Installment => 'Installment',
             self::ExamFee => 'Exam fee',
             self::CertificateFee => 'Certificate fee',
+            self::ExtraFee => 'Extra fee',
+            self::Tax => 'Tax',
             self::Other => 'Other',
         };
     }
@@ -48,6 +52,8 @@ enum StudentFeeType: string
             self::CourseFee, self::MonthlyFee, self::Installment => 'sky',
             self::AdmissionFee, self::RegistrationFee => 'violet',
             self::ExamFee, self::CertificateFee => 'slate',
+            self::ExtraFee => 'amber',
+            self::Tax => 'rose',
             self::Other => 'slate',
         };
     }
@@ -64,6 +70,10 @@ enum StudentFeeType: string
         return match ($this) {
             self::CourseFee, self::MonthlyFee, self::Installment, self::Other => true,
             self::AdmissionFee, self::RegistrationFee, self::ExamFee, self::CertificateFee => false,
+            // Neither is the institute's earning to share. The extra fee covers a cost -- a kit, a
+            // lab, an exam body's charge -- and the tax is the government's. `Other` answers true
+            // here, which is exactly why neither of these is `Other`.
+            self::ExtraFee, self::Tax => false,
         };
     }
 
@@ -75,6 +85,8 @@ enum StudentFeeType: string
         return match ($this) {
             self::AdmissionFee => 'collaborator.commission_on_admission_fee',
             self::RegistrationFee => 'collaborator.commission_on_registration_fee',
+            // `ExtraFee` and `Tax` fall through to null deliberately: unlike the admission fee, there
+            // is no setting that could turn them on, because there is no argument for turning them on.
             default => null,
         };
     }

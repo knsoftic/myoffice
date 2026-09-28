@@ -257,10 +257,20 @@ final class AdmissionService
         }
 
         return $this->db->transaction(function () use ($admission, $money, $reason, $actor): StudentAdmission {
+            /*
+            | `extra_fee` is seeded from the row, or an edit to the discount would silently zero it.
+            |
+            | `tax_amount` is deliberately NOT seeded, so it is recomputed: changing the discount
+            | changes what is being sold and therefore what is taxed. Recomputing uses today's rate,
+            | which is safe here and only here -- `updateFigures()` refuses once `figures_locked_at`
+            | is set (INV-I2), so the only admissions that reach this line are ones nothing has been
+            | charged against yet.
+            */
             $figures = $this->figuresFrom($admission->course, array_merge([
                 'course_fee' => $admission->course_fee,
                 'admission_fee' => $admission->admission_fee,
                 'registration_fee' => $admission->registration_fee,
+                'extra_fee' => $admission->extra_fee,
                 'discount_amount' => $admission->discount_amount,
                 'scholarship_amount' => $admission->scholarship_amount,
             ], $money));
@@ -442,10 +452,22 @@ final class AdmissionService
      */
     private function structureFrom(StudentAdmission $admission, array $plan): FeeStructureData
     {
+        /*
+        | Every head that is part of `net_payable`, because `generateStructure()` sums them and
+        | compares the total with that column, aborting the whole structure when they differ.
+        |
+        | Leaving the extra fee and the tax out was not a missing feature but a broken one: an
+        | admission carrying either would have had an unissuable fee structure and a registration
+        | that rolled back with no explanation the operator could act on. A head at zero is dropped
+        | by `FeeStructureData`, so an institute that configures neither sees the same three heads
+        | it has always seen.
+        */
         $amounts = [
             StudentFeeType::AdmissionFee->value => (string) $admission->admission_fee,
             StudentFeeType::RegistrationFee->value => (string) $admission->registration_fee,
             StudentFeeType::CourseFee->value => (string) $admission->course_fee,
+            StudentFeeType::ExtraFee->value => (string) $admission->extra_fee,
+            StudentFeeType::Tax->value => (string) $admission->tax_amount,
         ];
 
         $dueDates = [];
@@ -835,16 +857,21 @@ final class AdmissionService
             if ($once && $index > 0) {
                 $admissionFee = Money::zero();
                 $registrationFee = Money::zero();
+                $extraFee = Money::zero();
             } else {
                 $admissionFee = Money::of((string) ($overrides['admission_fee'] ?? $course->admission_fee ?? '0.00'));
                 $registrationFee = Money::of((string) ($overrides['registration_fee'] ?? $course->registration_fee ?? '0.00'));
+                // A kit, a lab charge, an ID card: issued once per registration however many courses
+                // were ticked, so it rides the same one-off rule as the other two.
+                $extraFee = Money::of((string) ($shared['extra_fee'] ?? '0.00'));
             }
 
             $lines[$index]['overrides']['course_fee'] = $courseFee;
             $lines[$index]['overrides']['admission_fee'] = $admissionFee;
             $lines[$index]['overrides']['registration_fee'] = $registrationFee;
+            $lines[$index]['overrides']['extra_fee'] = $extraFee;
 
-            $grossByLine[$index] = Money::sum($courseFee, $admissionFee, $registrationFee);
+            $grossByLine[$index] = Money::sum($courseFee, $admissionFee, $registrationFee, $extraFee);
         }
 
         $basketGross = Money::sum(array_values($grossByLine));
@@ -869,6 +896,7 @@ final class AdmissionService
             foreach (array_keys($lines) as $index) {
                 $lines[$index]['overrides']['discount_amount'] = Money::zero();
                 $lines[$index]['overrides']['scholarship_amount'] = Money::zero();
+                $lines[$index]['overrides']['tax_amount'] = Money::zero();
             }
 
             return $lines;
@@ -877,9 +905,40 @@ final class AdmissionService
         $discountShares = Money::allocate($discount, $grossByLine);
         $scholarshipShares = Money::allocate($scholarship, $grossByLine);
 
+        /*
+        | The tax is computed once on the basket and then split, never computed per line.
+        |
+        | `round(a x r) + round(b x r) + round(c x r)` is not `round((a+b+c) x r)`. Three equal lines
+        | at a rate that lands on a third of a paisa store a total one paisa short of the figure the
+        | operator was shown -- and `generateStructure()` sums the heads and compares them with
+        | `net_payable`, aborting the whole fee structure when they differ. So the bill's tax is the
+        | truth, and the lines carry its shares.
+        */
+        $taxableByLine = [];
+
+        foreach (array_keys($lines) as $index) {
+            $taxableByLine[$index] = Money::max(
+                Money::sub(
+                    $grossByLine[$index],
+                    Money::add($discountShares[$index], $scholarshipShares[$index]),
+                ),
+                Money::zero(),
+            );
+        }
+
+        $basketTaxable = Money::sub($basketGross, $reductions);
+        $basketTax = array_key_exists('tax_amount', $shared)
+            ? Money::of((string) $shared['tax_amount'])
+            : Money::percentage($basketTaxable, self::taxRate());
+
+        $taxShares = Money::isZero($basketTaxable)
+            ? array_fill_keys(array_keys($lines), Money::zero())
+            : Money::allocate($basketTax, $taxableByLine);
+
         foreach (array_keys($lines) as $index) {
             $lines[$index]['overrides']['discount_amount'] = $discountShares[$index];
             $lines[$index]['overrides']['scholarship_amount'] = $scholarshipShares[$index];
+            $lines[$index]['overrides']['tax_amount'] = $taxShares[$index];
         }
 
         return $lines;
@@ -917,10 +976,11 @@ final class AdmissionService
         $courseFee = Money::of((string) ($overrides['course_fee'] ?? $course->course_fee ?? '0.00'));
         $admissionFee = Money::of((string) ($overrides['admission_fee'] ?? $course->admission_fee ?? '0.00'));
         $registrationFee = Money::of((string) ($overrides['registration_fee'] ?? $course->registration_fee ?? '0.00'));
+        $extraFee = Money::of((string) ($overrides['extra_fee'] ?? '0.00'));
         $discount = Money::of((string) ($overrides['discount_amount'] ?? '0.00'));
         $scholarship = Money::of((string) ($overrides['scholarship_amount'] ?? '0.00'));
 
-        $total = Money::sum($courseFee, $admissionFee, $registrationFee);
+        $total = Money::sum($courseFee, $admissionFee, $registrationFee, $extraFee);
         $reductions = Money::add($discount, $scholarship);
 
         if (Money::compare($reductions, $total) > 0) {
@@ -933,15 +993,46 @@ final class AdmissionService
             ));
         }
 
+        /*
+        | Tax after the discount, on what is actually being sold.
+        |
+        | The rate is snapshotted here rather than read when the bill is printed: an admission is the
+        | record of what was agreed, and a rate looked up later would re-tax last year's receipt at
+        | this year's rate. A caller may pass `tax_amount` outright -- `updateFigures()` does, so that
+        | correcting a figure does not silently re-rate an old admission against a rate that has since
+        | changed.
+        */
+        $taxable = Money::sub($total, $reductions);
+        $tax = array_key_exists('tax_amount', $overrides)
+            ? Money::of((string) $overrides['tax_amount'])
+            : Money::percentage($taxable, self::taxRate());
+
         return [
             'course_fee' => $courseFee,
             'admission_fee' => $admissionFee,
             'registration_fee' => $registrationFee,
+            'extra_fee' => $extraFee,
             'discount_amount' => $discount,
             'scholarship_amount' => $scholarship,
+            'tax_amount' => $tax,
             'total_amount' => $total,
-            'net_payable' => Money::sub($total, $reductions),
+            'net_payable' => Money::add($taxable, $tax),
         ];
+    }
+
+    /**
+     * The institute's own tax rate, as a percentage.
+     *
+     * Deliberately **not** `finance.default_tax_rate`: that one belongs to the invoice engine, its
+     * label says "on invoices", and it is read by `InvoiceService` for client work. A school that
+     * taxes tuition and a software house that taxes invoices are two separate decisions, and sharing
+     * one key would make the settings screen describe something other than what the field does.
+     */
+    private static function taxRate(): string
+    {
+        $rate = trim((string) setting('institute.tax_rate', '0.0000'));
+
+        return $rate === '' ? '0.0000' : $rate;
     }
 
     /**

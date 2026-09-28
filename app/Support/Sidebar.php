@@ -706,6 +706,16 @@ final class Sidebar
                                 'permission' => 'students.view_any',
                             ],
                             [
+                                // The two-step counter flow: student and login, then courses and the
+                                // bill. First in the group because it is the thing a front desk opens
+                                // most; the list below it is for looking things up.
+                                'label' => 'Register a Student',
+                                'icon' => 'user-plus',
+                                'route' => 'admin.students.register',
+                                'module' => 'students',
+                                'permission' => 'students.create',
+                            ],
+                            [
                                 'label' => 'Admissions',
                                 'icon' => 'user-plus',
                                 'route' => 'admin.admissions.index',

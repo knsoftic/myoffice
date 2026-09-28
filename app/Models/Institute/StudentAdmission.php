@@ -60,7 +60,7 @@ class StudentAdmission extends Model
         'branch_id', 'student_id', 'course_id', 'batch_id',
         'student_application_id', 'course_inquiry_id',
         'admission_date', 'counselor_id', 'delivery_mode', 'preferred_timing',
-        'course_fee', 'admission_fee', 'registration_fee',
+        'course_fee', 'admission_fee', 'registration_fee', 'extra_fee',
         'discount_amount', 'scholarship_amount', 'discount_reason',
         'payment_method', 'monthly_fee',
         'installment_plan_requested', 'requested_installments', 'notes',
@@ -90,6 +90,11 @@ class StudentAdmission extends Model
             'withdrawn_at' => 'datetime',
             'installment_plan_requested' => 'boolean',
             'requested_installments' => 'integer',
+            // Money comes back as a fixed-scale string, never a float: every comparison downstream is
+            // `Money::compare`, and a float here would make the row disagree with the arithmetic that
+            // wrote it in the last paisa.
+            'extra_fee' => 'decimal:2',
+            'tax_amount' => 'decimal:2',
         ];
     }
 
@@ -134,8 +139,8 @@ class StudentAdmission extends Model
     {
         return [
             'stage', 'admission_date', 'registration_date', 'batch_id', 'counselor_id',
-            'course_fee', 'admission_fee', 'registration_fee',
-            'discount_amount', 'scholarship_amount', 'discount_reason',
+            'course_fee', 'admission_fee', 'registration_fee', 'extra_fee',
+            'discount_amount', 'scholarship_amount', 'discount_reason', 'tax_amount',
             'total_amount', 'net_payable', 'monthly_fee',
             'installment_plan_requested', 'requested_installments',
             'cancellation_reason', 'withdrawal_reason',
@@ -178,19 +183,26 @@ class StudentAdmission extends Model
             (string) $this->course_fee,
             (string) $this->admission_fee,
             (string) $this->registration_fee,
+            (string) $this->extra_fee,
         );
     }
 
-    public function computedNetPayable(): string
+    /** What is taxed: the sale after any reduction, which is the ordinary order. */
+    public function computedTaxable(): string
     {
-        $net = Money::sub(
+        $taxable = Money::sub(
             Money::sub($this->computedTotal(), (string) $this->discount_amount),
             (string) $this->scholarship_amount,
         );
 
         // Never below free: `chk_sadm_discount_ceiling` forbids it in the table, and the preview says
         // the same thing before the form is submitted rather than after.
-        return Money::compare($net, Money::ZERO) < 0 ? Money::ZERO : $net;
+        return Money::compare($taxable, Money::ZERO) < 0 ? Money::ZERO : $taxable;
+    }
+
+    public function computedNetPayable(): string
+    {
+        return Money::add($this->computedTaxable(), (string) $this->tax_amount);
     }
 
     /*

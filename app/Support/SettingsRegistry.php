@@ -4282,6 +4282,52 @@ final class SettingsRegistry
             // `finance.backdate_limit_days` and every `collaborator.*` commission key are used as they
             // stand). Validation comes from `rulesFor('institute')`, so the settings Form Request needs
             // no duplicate list.
+            /*
+            |----------------------------------------------------------------------------------
+            | The two optional lines on a registration bill (§8.8, the two-step registration)
+            |----------------------------------------------------------------------------------
+            |
+            | Both are snapshotted onto `student_admissions.extra_fee` and `.tax_amount` when the
+            | admission is created, and the bill is rendered from those columns afterwards -- never
+            | from these settings. A rate read live at print time would re-tax last year's receipt at
+            | this year's rate.
+            |
+            | Deliberately NOT `finance.default_tax_rate`: that one is the invoice engine's, its label
+            | says "on invoices", and it is read by `InvoiceService` for client work. A school that
+            | taxes tuition and a software house that taxes invoices are two decisions.
+            */
+            'extra_fee_amount' => [
+                'label' => 'Extra fee',
+                'type' => self::TYPE_DECIMAL,
+                'rules' => ['nullable', 'numeric', 'decimal:0,2', 'min:0', 'max:9999999999999'],
+                'default' => '0.00',
+                'help' => 'A fixed amount added once to a registration — a kit, a lab charge, an ID card. '
+                    .'Leave it at zero and the line does not appear on the bill at all.',
+                'span' => 4,
+                'sort' => 136,
+            ],
+            'tax_rate' => [
+                'label' => 'Tax on fees',
+                'type' => self::TYPE_DECIMAL,
+                'rules' => ['nullable', 'numeric', 'decimal:0,4', 'min:0', 'max:100'],
+                'default' => '0.0000',
+                'help' => 'Applied to the bill AFTER any discount, which is the ordinary order. Zero '
+                    .'means no tax line. This is the institute\'s own tax and is separate from the '
+                    .'invoice tax under Finance.',
+                'suffix' => '%',
+                'span' => 4,
+                'sort' => 137,
+            ],
+            'tax_label' => [
+                'label' => 'What to call the tax',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', self::NO_CONTROL_CHARACTERS, 'max:32'],
+                'default' => 'Tax',
+                'help' => 'Printed on the bill and the receipt beside the amount — GST, Sales Tax, '
+                    .'whatever the institute calls it.',
+                'span' => 4,
+                'sort' => 138,
+            ],
             'fee_due_days' => [
                 'label' => 'Default payment window',
                 'type' => self::TYPE_NUMBER,

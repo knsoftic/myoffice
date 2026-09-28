@@ -111,6 +111,7 @@ use App\Http\Controllers\Admin\Institute\ProgressController as StudentProgressCo
 use App\Http\Controllers\Admin\Institute\ResultCardController;
 use App\Http\Controllers\Admin\Institute\StudentApplicationController;
 use App\Http\Controllers\Admin\Institute\StudentController;
+use App\Http\Controllers\Admin\Institute\StudentRegistrationController;
 use App\Http\Controllers\Admin\Institute\StudentFeeController;
 use App\Http\Controllers\Admin\Institute\StudentIdCardController;
 use App\Http\Controllers\Admin\Institute\TeacherController;
@@ -2017,6 +2018,27 @@ Route::prefix('admin')
             Route::post('students', [StudentController::class, 'store'])->middleware('can:students.create')->name('students.store');
             Route::get('students/export/{format}', [StudentController::class, 'export'])->middleware('can:students.export')->name('students.export');
             Route::post('students/import', [StudentController::class, 'import'])->middleware('can:students.import')->name('students.import');
+
+            /*
+            | The two-step registration.
+            |
+            | Declared BEFORE `students/{student}` so `students/register` is not swallowed by the
+            | wildcard. (`whereNumber('student')` already prevents that, but order is the thing a
+            | reader checks first and the thing a future `whereAlpha` would break.)
+            |
+            | Step 2 carries `can:admissions.create` on top of the student abilities, and its own
+            | request re-checks `student_fees.create` and `student_fee_payments.create` per section:
+            | an operator who may register a student but not take money gets the courses and the bill,
+            | and no payment box.
+            */
+            Route::get('students/register', [StudentRegistrationController::class, 'create'])
+                ->middleware('can:students.create')->name('students.register');
+            Route::post('students/register', [StudentRegistrationController::class, 'store'])
+                ->middleware('can:students.create')->name('students.register.store');
+            Route::get('students/{student}/register/courses', [StudentRegistrationController::class, 'courses'])
+                ->whereNumber('student')->middleware(['can:update,student', 'can:admissions.create'])->name('students.register.courses');
+            Route::post('students/{student}/register/courses', [StudentRegistrationController::class, 'complete'])
+                ->whereNumber('student')->middleware(['can:update,student', 'can:admissions.create'])->name('students.register.complete');
 
             Route::get('students/{student}', [StudentController::class, 'show'])->whereNumber('student')->middleware('can:view,student')->name('students.show');
             Route::get('students/{student}/edit', [StudentController::class, 'edit'])->whereNumber('student')->middleware('can:update,student')->name('students.edit');

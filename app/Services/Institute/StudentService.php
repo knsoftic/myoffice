@@ -207,8 +207,18 @@ final class StudentService
      * The generated password leaves here only by `PortalLoginCreatedNotification`. Check
      * `credentialsMailFailed()` afterwards: a `true` means the account exists and nobody can sign
      * in to it until somebody resets it.
+     *
+     * **`$password` changes who knows it, and therefore whether anything is mailed.** Left null -- as
+     * every caller but the two-step registration leaves it -- the password is generated here, nobody
+     * reads it, and the notification is the only copy. Supplied, it is the one the operator typed at
+     * the counter and **no e-mail is sent**: putting a password the admin already knows into an inbox
+     * and a mail log as well would add two copies and no security. Either way
+     * `must_change_password` is set, so the operator's copy stops being the password at the student's
+     * first sign-in.
+     *
+     * @param  string|null  $password  the operator's choice, or null to generate one and mail it
      */
-    public function createLogin(Student $student, ?User $actor = null): ?User
+    public function createLogin(Student $student, ?User $actor = null, #[\SensitiveParameter] ?string $password = null): ?User
     {
         if ($student->user_id !== null) {
             // `loadMissing`, not `->user`: strict mode turns a lazy read into an exception, and this
@@ -236,7 +246,10 @@ final class StudentService
         */
         $this->credentialsMailFailed = false;
 
-        return $this->db->transaction(function () use ($student, $email, $actor): ?User {
+        $chosen = $password === null ? null : trim($password);
+        $chosen = $chosen === '' ? null : $chosen;
+
+        return $this->db->transaction(function () use ($student, $email, $actor, $chosen): ?User {
             if (User::query()->where('email', $email)->exists()) {
                 throw CourseRuleException::refuse('email', sprintf(
                     'There is already an account for %s. Link it to this student instead of creating a '
@@ -251,8 +264,11 @@ final class StudentService
             | Held in a local only long enough to mail it. Never returned by this method, never
             | logged, never written anywhere but the hash below — so the message sent after this
             | transaction commits is genuinely the only copy that ever exists.
+            |
+            | Unless the operator chose one, in which case a copy already exists in their head and
+            | the message is not sent at all.
             */
-            $plainPassword = Str::password(16, true, true, false, false);
+            $plainPassword = $chosen ?? Str::password(16, true, true, false, false);
 
             $user->forceFill([
                 'name' => $student->name,
@@ -271,6 +287,11 @@ final class StudentService
                 'user_id' => $user->getKey(),
                 'updated_by' => $actor?->getKey(),
             ])->save();
+
+            if ($chosen !== null) {
+                // Nothing to send: the person who typed it is the person handing it over.
+                return $user;
+            }
 
             /*
             | **After the commit, not inside it.**
