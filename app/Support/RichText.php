@@ -125,6 +125,18 @@ final class RichText
                 'a', 'img', 'figure', 'figcaption', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'hr',
                 'span',
                 'div', 'h1', 'h5', 'h6', 'small', 'b', 'i', 'sub', 'sup',
+                // `code` and `pre`, for documents that quote a command, a path or a setting key.
+                //
+                // Added when the admin guide (`docs/ADMIN-GUIDE.md`) began rendering in-app: it
+                // names routes, settings keys and shell commands throughout, and without these two
+                // every one of them arrived as undifferentiated prose. Neither element carries
+                // behaviour and neither gains an attribute here, so what changes is that two inert
+                // wrappers survive -- purifier still strips everything not allowed above, and the
+                // common core (script, on*, javascript:, Blade and PHP constructs) is untouched.
+                //
+                // Deliberately NOT added to `cms`: the public website has no use for them, and a
+                // profile earns a tag by needing it.
+                'code', 'pre',
             ],
             'attributes' => [
                 'href' => ['a'],

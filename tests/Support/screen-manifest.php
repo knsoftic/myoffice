@@ -2719,6 +2719,20 @@ return [
     ],
 
     [
+        'route' => 'admin.help.index',
+        'panel' => 'admin',
+        'kind' => 'index',
+        'params' => static fn (?object $fixture = null): array => [],
+        'permissions' => ['dashboard.view'],
+        'module' => 'dashboard',
+        'owner_phase' => 15,
+        'query_budget' => null,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+    [
         'route' => 'admin.students.register',
         'panel' => 'admin',
         'kind' => 'wizard',

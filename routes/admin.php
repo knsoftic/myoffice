@@ -52,6 +52,7 @@ use App\Http\Controllers\Admin\Collaborator\StatementController;
 use App\Http\Controllers\Admin\Collaborator\WalletController;
 use App\Http\Controllers\Admin\Collaborator\WalletReconciliationController;
 use App\Http\Controllers\Admin\DashboardController;
+use App\Http\Controllers\Admin\HelpController;
 use App\Http\Controllers\Admin\Finance\ExpenseController;
 use App\Http\Controllers\Admin\Finance\FeePaymentController;
 use App\Http\Controllers\Admin\Finance\FinanceCategoryController;
@@ -275,6 +276,21 @@ Route::prefix('admin')
         | Permissions (read-only viewer)
         |------------------------------------------------------------------
         */
+
+        /*
+        |------------------------------------------------------------------
+        | The operating guide
+        |------------------------------------------------------------------
+        |
+        | No `module:` because `dashboard` is core, and no module of its own because a manual
+        | some roles cannot open is not a manual: a new permission would have to be seeded onto
+        | every role that should read it, and the roles that need this page most are the
+        | front-desk ones a new grant would miss. `dashboard.view` means "may see the admin
+        | panel at all", which is the right bar for a page explaining the admin panel.
+        */
+        Route::get('help', [HelpController::class, 'index'])
+            ->middleware('can:dashboard.view')
+            ->name('help.index');
 
         Route::get('permissions', [PermissionController::class, 'index'])
             ->middleware('can:permissions.view_any')

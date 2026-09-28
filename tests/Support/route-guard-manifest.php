@@ -4430,6 +4430,16 @@ return [
     ],
 
     [
+        'route' => 'admin.help.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'can:dashboard.view'],
+        'permission' => 'dashboard.view',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+    [
         'route' => 'admin.students.register',
         'methods' => ['GET', 'HEAD'],
         'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:students', 'can:students.create'],

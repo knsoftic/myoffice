@@ -211,4 +211,25 @@ return [
         'owner_phase' => 21,
         'why' => 'The designer preview of a template, rendered from the same sanitised body_html the print path uses - so the preview shows what will actually print.',
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | The operating guide (admin.help.index)
+    |--------------------------------------------------------------------------
+    */
+    [
+        'view' => 'admin/help/index.blade.php',
+        'expression' => '{!! $html !!}',
+        'occurrences' => 1,
+        'sanitiser' => 'App\\Support\\RichText::sanitize()',
+        'owner_phase' => 15,
+        'why' => 'The admin guide, rendered from docs/ADMIN-GUIDE.md. The markdown is converted with '
+            .'Str::markdown() and then passed through RichText::sanitize() under the `material` '
+            .'profile, which is the profile that keeps `code` and `pre` -- a guide that quotes '
+            .'settings keys and shell commands needs both. One difference from raw sanitiser output '
+            .'is deliberate and worth naming: HelpController::indexed() adds an `id` to every h2 and '
+            .'h3 afterwards, because `id` is not an allowed attribute and one added before would be '
+            .'stripped. The injected value is Str::slug() output, [a-z0-9-]+ by construction, so it '
+            .'cannot close the attribute or open a tag.',
+    ],
 ];

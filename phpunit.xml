@@ -18,6 +18,19 @@
         </include>
     </source>
     <php>
+        <!--
+            The suite does not fit in PHP's default 512M and dies without a tally.
+
+            Measured: `php artisan test` on this repo produces 388 "Allowed memory size of
+            536870912 bytes exhausted" errors and never prints a `Tests:` line at all, so a run that
+            ran out of memory is indistinguishable from a run that never started. `-d memory_limit`
+            on the artisan command does NOT help: artisan spawns phpunit as a child process and the
+            flag does not reach it. This is the one place that applies to the process actually
+            running the tests, which is why it belongs here rather than in a command somebody has to
+            remember.
+        -->
+        <ini name="memory_limit" value="2G"/>
+
         <env name="APP_ENV" value="testing"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>

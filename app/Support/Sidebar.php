@@ -183,6 +183,17 @@ final class Sidebar
                         'permission' => 'roles.view_any',
                     ],
                     [
+                        // The guide. `dashboard.view` here is not a convenience: the sidebar's
+                        // permission must be the exact string the route's `can:` names, or a role
+                        // sees a link that 403s (or reaches a screen with no link) -- which is the
+                        // bug PermissionStringConsistencyTest was written for.
+                        'label' => 'Guide',
+                        'icon' => 'book-open',
+                        'route' => 'admin.help.index',
+                        'module' => 'dashboard',
+                        'permission' => 'dashboard.view',
+                    ],
+                    [
                         'label' => 'Permissions',
                         'icon' => 'key',
                         'route' => 'admin.permissions.index',
