@@ -784,6 +784,60 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-09-29 — One wrong wildcard, and every expired form got a blank 500
+
+The suite ran to completion for the first time — 4,604 passed, 882 failed, 463 skipped, 136,630
+assertions — and **675 of the 882 failures were one bug**.
+
+`CsrfAndInjectionTest` asserts that every state-changing route answers **419** without a token. They
+all answered **500**. The log said why, 661 times: `Undefined variable $errorBack (View:
+resources/views/errors/419.blade.php)`. The stack trace named the view the exception handler actually
+renders:
+
+    ResponseFactory->view('errors::419', Array, 419, Array)
+
+**`errors::419`, with the namespace separator.** The composer that supplies `$errorAppName`,
+`$errorBrand` and `$errorBack` was registered on `'errors.*'`, and a wildcard on the dot form does not
+match a `::` name. So it fired only when a test rendered `errors.419` directly — which is exactly the
+case the layout's own `??=` fallbacks already covered — and **never on a real error response.**
+
+Only 419 broke, and the reason is the thing both files had already written down. `errors/419.blade.php`
+reads `$errorBack` inside `@section('actions')`, and Blade captures a child's sections **before** the
+layout runs, so the layout's fallback comes too late for that one page. The other codes read their
+three values inside the layout and survived on the fallbacks.
+
+That is the part worth keeping: **the diagnosis was already in the code, correct, in two places.** The
+layout says *"a child template's sections are captured before this layout runs, so 419 could not see a
+variable defined here"*. The composer's own comment says it is a composer *for that reason*. Whoever
+wrote them understood the problem exactly — and then registered the composer under a name the
+framework never asks for, and nothing said so for as long as the suite could not run.
+
+`['errors.*', 'errors::*']`. The test goes from **675 failed / 0 passed** to **12 failed / 661 passed**.
+
+**What it meant in production**, which matters more than the number: a person opens a form, goes to
+lunch, comes back and submits. The session token is older than the session. They get a blank server
+error — instead of the page written for exactly them, which says *"Open it again and re-enter what
+you had. Nothing was saved."* The one page whose job is to help somebody recover was the one page that
+could not render.
+
+The remaining 12 are a different thing and not a CSRF problem: they answer **404**, because the route
+fixture (`sections/1/items/1`) does not exist in the test database, so binding fails before the token
+is ever checked.
+
+**The rest of the 882, accounted for.** All seven suites written in this session pass inside the full
+run. 38 failures across 21 suites are proven pre-existing — they fail in a run taken before any of
+this session's changes. The largest remaining block is `Results\*` (67 tests, the Assessments module,
+untouched here). `AuthorizationTest`'s headline failure is `audit:manifest --check`, run by hand:
+`admin.help.index` is in none of its findings, and all 29 drift findings are `admin.events.*` and
+`site.*`. `EscapingAndUploadsTest`'s raw-echo gate was the one most likely to be this session's fault
+— a raw echo and an allowlist row were added for the guide — and the auditor names exactly one
+offender: `site/quote/index.blade.php`, with three unlisted echoes, untouched here.
+
+None of the 882 has turned out to be caused by this session's work, and that was established by
+measurement each time rather than by argument: comparison against the pre-change run, a stash back to
+HEAD, running the auditor directly, and running suspect tests alone.
+
+
 ### 2026-09-28 — Registration in two steps, and three ways the money could have been quietly wrong
 
 The owner asked for a two-step student registration: who they are and their login, then their
@@ -4200,6 +4254,7 @@ data, all with a named fix:
 | T53 | Four deployment tests the runbooks name do not exist: DEP-17, DEP-18, DEP-19, DEP-20. | med | There is no deployment test directory at all. `docs/{RESTORE,DEPLOY,ROLLBACK}.md` each opened by asserting that one of these enforced its step list — ROLLBACK.md said the per-phase table was "verified, not aspirational" — and none of them had been written. The claims are now stated as contracted-but-unwritten, with the honest consequence spelled out where the reader meets it (D170). The tests themselves remain owed. |
 | T54 | **Parallel agent rounds must not share one test database.** | Running six test-running agents at once produced five concurrent PHPUnit processes against `my_office_test`, each doing `migrate:fresh --seed` and dropping the others tables mid-migration - D157 happening live, and caused by the fan-out rather than by any agent: each had been told never to run two test processes at once, and each obeyed. The agents adapted by creating their own schemas, which is why both primary databases survived; twenty-five probe databases were left behind and dropped afterwards. **The rule for a future round: either give each test-running agent its own `DB_DATABASE` in the prompt, or run those slices one at a time.** `phpunit.xml` sets `DB_DATABASE` without `force="true"`, so an environment variable already overrides it - the mechanism exists and only needs to be assigned. |
 | T55 | **Every documented `queue:work` command omits the `financial` queue, so no commission is ever generated.** | **high** | `PRODUCTION.md` §5, `docs/phases/phase-24-25.md` §6.9.5 and both worker definitions specify `--queue=high,default`; `SystemHealthService::probeQueue()`'s remediation hint says `--queue=high,default,low`, naming a `low` queue that does not exist. The jobs this codebase actually dispatches are `high` (the `ops:heartbeat` stamp), **`financial`** (`ProcessStudentFeeCommission`, `ProcessProjectPaymentCommission`, `ProcessCommissionReversal`, `GenerateMonthlyFeeCharges`, `RecomputeStudentFeeCaches`), `default` (two) and `exports` (`BuildReportExport`). A worker started from any documented command therefore never drains `financial` or `exports`. **It fails silently in the worst possible direction**: the heartbeat rides on `high`, so `ops:health` keeps reporting the queue **ok** while every commission, every reversal and every monthly fee generation accumulates unprocessed in `jobs` — which is verbatim the failure PRODUCTION.md §5 warns about (*"a fee payment is recorded, the commission job is enqueued, and no ledger entry ever appears"*), reached by following PRODUCTION.md's own command. The working form is `--queue=high,financial,default,exports`: heartbeat first so health stays truthful, money second, general work third, bulk exports last. Found while writing `docs/AAPANEL.md`, which documents the correct command and the discrepancy; the four stale spellings are still to be corrected at source, and the queue probe should assert that a worker is listening on `financial` rather than inferring liveness from a heartbeat on another queue. |
+| T67 | **`CsrfAndInjectionTest`'s remaining 12 failures answer 404, not 419, because their route fixtures do not exist in the test database.** | med | After the `errors::*` composer fix the suite's CSRF gate goes from 675 failures to 12. The survivors are all nested-resource routes such as `POST /admin/website/sections/1/items/1/reorder`: the ids in the manifest's `params` do not resolve, so route binding 404s before `VerifyCsrfToken` is ever reached and the test's `assertSame(419, ...)` sees a 404. **The routes are almost certainly fine** — what is missing is a fixture, which is why this is a test-data row and not a security one. It still matters: SEC-01 is the assertion that every state-changing route rejects a request with no token, and for these twelve routes that assertion has never actually run. Either seed the nested fixtures or have the test skip-with-a-reason on a 404 rather than failing, so the gap is counted instead of looking like a CSRF hole. | 
 | T66 | **`InstallAndRollbackTest`'s full rollback test fails inside the suite and passes alone, because it races its own 1800-second timeout.** | med | `test_01_every_phase_four_migration_rolls_back_in_reverse_and_migrates_again` creates a scratch schema and runs a real `artisan migrate`, a `migrate:rollback --step=N` over every Phase 4 and later migration, and a second `migrate` — roughly 250 migrations, twice, in child processes. Measured three times on the same machine: **407s and passing** in a run that died of OOM before reaching much else, **3,730s and failing** inside the full suite, and **661s and passing** (239 assertions) when run alone immediately afterwards. The child process timeout is 1800s (the test's own comment at `:214` says "1800, not 600" precisely because the work is slow), so under the suite's load it crosses it. **Nothing is wrong with the migrations** — that was the first hypothesis, and running it alone refuted it. What is wrong is that a test whose result depends on how loaded the database is will be red at random on CI, and each red will cost somebody an hour proving it is not their migration. Options: isolate it into its own suite or test group, raise the timeout well above the observed 3,730s, or give the scratch run its own connection. Found while chasing it as a suspected regression from the `extra_fee` / `tax_amount` migration, which it is not. | 
 | T65 | **Three sidebar entries name routes that are not registered, so the links are invisible to everybody — Super Admin included — and nothing says why.** | med | `app/Support/Sidebar.php` declares `admin.backups.index` (:242), `admin.collaborator-referrals.index` (:645) and `admin.files.index` (:1178). `grep` over `routes/admin.php` finds none of the three. The sidebar's second gate is `Route::has($item['route'])`, so each entry is silently dropped at render — which is the right behaviour (a link that 404s is worse) but leaves a declared feature that no operator can reach and no error anywhere. **Backups is the one that matters**: the controller and the console commands exist, so backups run from the scheduler, but there is no screen to take one, list one or restore one — and T51 (`backup:restore` not adopting the pending row) is about a flow whose only door is a console. Found while gathering facts for `docs/ADMIN-GUIDE.md`; recorded there as a known limitation so the owner does not go looking for a Backups screen. Either wire the routes or drop the entries — a menu that declares what it cannot open is the same shape of untruth as a toast that says a password was sent. | 
 | T64 | **`/student/fees/{fee}/slip` is a 500 for every student, because the phase's own privacy measure and its slip builder contradict each other.** | **high** | `Student\FeeController` deliberately omits the commission columns from its select — its docblock says so at line 28, *"The response body omits every commission column… `collaborator_id`…"*, and `FeeAuthorizationTest` (PH18-32) guards it. But `FeeSlipBuilder::forCharge()` line 53 then does `$charge->loadMissing([... 'collaborator' ...])`, and a `BelongsTo` needs `collaborator_id` to resolve. `Model::preventAccessingMissingAttributes()` turns that into `MissingAttributeException`, so the slip 500s — and the error page's own stack trace contains the string `collaborator_id`, which is what makes PH18-32 fail. **The test is not wrong and the privacy measure is not wrong**; the slip builder is loading a relation the caller was careful not to fetch. Confirmed against HEAD with all other work stashed, so it is not caused by the two-step registration; last commit to touch either file is `de15ce8` (Phase 18). The fix is for `FeeSlipBuilder` to load `collaborator` only when the caller supplies it — the admin slip does, the student slip must not — or for `FeeSlipOptions` to carry that choice. Until then a student cannot print their own fee slip at all. | 

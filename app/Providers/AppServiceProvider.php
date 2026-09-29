@@ -710,7 +710,22 @@ class AppServiceProvider extends ServiceProvider
         | Everything here is best-effort. This runs while rendering the page that reports a
         | failure, and a settings read that throws would replace an error page with a blank one.
         */
-        View::composer('errors.*', static function ($view): void {
+        /*
+        | Both spellings, and the second one is the one that mattered.
+        |
+        | `errors.*` never matched the page this composer exists for. Laravel's exception handler
+        | renders the NAMESPACED view -- `ResponseFactory->view('errors::419', ...)` -- and a
+        | wildcard on the dot form does not match a `::` name. So the composer fired only when a
+        | test rendered `errors.419` directly, which is exactly the case the layout's `??=`
+        | fallbacks already covered, and never on a real error response.
+        |
+        | It showed up as 675 failures in `CsrfAndInjectionTest`: every state-changing route
+        | answered **500 instead of 419**, because `errors/419.blade.php` reads `$errorBack` inside
+        | `@section('actions')` -- captured before the layout's fallbacks run -- so the one page whose
+        | job is to tell somebody "refresh and try again" was the one page that could not render.
+        | The other codes survived on those fallbacks.
+        */
+        View::composer(['errors.*', 'errors::*'], static function ($view): void {
             try {
                 $name = (string) (setting('company.name') ?: config('app.name', 'My Office'));
             } catch (Throwable) {
