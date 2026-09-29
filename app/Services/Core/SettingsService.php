@@ -7,6 +7,7 @@ namespace App\Services\Core;
 use App\Events\SettingsChanged;
 use App\Models\Setting;
 use App\Models\User;
+use App\Services\Cms\SettingsImageService;
 use App\Services\Core\Concerns\WritesAuditTrail;
 use App\Support\ConfigureFromSettings;
 use App\Support\Money;
@@ -719,6 +720,12 @@ final class SettingsService
             if ($storage->exists($path)) {
                 $storage->delete($path);
             }
+
+            // The responsive derivatives built from this file, if it had any. Their names are derived
+            // from this filename and settings uploads get a fresh random one each time, so leaving
+            // them would leave files nothing can ever reach again. The service swallows its own
+            // failures: tidying up must not be able to fail the deletion it is tidying up after.
+            app(SettingsImageService::class)->forget($path);
         } catch (Throwable $exception) {
             // The row already points somewhere else; a file that cannot be removed must not fail
             // the request, but it must not be invisible either.

@@ -36,6 +36,7 @@
 --}}
 
 @php
+    use App\Services\Cms\SettingsImageService;
     use Illuminate\Support\Facades\Route;
     use Illuminate\Support\Facades\Storage;
 
@@ -55,15 +56,45 @@
         return rescue(static fn () => Storage::disk('public')->url(ltrim($path, '/')), null, false);
     };
 
+    /*
+    | The settings logo, through the one public image pipeline.
+    |
+    | A settings image is only a path, so it used to be handed on as `['url' => $url]` -- no srcset,
+    | no WebP and, worse, no intrinsic dimensions for the browser to reserve header space with. The
+    | live site was serving a 4167x1571 PNG of 141 KB to paint a 36-pixel-tall mark, twice per page
+    | (light and dark are both in the markup), and shifting its own header while it loaded.
+    |
+    | `SettingsImageService::snapshot()` returns the same array a published section carries, or null.
+    | Null is not a failure to handle: it means "nothing better than the original", which is exactly
+    | the old behaviour. Rescued as well as null-safe because this component also renders the holding
+    | and maintenance pages, where a container that is not ready yet must not cost the only page the
+    | site has.
+    */
+    $settingsMedia = static function (mixed $path) use ($publicUrl): ?array {
+        $url = $publicUrl($path);
+
+        if ($url === null) {
+            return null;
+        }
+
+        $snapshot = rescue(
+            static fn (): ?array => app(SettingsImageService::class)->snapshot(is_string($path) ? $path : null, 'logo'),
+            null,
+            false,
+        );
+
+        return is_array($snapshot) ? $snapshot : ['url' => $url];
+    };
+
     $companyName = trim((string) ($name ?? $siteSetting('company.name', '') ?? ''));
 
     $lightMedia = filled(data_get($logoLight, 'url'))
         ? $logoLight
-        : (($url = $publicUrl($siteSetting('branding.logo_light'))) !== null ? ['url' => $url] : null);
+        : $settingsMedia($siteSetting('branding.logo_light'));
 
     $darkMedia = filled(data_get($logoDark, 'url'))
         ? $logoDark
-        : (($url = $publicUrl($siteSetting('branding.logo_dark'))) !== null ? ['url' => $url] : null);
+        : $settingsMedia($siteSetting('branding.logo_dark'));
 
     // An explicit override always wins; only the settings fallback swaps to the dark-background logo.
     if ($preferDark && $darkMedia !== null && ! filled(data_get($logoLight, 'url'))) {

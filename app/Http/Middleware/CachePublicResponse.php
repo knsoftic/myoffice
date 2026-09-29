@@ -24,10 +24,20 @@ use Throwable;
  * A terminable middleware. An anonymous GET is answered from a stored copy when one exists; otherwise
  * the page renders, and the copy is written in `terminate()`, after the response has been sent.
  *
- * **Key.** `CacheVersion::key('page', [scheme, host, base path + path, locale, whitelisted query])`. The
- * version stamp is read **before** the page renders, so a publish landing mid-render stores the old HTML
- * under the old, already unreachable, version — never under the new one. Any publish makes every stored
- * page unreachable at once (INV-8).
+ * **Key.** `CacheVersion::key('page', [scheme, host, base path + path, locale, whitelisted query,
+ * build stamp])`. The version stamp is read **before** the page renders, so a publish landing mid-render
+ * stores the old HTML under the old, already unreachable, version — never under the new one. Any publish
+ * makes every stored page unreachable at once (INV-8).
+ *
+ * **Why the build stamp is in the key** (D175). Every `CacheVersion::bump()` in the system is a *content*
+ * event — a section or page published, an FAQ, a CTA, a setting changed. Nothing bumps when the front-end
+ * assets are rebuilt, and a stored page is complete HTML that has `@vite`'s content-hashed asset URLs
+ * baked into it. So a deploy that runs `npm run build` renames every asset and leaves every stored page
+ * pointing at files that no longer exist: the pages keep answering 200, with a stylesheet that 404s, until
+ * somebody clears the cache by hand. **This is not hypothetical** — knsoftic.com served an entirely
+ * unstyled site this way, and it would have happened again on every deploy. Keying on the manifest's
+ * *contents* rather than its mtime means a rebuild that produces identical assets keeps the cache warm,
+ * and one that produces different assets invalidates exactly the pages that embed them.
  *
  * **Query whitelist.** Only `page`, `category` and `ref`, each with a strict value pattern. `ref` (the §38
  * referral code, phase-08-09's `[A-Z0-9][A-Z0-9-]{3,31}`) is whitelisted on every cached route **and
@@ -269,7 +279,41 @@ final class CachePublicResponse
             $request->getBaseUrl().'/'.trim($request->path(), '/'),
             app()->getLocale(),
             $query,
+            // Appended, never inserted: `$parts[4]` is read by the variant counter above.
+            $this->buildStamp(),
         ];
+    }
+
+    /**
+     * An identifier for the front-end build whose asset URLs this page will embed.
+     *
+     * Hashes the Vite manifest's **contents**, so two builds that produce the same assets share a stamp
+     * and a rebuild alone does not throw away a warm cache — only a rebuild that actually renamed
+     * something does. See the class docblock for why this is in the key at all.
+     *
+     * **Deliberately not memoised in a static.** Under PHP-FPM a worker outlives the request, so a static
+     * would hold the old stamp until the pool was reloaded, and a rebuild without a reload would
+     * reintroduce exactly the bug this closes — on some workers but not others, which is worse than the
+     * bug. The cost avoided is not worth that: the manifest is around 500 bytes, sits in the OS page
+     * cache, and is read once per request that was about to render or replay a whole page.
+     *
+     * `hot` is Vite's dev-server marker; while it exists, assets are served by the dev server and no
+     * manifest applies. A tree with neither file answers a constant rather than failing — an application
+     * whose assets have not been built yet has bigger problems than a cache key.
+     */
+    private function buildStamp(): string
+    {
+        return rescue(static function (): string {
+            if (is_file($hot = public_path('hot'))) {
+                return 'dev:'.substr(hash_file('sha256', $hot), 0, 12);
+            }
+
+            $manifest = public_path('build/manifest.json');
+
+            return is_file($manifest)
+                ? substr(hash_file('sha256', $manifest), 0, 12)
+                : 'no-build';
+        }, 'no-build', false);
     }
 
     /**

@@ -313,6 +313,7 @@ hand.
 php artisan optimize
 php artisan event:cache
 php artisan permission:cache-reset
+php artisan media:warm-settings-images
 ```
 
 `optimize` compiles config, routes, views and the event map; `event:cache` is named again because the
@@ -321,9 +322,29 @@ one that did not deploy. **Step 9 touched modules, permissions, roles and settin
 `permission:cache-reset` is mandatory here, not optional** — and the same rule holds any other time you
 change one of those four things.
 
-**Working looks like**: `php artisan about` reports Config, Routes, Views and Events as **CACHED**. That
-`about` call is itself the proof of GL-04: once configuration is cached, an `env()` call outside `config/`
+`media:warm-settings-images` builds the responsive derivatives of the logos uploaded through Settings.
+It is here rather than left to the first request for a measured reason: cold it is **1,086 ms per
+image**, warm it is **3 ms**, so a site with a light and a dark logo hands about two and a quarter
+seconds to whichever visitor arrives first after a deploy — and that visitor is as likely as not to be
+a performance audit, which then reports a number nobody will ever see again. It is idempotent, it
+never fails the deploy (a logo that will not encode leaves the original being served, which is slow
+but not broken), and it needs `storage:link` to have worked.
+
+**There is deliberately no `cache:clear` here, and that is a recent change.** The public page cache
+stores finished HTML with the content-hashed asset URLs inside it, and until decision **D175** nothing
+invalidated it when `npm run build` renamed those assets — so a deploy left every cached page requesting
+files it had just deleted, answering 200 with a stylesheet that 404s, until somebody cleared the cache by
+hand. The cache key now carries the Vite manifest's content hash, so a rebuild that moves the asset names
+invalidates the pages that embed them and a rebuild that does not keeps the cache warm. **On a release
+that predates D175 you still have to clear it by hand** — `php artisan cache:clear`, or the Flush button
+on the Website overview.
+
+**Working looks like**: `php artisan about` reports Config, Routes, Views and Events as **CACHED**, and
+`media:warm-settings-images` reports each logo as `ready` with the byte saving beside it. That `about`
+call is itself the proof of GL-04: once configuration is cached, an `env()` call outside `config/`
 returns `null`, so an application that still boots and reports correctly has no such call on its boot path.
+Then load the public home page and confirm the stylesheet it names answers 200 — that one check is what
+would have caught the unstyled-site failure D175 describes.
 
 **When it fails**: `php artisan optimize:clear` undoes all of it in one command; run that first whenever
 the application behaves as though your change never happened, then rebuild. If a route from this release
