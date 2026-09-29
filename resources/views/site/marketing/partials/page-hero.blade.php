@@ -48,7 +48,7 @@
             <p data-fx="rise" class="mt-6 text-xs font-semibold uppercase tracking-[0.14em] text-brand-600 dark:text-brand-400">{{ $eyebrow }}</p>
         @endif
 
-        <h1 id="page-title" data-fx="rise" data-fx-delay="1" @class([
+        <h1 id="page-title" data-fx="rise" data-fx-lcp data-fx-delay="1" @class([
             'max-w-4xl text-balance text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl dark:text-white',
             'mt-6' => blank($eyebrow ?? null),
             'mt-2' => filled($eyebrow ?? null),

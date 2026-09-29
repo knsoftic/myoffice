@@ -29,9 +29,39 @@
             // nothing would ever be un-hidden, so the effects stay off rather than risk a blank page.
             var supported = 'IntersectionObserver' in window;
 
-            if (!reduced && supported) {
-                document.documentElement.classList.add('fx-on');
+            if (reduced || !supported) {
+                return;
             }
+
+            var root = document.documentElement;
+            root.classList.add('fx-on');
+
+            /*
+             | The failsafe, and why it is not optional.
+             |
+             | This script running proves JavaScript is enabled *here, in the head*. It does not
+             | prove the module bundle will ever arrive. If it 404s, is blocked, or throws before
+             | `registerScrollFx()`, every `[data-fx]` element keeps `opacity: 0` for ever and the
+             | marketing site is a blank page with a header on it.
+             |
+             | That is measured, not feared: with the built `app-*.js` renamed, the home page
+             | rendered its header and nothing else -- no heading, no copy, no call to action. And
+             | it came within one file of happening for real, because the deploy that prompted this
+             | shipped a `build/` whose *stylesheet* 404'd. Had the same build dropped the script
+             | instead, the live site would have been empty.
+             |
+             | So the hidden state expires unless the bundle claims it. `scroll-fx.js` calls
+             | `window.__fxReady()` as its first act; if that has not happened by the deadline, the
+             | class comes off and the page is simply the page -- which is the guarantee this file
+             | was written to make in the first place.
+             */
+            var failsafe = setTimeout(function () {
+                root.classList.remove('fx-on');
+            }, 2500);
+
+            window.__fxReady = function () {
+                clearTimeout(failsafe);
+            };
         } catch (e) {
             /* Anything unexpected: leave the effects off. The page is the priority. */
         }

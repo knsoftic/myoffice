@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Tests\Feature\Cms\Behaviour;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Vite;
 use Illuminate\Support\Facades\File;
 use PHPUnit\Framework\Attributes\Test;
+use ReflectionProperty;
 use Tests\Feature\Cms\Behaviour\Concerns\CmsBehaviourFixtures;
 use Tests\Feature\Concerns\InteractsWithRbac;
 use Tests\TestCase;
@@ -68,6 +70,10 @@ final class PublicCacheSurvivesAssetRebuildTest extends TestCase
         } elseif (File::exists($this->manifestPath)) {
             File::delete($this->manifestPath);
         }
+
+        // The file is back; the framework's memoised copy of it is not. Without this every test that
+        // runs after this one in the same process renders against this test's fixture.
+        $this->forgetViteManifest();
 
         parent::tearDown();
     }
@@ -145,5 +151,26 @@ final class PublicCacheSurvivesAssetRebuildTest extends TestCase
         ], JSON_PRETTY_PRINT));
 
         clearstatcache(true, $this->manifestPath);
+        $this->forgetViteManifest();
+    }
+
+    /**
+     * Drop the framework's memoised copy of the manifest.
+     *
+     * `Illuminate\Foundation\Vite::$manifests` is a **static** keyed by path, filled the first time a
+     * manifest is read and never re-read. Rewriting the file does not touch it, so without this a test
+     * that changes the manifest hands every later test in the same process whatever fixture it last
+     * wrote. That is not hypothetical: it is how this test first broke `ThemeAndLayoutTest`, which
+     * failed with *"Unable to locate file in Vite manifest: resources/js/charts.js"* against a manifest
+     * on disk that listed it perfectly well.
+     *
+     * `Vite::flush()` does not help — it clears `preloadedAssets` and nothing else — so reflection is
+     * the only way in.
+     */
+    private function forgetViteManifest(): void
+    {
+        $manifests = new ReflectionProperty(Vite::class, 'manifests');
+        $manifests->setAccessible(true);
+        $manifests->setValue(null, []);
     }
 }

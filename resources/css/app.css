@@ -400,6 +400,27 @@
         will-change: opacity, transform;
     }
 
+    /*
+    | `data-fx-lcp` — an element that moves but is never invisible.
+    |
+    | Largest Contentful Paint is the moment the largest text or image *becomes visible*, so an
+    | element that starts at `opacity: 0` does not contribute to it until something sets that to 1.
+    | For a `[data-fx]` element that something is the module bundle: downloaded, parsed, Alpine
+    | started, IntersectionObserver fired. On a throttled mobile connection — which is exactly the
+    | condition a performance audit measures — that puts the page's headline behind the whole
+    | JavaScript critical path, for an entrance animation.
+    |
+    | So the hero heading keeps its rise and gives up its fade. It paints with the HTML, at its
+    | starting offset, and slides into place when the effects wake up. The travel is the part a
+    | reader notices; the fade is the part that costs the metric.
+    |
+    | Only for something above the fold on arrival. Below the fold the fade is free — the reader
+    | cannot see it happen — and there it is worth keeping.
+    */
+    .fx-on [data-fx][data-fx-lcp] {
+        opacity: 1;
+    }
+
     .fx-on [data-fx='rise'] {
         transform: translate3d(0, 2.5rem, 0);
     }

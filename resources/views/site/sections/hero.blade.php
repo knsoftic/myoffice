@@ -123,7 +123,9 @@
                     'mx-auto max-w-4xl text-center' => ! $alignLeft,
                 ])>
                     @if ($heading !== '')
-                        <h1 data-fx="rise" class="text-balance text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl lg:leading-[1.05] dark:text-white">
+                        {{-- `data-fx-lcp`: the hero heading is the page's Largest Contentful Paint on
+                             almost every public page, so it rises but never fades — see app.css. --}}
+                        <h1 data-fx="rise" data-fx-lcp class="text-balance text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl lg:leading-[1.05] dark:text-white">
                             {{ $heading }}
                         </h1>
                     @endif

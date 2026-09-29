@@ -58,6 +58,18 @@ export function registerScrollFx() {
         return;
     }
 
+    /*
+     | Claim the hidden state before doing anything else.
+     |
+     | The gate hides `[data-fx]` on the strength of JavaScript running in <head>, which does not
+     | promise this bundle will arrive — a 404, a blocked CDN or a throw before this line would
+     | otherwise leave every element at `opacity: 0` for ever, which is a blank marketing site.
+     | So the gate sets a deadline and this call is what cancels it. It is the first statement in
+     | the function on purpose: everything below can fail without the page paying for it, and
+     | nothing below is worth a blank page.
+     */
+    window.__fxReady?.();
+
     /* ------------------------------------------------------------------ reveals */
 
     /**
