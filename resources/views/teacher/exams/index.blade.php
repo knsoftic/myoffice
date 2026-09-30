@@ -58,7 +58,7 @@
                         <div class="mt-2 text-sm text-slate-600 dark:text-slate-300">
                             {{ app_date($exam->scheduled_date) }}
                             @if ($exam->start_time)
-                                <span class="text-slate-400">{{ app_time($exam->start_time) }}@if ($exam->end_time) – {{ app_time($exam->end_time) }}@endif</span>
+                                <span class="text-slate-400">{{ app_clock($exam->start_time) }}@if ($exam->end_time) – {{ app_clock($exam->end_time) }}@endif</span>
                             @endif
                             @if ($exam->classroom)
                                 <span class="text-slate-400">· {{ $exam->classroom->code }}</span>

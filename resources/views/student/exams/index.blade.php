@@ -37,7 +37,7 @@
                             <x-ui.icon name="calendar-days" class="h-4 w-4 text-slate-400" />
                             <span>{{ app_date($exam->scheduled_date) }}</span>
                             @if ($exam->start_time)
-                                <span class="text-slate-400">{{ app_time($exam->start_time) }}@if ($exam->end_time) – {{ app_time($exam->end_time) }}@endif</span>
+                                <span class="text-slate-400">{{ app_clock($exam->start_time) }}@if ($exam->end_time) – {{ app_clock($exam->end_time) }}@endif</span>
                             @endif
                             @if ($exam->classroom)
                                 <span class="text-slate-400">· {{ $exam->classroom->name ?? $exam->classroom->code }}</span>

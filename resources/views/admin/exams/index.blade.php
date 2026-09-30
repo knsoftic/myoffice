@@ -99,7 +99,7 @@
                         {{ app_date($exam->scheduled_date) }}
                         @if ($exam->start_time)
                             <div class="text-xs text-slate-400">
-                                {{ app_time($exam->start_time) }}@if ($exam->end_time) – {{ app_time($exam->end_time) }}@endif
+                                {{ app_clock($exam->start_time) }}@if ($exam->end_time) – {{ app_clock($exam->end_time) }}@endif
                             </div>
                         @else
                             <div class="text-xs text-slate-400">no time set</div>

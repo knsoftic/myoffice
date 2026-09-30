@@ -52,7 +52,7 @@
                             <td class="px-4 py-3">
                                 <a href="{{ route('admin.class-sessions.show', $session) }}"
                                    class="font-medium text-slate-700 hover:underline dark:text-slate-200">{{ app_date($session->session_date) }}</a>
-                                <div class="text-xs text-slate-400">{{ app_time($session->startsAt()) }} – {{ app_time($session->endsAt()) }}</div>
+                                <div class="text-xs text-slate-400">{{ app_clock($session->startsAt()) }} – {{ app_clock($session->endsAt()) }}</div>
                             </td>
                             <td class="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">{{ $session->batch?->code ?? '—' }}</td>
                             <td class="px-4 py-3"><x-ui.badge :color="$session->status->color()" size="xs">{{ $session->status->label() }}</x-ui.badge></td>

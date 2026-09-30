@@ -4,7 +4,7 @@
 
 @section('header')
     <x-ui.page-header :title="$session->displayTitle()"
-                      :subtitle="($session->batch?->code ?? '—').' · '.app_date($session->session_date).' · '.app_time($session->startsAt()).'–'.app_time($session->endsAt())"
+                      :subtitle="($session->batch?->code ?? '—').' · '.app_date($session->session_date).' · '.app_clock($session->startsAt()).'–'.app_clock($session->endsAt())"
                       icon="calendar-days"
                       :badge="$session->status->label()"
                       :badge-color="$session->status->color()"

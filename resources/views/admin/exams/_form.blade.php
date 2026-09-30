@@ -91,11 +91,11 @@
                              help="{{ $editing ? 'Use “Move it” on the exam’s page — a date change is recorded with a reason.' : '' }}" />
 
             <x-ui.form.input type="time" name="start_time" label="Starts"
-                             :value="old('start_time', $editing ? app_time($exam->start_time, 'H:i') : '')"
+                             :value="old('start_time', $editing ? app_clock($exam->start_time, 'H:i') : '')"
                              help="Leave both times empty for an exam that books no slot." />
 
             <x-ui.form.input type="time" name="end_time" label="Ends"
-                             :value="old('end_time', $editing ? app_time($exam->end_time, 'H:i') : '')" />
+                             :value="old('end_time', $editing ? app_clock($exam->end_time, 'H:i') : '')" />
 
             <x-ui.form.input type="number" name="duration_minutes" label="Minutes" min="1" max="1440"
                              :value="old('duration_minutes', $editing ? $exam->duration_minutes : '')"

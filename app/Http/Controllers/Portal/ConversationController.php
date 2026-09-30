@@ -162,7 +162,10 @@ final class ConversationController extends Controller
             })
             ->orderBy('name')
             ->limit(50)
-            ->get(['id', 'name'])
+            // The matrix reads each candidate's status and roles. Strict models refuse an unselected
+            // column and a lazy load, so both are fetched here — without them the picker was a 500.
+            ->with('roles')
+            ->get(['id', 'name', 'status'])
             ->map(static function (User $candidate) use ($user): ?array {
                 $decision = MessagingMatrix::mayStart($user, $candidate);
 

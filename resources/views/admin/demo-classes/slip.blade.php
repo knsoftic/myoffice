@@ -12,7 +12,7 @@
     <div class="mono strong">DEMO-{{ str_pad((string) $demo->id, 6, '0', STR_PAD_LEFT) }}</div>
     <div class="muted tiny" style="margin-top:6px;">
         {{ app_date($demo->scheduled_on) }}<br>
-        {{ app_time($demo->startsAt()) }} – {{ app_time($demo->endsAt()) }}
+        {{ app_clock($demo->startsAt()) }} – {{ app_clock($demo->endsAt()) }}
     </div>
 @endsection
 

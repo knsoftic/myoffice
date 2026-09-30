@@ -154,7 +154,11 @@ final class FeeAuthorizationTest extends TestCase
         $this->receive($charge, '4000.00');
 
         foreach (['/student/fees', '/student/fees/'.$charge->id, '/student/fees/'.$charge->id.'/slip'] as $url) {
-            $body = $this->actingAs($user)->get($url)->getContent();
+            // Asserted OK first: an error page contains none of the forbidden words either, so without
+            // this the slip's 500 (T64) passed as "leaks nothing".
+            $response = $this->actingAs($user)->get($url);
+            $response->assertOk();
+            $body = $response->getContent();
 
             foreach ([
                 'collaborator_id', 'collaborator_referral_id', 'commission_state',

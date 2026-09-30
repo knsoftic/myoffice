@@ -62,7 +62,10 @@ final class AttendanceService
     {
         $on = Carbon::parse($session->session_date->toDateString());
 
+        // `marker` is eager-loaded: the register names who took it ("Marked by …"), and lazy loading is
+        // off, so without it re-opening a marked class was a 500 on both the admin and teacher screens.
         $existing = StudentAttendance::query()
+            ->with('marker:id,name')
             ->where('class_session_id', $session->getKey())
             ->get()
             ->keyBy('student_id');

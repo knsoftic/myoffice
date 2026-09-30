@@ -16,6 +16,7 @@ use App\Models\Institute\TimetableEntry;
 use App\Services\Institute\ScheduleClashDetector;
 use App\Services\Institute\TimetableService;
 use Illuminate\Contracts\View\View;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -35,6 +36,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 final class TimetableController extends Controller
 {
+    use AuthorizesRequests;
+
     public function __construct(
         private readonly TimetableService $timetable,
         private readonly ScheduleClashDetector $detector,

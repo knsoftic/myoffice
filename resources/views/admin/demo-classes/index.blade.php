@@ -8,6 +8,9 @@
                       icon="video-camera">
         <x-slot:actions>
             <x-ui.button variant="ghost" icon="calendar-days" :href="route('admin.demo-classes.calendar')">Calendar</x-ui.button>
+            @if ($booking !== null)
+                <x-ui.button icon="plus" x-on:click="$dispatch('open-modal', 'book-demo')">Book a demo</x-ui.button>
+            @endif
         </x-slot:actions>
     </x-ui.page-header>
 @endsection
@@ -79,7 +82,7 @@
                 <tr>
                     <td class="px-4 py-3">
                         <div class="font-medium text-slate-700 dark:text-slate-200">{{ app_date($demo->scheduled_on) }}</div>
-                        <div class="text-xs text-slate-400">{{ app_time($demo->startsAt()) }} – {{ app_time($demo->endsAt()) }}</div>
+                        <div class="text-xs text-slate-400">{{ app_clock($demo->startsAt()) }} – {{ app_clock($demo->endsAt()) }}</div>
                     </td>
                     <td class="px-4 py-3">
                         <div class="font-medium text-slate-700 dark:text-slate-200">{{ $demo->attendee_name }}</div>
@@ -95,9 +98,21 @@
                     <td class="px-4 py-3"><x-ui.badge :color="$demo->status->color()">{{ $demo->status->label() }}</x-ui.badge></td>
                     <td class="px-4 py-3 text-xs text-slate-500">{{ \Illuminate\Support\Str::limit((string) $demo->attendance_remarks, 60) ?: '—' }}</td>
                     <td class="px-4 py-3 text-right">
-                        @can('print', $demo)
-                            <x-ui.button variant="ghost" size="sm" icon="printer" :href="route('admin.demo-classes.slip', $demo)">Slip</x-ui.button>
-                        @endcan
+                        <div class="flex flex-wrap justify-end gap-1">
+                            @if ($demo->status === \App\Enums\DemoClassStatus::Scheduled)
+                                @can('changeStatus', $demo)
+                                    <x-ui.button variant="ghost" size="sm" icon="check"
+                                                 x-on:click="$dispatch('open-modal', 'mark-demo-{{ $demo->id }}')">Mark</x-ui.button>
+                                @endcan
+                                @can('reschedule', $demo)
+                                    <x-ui.button variant="ghost" size="sm" icon="arrow-path"
+                                                 x-on:click="$dispatch('open-modal', 'move-demo-{{ $demo->id }}')">Reschedule</x-ui.button>
+                                @endcan
+                            @endif
+                            @can('print', $demo)
+                                <x-ui.button variant="ghost" size="sm" icon="printer" :href="route('admin.demo-classes.slip', $demo)">Slip</x-ui.button>
+                            @endcan
+                        </div>
                     </td>
                 </tr>
             @endforeach
@@ -110,4 +125,136 @@
 
         <x-ui.pagination-summary :paginator="$demos" label="demos" />
     </x-ui.card>
+
+    @foreach ($demos as $demo)
+        @if ($demo->status === \App\Enums\DemoClassStatus::Scheduled)
+            @can('changeStatus', $demo)
+                <x-ui.modal name="mark-demo-{{ $demo->id }}" :title="'What happened with '.$demo->attendee_name.'’s demo?'" icon="check"
+                            :show="old('_form') === 'mark-'.$demo->id && $errors->any()">
+                    <form method="POST" action="{{ route('admin.demo-classes.status', $demo) }}" class="space-y-4"
+                          x-data="{ status: @js(old('_form') === 'mark-'.$demo->id ? old('status', 'attended') : 'attended') }">
+                        @csrf
+                        <input type="hidden" name="_form" value="mark-{{ $demo->id }}">
+                        <x-ui.form.select name="status" label="What happened?" required x-model="status">
+                            <option value="attended">They attended</option>
+                            <option value="missed">They did not turn up</option>
+                            <option value="cancelled">Cancel this demo</option>
+                        </x-ui.form.select>
+
+                        <div x-show="status !== 'cancelled'">
+                            <x-ui.form.textarea name="remarks" label="Anything worth noting?" rows="2"
+                                                help="The counsellor following this up reads it." />
+                        </div>
+
+                        <div x-show="status === 'cancelled'" x-cloak>
+                            <x-ui.form.input name="reason" label="Why is it cancelled?"
+                                             help="Required when cancelling — the slot goes back to the teacher and room." />
+                        </div>
+
+                        <div class="flex justify-end gap-2">
+                            <x-ui.button type="button" variant="ghost"
+                                         x-on:click="$dispatch('close-modal', 'mark-demo-{{ $demo->id }}')">Close</x-ui.button>
+                            <x-ui.button type="submit" variant="primary">Save</x-ui.button>
+                        </div>
+                    </form>
+                </x-ui.modal>
+            @endcan
+
+            @can('reschedule', $demo)
+                <x-ui.modal name="move-demo-{{ $demo->id }}" :title="'Move '.$demo->attendee_name.'’s demo'" icon="arrow-path" size="lg"
+                            :show="old('_form') === 'move-'.$demo->id && $errors->any()">
+                    <form method="POST" action="{{ route('admin.demo-classes.reschedule', $demo) }}" class="space-y-4">
+                        @csrf
+                        <input type="hidden" name="_form" value="move-{{ $demo->id }}">
+                        <div class="grid gap-4 sm:grid-cols-3">
+                            <x-ui.form.input name="scheduled_on" label="Date" type="date" required :value="$demo->scheduled_on->toDateString()" />
+                            <x-ui.form.input name="start_time" label="From" type="time" required :value="substr((string) $demo->start_time, 0, 5)" />
+                            <x-ui.form.input name="end_time" label="To" type="time" :value="substr((string) $demo->end_time, 0, 5)" />
+                        </div>
+                        <x-ui.form.input name="reason" label="Why is it moving?" required />
+
+                        <div class="flex justify-end gap-2">
+                            <x-ui.button type="button" variant="ghost"
+                                         x-on:click="$dispatch('close-modal', 'move-demo-{{ $demo->id }}')">Close</x-ui.button>
+                            <x-ui.button type="submit" variant="primary">Move it</x-ui.button>
+                        </div>
+                    </form>
+                </x-ui.modal>
+            @endcan
+        @endif
+    @endforeach
+
+    @if ($booking !== null)
+        @php
+            $bookType = old('subject_type', request('subject_type', 'inquiry'));
+            $bookId = old('subject_id', request('subject_id'));
+        @endphp
+        <x-ui.modal name="book-demo" title="Book a demo class" icon="video-camera" size="lg"
+                    :show="(old('_form') === 'book' && $errors->any()) || request()->filled('subject_id')">
+            <form method="POST" action="{{ route('admin.demo-classes.store') }}" class="space-y-4"
+                  x-data="{ type: @js($bookType), mode: @js(old('delivery_mode', 'physical')) }">
+                @csrf
+                <input type="hidden" name="_form" value="book">
+                <p class="text-sm text-slate-600 dark:text-slate-300">
+                    A demo is booked for somebody who enquired, applied or is already a student. It holds the
+                    teacher and the room, so it is clash-checked like a class.
+                </p>
+
+                <div class="grid gap-4 sm:grid-cols-2">
+                    <x-ui.form.select name="subject_type" label="Who is it for?" required x-model="type">
+                        <option value="inquiry">An enquiry</option>
+                        <option value="application">An applicant</option>
+                        <option value="student">A student</option>
+                    </x-ui.form.select>
+
+                    <template x-if="type === 'inquiry'">
+                        <x-ui.form.select name="subject_id" label="Enquiry" required placeholder="Pick an enquiry"
+                                          :options="$booking['inquiries']->pluck('label', 'id')" :selected="$bookType === 'inquiry' ? $bookId : null" />
+                    </template>
+                    <template x-if="type === 'application'">
+                        <x-ui.form.select name="subject_id" label="Applicant" required placeholder="Pick an applicant"
+                                          :options="$booking['applications']->pluck('label', 'id')" :selected="$bookType === 'application' ? $bookId : null" />
+                    </template>
+                    <template x-if="type === 'student'">
+                        <x-ui.form.select name="subject_id" label="Student" required placeholder="Pick a student"
+                                          :options="$booking['students']->pluck('label', 'id')" :selected="$bookType === 'student' ? $bookId : null" />
+                    </template>
+
+                    <x-ui.form.select name="course_id" label="Course" required placeholder="Pick a course"
+                                      :options="$booking['courses']" :selected="old('course_id', request('course_id'))" />
+
+                    <x-ui.form.select name="teacher_id" label="Teacher" placeholder="Not decided yet"
+                                      :options="$booking['teachers']" :selected="old('teacher_id')" />
+
+                    <x-ui.form.select name="delivery_mode" label="How" required x-model="mode"
+                                      :options="$deliveryModes" :selected="old('delivery_mode', 'physical')" />
+
+                    <div x-show="mode !== 'online'">
+                        <x-ui.form.select name="classroom_id" label="Classroom" placeholder="No room"
+                                          :options="$booking['classrooms']" :selected="old('classroom_id')" />
+                    </div>
+
+                    <div x-show="mode !== 'physical'" x-cloak class="sm:col-span-2">
+                        <x-ui.form.input name="meeting_url" label="Meeting link" type="url" :value="old('meeting_url')"
+                                         placeholder="https://meet.google.com/…" />
+                    </div>
+
+                    <x-ui.form.input name="scheduled_on" label="Date" type="date" required
+                                     :value="old('scheduled_on', now()->toDateString())" />
+                    <div class="grid grid-cols-2 gap-4">
+                        <x-ui.form.input name="start_time" label="From" type="time" required :value="old('start_time')" />
+                        <x-ui.form.input name="end_time" label="To" type="time" :value="old('end_time')"
+                                         help="Blank uses the default length." />
+                    </div>
+                </div>
+
+                <x-ui.form.textarea name="notes" label="Notes" rows="2" :value="old('notes')" />
+
+                <div class="flex justify-end gap-2">
+                    <x-ui.button type="button" variant="ghost" x-on:click="$dispatch('close-modal', 'book-demo')">Cancel</x-ui.button>
+                    <x-ui.button type="submit" variant="primary">Book the demo</x-ui.button>
+                </div>
+            </form>
+        </x-ui.modal>
+    @endif
 @endsection

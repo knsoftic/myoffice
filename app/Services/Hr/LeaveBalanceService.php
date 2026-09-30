@@ -152,7 +152,11 @@ class LeaveBalanceService
                 $days = (string) $type->annual_quota_days;
 
                 if ($prorated) {
-                    $remaining = (string) max(0, 12 - $person->joining_date->diffInMonths($window['start']));
+                    // Whole months already gone, measured forward from the window start. Carbon 3's
+                    // diffInMonths() is signed and fractional: the other way round it came out negative,
+                    // and a March joiner was granted more than a full year's quota.
+                    $elapsed = (int) floor($window['start']->diffInMonths($person->joining_date));
+                    $remaining = (string) max(0, 12 - $elapsed);
                     $days = Money::round(Money::div(Money::mul($days, $remaining), '12'), 4);
                 }
 
