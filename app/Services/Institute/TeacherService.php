@@ -76,9 +76,12 @@ final class TeacherService
                 'status' => $this->statusFrom($data['status'] ?? null)->value,
                 'branch_id' => $data['branch_id'] ?? $actor?->branch_id ?? setting('institute.default_branch_id'),
                 'sort_order' => (int) ($data['sort_order'] ?? 0),
-            ])->save();
+            ]);
 
+            $this->fillPublicSlug($teacher);
             $this->assertPublicHasASlug($teacher);
+
+            $teacher->save();
 
             if (($data['create_login'] ?? null) !== false) {
                 $this->createLogin($teacher, $actor);
@@ -102,9 +105,12 @@ final class TeacherService
                 unset($columns['name'], $columns['email'], $columns['phone'], $columns['salary']);
             }
 
-            $teacher->fill($columns)->save();
+            $teacher->fill($columns);
 
+            $this->fillPublicSlug($teacher);
             $this->assertPublicHasASlug($teacher);
+
+            $teacher->save();
 
             return $teacher->refresh();
         }, 3);
@@ -478,6 +484,33 @@ final class TeacherService
         }
 
         return TeacherStatus::tryFrom((string) $status) ?? TeacherStatus::Active;
+    }
+
+    /**
+     * A public teacher left without a slug gets one from their name.
+     *
+     * The check has to run **before** the save: `chk_te_public_slug` refuses the row itself, so a check
+     * after the insert never ran and the operator got a raw constraint violation instead of a message.
+     */
+    private function fillPublicSlug(Teacher $teacher): void
+    {
+        if (! $teacher->is_public || trim((string) $teacher->slug) !== '') {
+            return;
+        }
+
+        $base = Str::limit(Str::slug((string) $teacher->name), 160, '');
+
+        if ($base === '') {
+            return;
+        }
+
+        $slug = $base;
+
+        for ($n = 2; Teacher::withTrashed()->where('slug', $slug)->whereKeyNot($teacher->getKey())->exists(); $n++) {
+            $slug = $base.'-'.$n;
+        }
+
+        $teacher->slug = $slug;
     }
 
     private function assertPublicHasASlug(Teacher $teacher): void

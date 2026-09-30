@@ -21,7 +21,7 @@
                         <dd class="mt-1 text-sm text-slate-700 dark:text-slate-200">
                             {{ app_date($exam->scheduled_date) }}
                             @if ($exam->start_time)
-                                <div class="text-slate-400">{{ app_time($exam->start_time) }}@if ($exam->end_time) – {{ app_time($exam->end_time) }}@endif</div>
+                                <div class="text-slate-400">{{ app_clock($exam->start_time) }}@if ($exam->end_time) – {{ app_clock($exam->end_time) }}@endif</div>
                             @endif
                         </dd>
                     </div>

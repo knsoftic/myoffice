@@ -39,7 +39,7 @@
                                     <div class="rounded-lg border border-slate-200/70 bg-white p-2.5 text-sm dark:border-slate-800 dark:bg-slate-900
                                                 {{ $session->status->value === 'cancelled' ? 'opacity-60' : '' }}">
                                         <div class="flex items-start justify-between gap-2">
-                                            <span class="font-medium text-slate-700 dark:text-slate-200">{{ app_time($session->startsAt()) }}</span>
+                                            <span class="font-medium text-slate-700 dark:text-slate-200">{{ app_clock($session->startsAt()) }}</span>
                                             <x-ui.badge :color="$session->status->color()" size="xs">{{ $session->status->label() }}</x-ui.badge>
                                         </div>
                                         <div class="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{{ $session->course?->name ?? $session->batch?->code }}</div>

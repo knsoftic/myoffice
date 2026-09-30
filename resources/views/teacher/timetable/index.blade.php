@@ -33,7 +33,7 @@
                                 <a href="{{ route('teacher.sessions.show', $session) }}"
                                    class="block rounded-lg border border-slate-200/70 bg-white p-2.5 text-sm transition hover:border-brand-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-brand-600">
                                     <div class="flex items-start justify-between gap-2">
-                                        <span class="font-medium text-slate-700 dark:text-slate-200">{{ app_time($session->startsAt()) }}</span>
+                                        <span class="font-medium text-slate-700 dark:text-slate-200">{{ app_clock($session->startsAt()) }}</span>
                                         <x-ui.badge :color="$session->status->color()" size="xs">{{ $session->status->label() }}</x-ui.badge>
                                     </div>
                                     <div class="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{{ $session->batch?->code }}</div>

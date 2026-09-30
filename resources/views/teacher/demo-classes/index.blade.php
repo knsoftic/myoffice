@@ -47,7 +47,7 @@
                 <tr>
                     <td class="px-4 py-3">
                         <div class="font-medium text-slate-700 dark:text-slate-200">{{ app_date($demo->scheduled_on) }}</div>
-                        <div class="text-xs text-slate-400">{{ app_time($demo->startsAt()) }} – {{ app_time($demo->endsAt()) }}</div>
+                        <div class="text-xs text-slate-400">{{ app_clock($demo->startsAt()) }} – {{ app_clock($demo->endsAt()) }}</div>
                     </td>
                     <td class="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
                         {{ $demo->attendee_name }}

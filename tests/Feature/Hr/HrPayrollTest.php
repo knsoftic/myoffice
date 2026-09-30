@@ -432,6 +432,33 @@ final class HrPayrollTest extends TestCase
         );
     }
 
+    /**
+     * Carbon 3's `diffInMonths()` is signed and fractional, so `12 - joining->diffInMonths(start)` for a
+     * March joiner was `12 - (-2.45)` — a **larger** grant than a full year. The joiner gets the whole
+     * months left in the leave year, and never more than the quota.
+     */
+    #[Test]
+    public function a_mid_year_joiner_is_granted_the_remaining_months_and_never_more_than_the_quota(): void
+    {
+        $this->actingAs($this->createSuperAdmin());
+
+        $joiner = $this->employee('March Joiner', ['joining_date' => '2026-03-15']);
+        $type = $this->leaveType();
+
+        app(LeaveBalanceService::class)->grantYear(2026, $joiner);
+
+        $grant = LeaveBalanceTransaction::query()
+            ->where('employee_id', $joiner->getKey())
+            ->where('leave_type_id', $type->getKey())
+            ->where('leave_year', 2026)
+            ->sole();
+
+        // 14 days x 10 remaining months (March to December) / 12 = 11.67 (Money::div quantises at 2).
+        // Before the fix this was 16.86 — more than the 14-day quota.
+        $this->assertSame('joining_proration', $grant->reason->value);
+        $this->assertSame('11.6700', (string) $grant->days);
+    }
+
     #[Test]
     public function nobody_approves_their_own_leave(): void
     {

@@ -21,6 +21,7 @@ use App\DataObjects\Support\ParticipantInput;
 use App\Enums\AdmissionStage;
 use App\Enums\BatchStatus;
 use App\Enums\ClassroomType;
+use App\Enums\ClassSessionStatus;
 use App\Enums\ClientType;
 use App\Enums\CollaborationType;
 use App\Enums\CommissionCalculationType;
@@ -42,6 +43,7 @@ use App\Enums\PanelType;
 use App\Enums\PaymentMethod;
 use App\Enums\PayoutMethod;
 use App\Enums\Priority;
+use App\Enums\ProjectMemberRole;
 use App\Enums\ProjectStatus;
 use App\Enums\ProjectType;
 use App\Enums\ReferralSource;
@@ -49,6 +51,7 @@ use App\Enums\ReferralSubject;
 use App\Enums\ReversalType;
 use App\Enums\StudentAttendanceStatus;
 use App\Enums\StudentFeeType;
+use App\Enums\StudentStatus;
 use App\Enums\TaskStatus;
 use App\Enums\ThemePreference;
 use App\Enums\TicketStatus;
@@ -79,6 +82,7 @@ use App\Models\Institute\StudentBatchEnrollment;
 use App\Models\Institute\StudentFee;
 use App\Models\Institute\StudentFeePayment;
 use App\Models\Institute\Teacher;
+use App\Models\Institute\TimetableEntry;
 use App\Models\Project\Project;
 use App\Models\Role;
 use App\Models\Support\Meeting;
@@ -108,6 +112,7 @@ use App\Services\Institute\ExamService;
 use App\Services\Institute\StudentFeeService;
 use App\Services\Institute\StudentService;
 use App\Services\Institute\TeacherService;
+use App\Services\Institute\TimetableService;
 use App\Services\Project\MilestoneService;
 use App\Services\Project\ProjectService;
 use App\Services\Project\TaskService;
@@ -815,7 +820,12 @@ class DemoSeeder extends Seeder
         for ($i = 1; $i <= self::VOLUME['projects']; $i++) {
             $name = sprintf('%s Project %02d — %s', self::NAME_PREFIX, $i, $this->pick(self::PROJECT_KINDS));
 
-            $existing = Project::withTrashed()->where('name', $name)->first();
+            // Matched on the numbered prefix, not the whole name: the kind is picked at random, and the
+            // random sequence shifts between runs, so a full-name match made a new project every run.
+            $existing = Project::withTrashed()
+                ->where('name', 'like', sprintf('%s Project %02d — %%', self::NAME_PREFIX, $i))
+                ->orderBy('id')
+                ->first();
 
             if ($existing !== null) {
                 $this->projects[] = $existing;
@@ -844,6 +854,11 @@ class DemoSeeder extends Seeder
                 projectValue: $value,
             ), $this->actor);
 
+            // Work is assigned only to an active member of the project, so the developer joins it.
+            if ($developer->getKey() !== $manager->getKey()) {
+                $projects->addMember($project, $developer, null, ProjectMemberRole::Member, null, $this->actor);
+            }
+
             if ($i % 3 === 0 && $this->partners !== []) {
                 $referrals->attachSubject(
                     ReferralSubject::Project,
@@ -857,12 +872,14 @@ class DemoSeeder extends Seeder
 
             foreach (['Discovery', 'Build', 'Launch'] as $index => $title) {
                 $milestone = $milestones->create($project, [
-                    'title' => self::NAME_PREFIX.' '.$title,
+                    'name' => self::NAME_PREFIX.' '.$title,
                     'description' => self::TAG.' milestone.',
-                    'due_date' => Carbon::now()->addWeeks(2 + ($index * 4))->toDateString(),
+                    'deadline' => Carbon::now()->addWeeks(2 + ($index * 4))->toDateString(),
                 ], $this->actor);
 
                 if ($index === 0) {
+                    // Pending cannot jump straight to Completed (MilestoneStatus::allowedTransitions()).
+                    $milestones->changeStatus($milestone, MilestoneStatus::InProgress, null, $this->actor);
                     $milestones->changeStatus($milestone, MilestoneStatus::Completed, null, $this->actor);
                 }
 
@@ -882,6 +899,8 @@ class DemoSeeder extends Seeder
                     $tasks->assign($task, $developer, null, null, $this->actor);
 
                     if ($index === 0) {
+                        // To do cannot jump straight to Completed (TaskStatus::allowedTransitions()).
+                        $tasks->changeStatus($task, TaskStatus::InProgress, null, $this->actor);
                         $tasks->changeStatus($task, TaskStatus::Completed, null, $this->actor);
                     }
                 }
@@ -988,7 +1007,36 @@ class DemoSeeder extends Seeder
             $created++;
         }
 
+        $this->linkTeacherPanelAccounts();
+
         return $created;
+    }
+
+    /**
+     * Give the demo Teacher-panel sign-ins a teacher record to be.
+     *
+     * The teacher panel resolves "who am I" through `teachers.user_id`; an account with the Teacher
+     * role and no teacher row signs in to an empty panel. The account stage's demo teacher and the
+     * DemoUserSeeder's `teacher@myoffice.test` each take one of the demo teachers, unless linked already.
+     */
+    private function linkTeacherPanelAccounts(): void
+    {
+        $accounts = array_values(array_filter([
+            $this->accounts['Teacher'] ?? null,
+            User::query()->where('email', 'teacher@myoffice.test')->first(),
+        ]));
+
+        foreach ($accounts as $index => $account) {
+            $teacher = $this->teachers[$index] ?? null;
+
+            if ($teacher === null
+                || $teacher->user_id !== null
+                || Teacher::query()->where('user_id', $account->getKey())->exists()) {
+                continue;
+            }
+
+            $teacher->forceFill(['user_id' => $account->getKey()])->save();
+        }
     }
 
     /**
@@ -1108,6 +1156,16 @@ class DemoSeeder extends Seeder
             $existing = Batch::withTrashed()->where('name', $name)->first();
 
             if ($existing !== null) {
+                // A run that stopped between create and open leaves a Planned batch behind; finish it.
+                if ($existing->status === BatchStatus::Planned && ! $existing->trashed()) {
+                    if (! TimetableEntry::query()->where('batch_id', $existing->getKey())->exists()) {
+                        app(TimetableService::class)->seedFromBatch($existing, $this->actor);
+                    }
+
+                    $batches->changeStatus($existing, BatchStatus::Enrolling, null, $this->actor);
+                    $existing->refresh();
+                }
+
                 $this->batches[] = $existing;
 
                 continue;
@@ -1137,6 +1195,7 @@ class DemoSeeder extends Seeder
             );
 
             $batch = $batches->create([
+                'code' => sprintf('DEMO-B%02d', $i),
                 'name' => $name,
                 'course_id' => (int) $course->getKey(),
                 'branch_id' => (int) $course->branch_id,
@@ -1151,6 +1210,10 @@ class DemoSeeder extends Seeder
                 'student_capacity' => 30,
                 'notes' => self::TAG.' fictional batch.',
             ], $this->actor);
+
+            // A batch opens for admission only once it has a timetable, so its weekly slots are
+            // expanded from the batch days first.
+            app(TimetableService::class)->seedFromBatch($batch, $this->actor);
 
             // Enrolling, not Planned: a planned batch refuses enrolment, and the admission stage
             // needs a seat to hand out.
@@ -1215,7 +1278,34 @@ class DemoSeeder extends Seeder
             $created++;
         }
 
+        $this->linkStudentPanelAccounts();
+
         return $created;
+    }
+
+    /**
+     * Give the demo Student-panel sign-ins a student record to be.
+     *
+     * Each demo student's own login is created with a random password (it is mailed, never shown), so
+     * nobody can sign in as one. The account stage's demo student and DemoUserSeeder's
+     * `student@myoffice.test` — whose passwords are known — each take over one demo student instead.
+     */
+    private function linkStudentPanelAccounts(): void
+    {
+        $accounts = array_values(array_filter([
+            $this->accounts['Student'] ?? null,
+            User::query()->where('email', 'student@myoffice.test')->first(),
+        ]));
+
+        foreach ($accounts as $index => $account) {
+            $student = $this->students[$index] ?? null;
+
+            if ($student === null || Student::query()->where('user_id', $account->getKey())->exists()) {
+                continue;
+            }
+
+            $student->forceFill(['user_id' => $account->getKey()])->save();
+        }
     }
 
     /**
@@ -1264,6 +1354,14 @@ class DemoSeeder extends Seeder
             if ($live !== null) {
                 $this->admissions[] = $live;
 
+                continue;
+            }
+
+            // The intake wraps round the students, so a second course can land on somebody whose first
+            // one has already completed them — and a completed student takes no new seat.
+            $status = $student->refresh()->status;
+
+            if (! $status->isEnrollable() && $status !== StudentStatus::Applied) {
                 continue;
             }
 
@@ -1321,7 +1419,9 @@ class DemoSeeder extends Seeder
                 $this->buildPlan($fees, $courseFee, 4);
             }
 
-            $enrollments->enroll($student, $batch, $admission, [
+            // `register()` moved the student from Applied to Registered in the database; the copy held
+            // here still says Applied, and enrolment refuses an unregistered student.
+            $enrollments->enroll($student->refresh(), $batch, $admission, [
                 'enrolled_on' => Carbon::parse((string) $admission->admission_date)->toDateString(),
                 'notes' => self::TAG.' fictional enrolment.',
             ], $this->actor);
@@ -1624,6 +1724,14 @@ class DemoSeeder extends Seeder
             for ($day = self::VOLUME['session_days']; $day >= 1; $day--) {
                 $date = Carbon::now()->subDays($day * 2)->toDateString();
 
+                // The batch's own weekly slot already holds its teacher, room and students on those
+                // days, so a one-off at the same hour there is a clash the detector rightly refuses.
+                $weekday = strtolower(Carbon::parse($date)->englishDayOfWeek);
+
+                if (in_array($weekday, array_map(static fn ($d): string => $d->value, $batch->weekdays()), true)) {
+                    continue;
+                }
+
                 $exists = ClassSession::query()
                     ->where('batch_id', $batch->getKey())
                     ->whereDate('session_date', $date)
@@ -1667,7 +1775,13 @@ class DemoSeeder extends Seeder
                 }
 
                 $attendance->mark($session, $marks, ['marked_via' => 'manual'], $this->actor);
-                $sessions->markHeld($session->refresh(), $this->actor);
+
+                // Taking the register already marks the class held; asking again is an illegal move.
+                $session = $session->refresh();
+
+                if ($session->status !== ClassSessionStatus::Held) {
+                    $sessions->markHeld($session, $this->actor);
+                }
 
                 $created++;
             }
@@ -1747,8 +1861,12 @@ class DemoSeeder extends Seeder
             }
 
             $results->saveSheet($exam->refresh(), $rows, $this->actor);
-            $results->verify($exam->refresh(), $this->actor);
-            $results->publish($exam->refresh(), $this->actor);
+
+            // Maker-checker: whoever entered the marks may not verify them, so a second account checks.
+            $checker = $this->accounts['Institute Manager'] ?? $this->accounts['Course Coordinator'] ?? $this->actor;
+
+            $results->verify($exam->refresh(), $checker);
+            $results->publish($exam->refresh(), $checker);
 
             $created++;
         }

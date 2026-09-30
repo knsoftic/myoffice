@@ -104,6 +104,14 @@ final class FeeController extends Controller
     {
         $charge = $this->ownCharge($request, $fee);
 
+        // `FeeSlipBuilder` loads `collaborator` and `branch`, and both keys are selected away above, so
+        // strict models threw and every slip was a 500 (T64). The student's copy names the referrer
+        // (§41, Q9) — the name, never the money — so the two relations are resolved here, with only
+        // the columns the slip prints, and the charge itself still carries no `collaborator_id`.
+        $keys = StudentFee::query()->whereKey($charge->getKey())->first(['id', 'collaborator_id', 'branch_id']);
+        $charge->setRelation('collaborator', $keys?->collaborator()->first(['id', 'name']));
+        $charge->setRelation('branch', $keys?->branch()->first());
+
         return view('student.fees.slip', [
             // `studentCopy()` is constructed here and no query parameter reaches it: the three gates of
             // §6.7.1 are all AND-ed and this is the one the panel can never turn off.

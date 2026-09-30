@@ -29,7 +29,7 @@
 
                     @forelse ($demos[$key] ?? [] as $demo)
                         <div class="mb-2 rounded-lg bg-slate-50 p-2 text-xs dark:bg-slate-800/60">
-                            <div class="font-medium text-slate-700 dark:text-slate-200">{{ app_time($demo->startsAt()) }}</div>
+                            <div class="font-medium text-slate-700 dark:text-slate-200">{{ app_clock($demo->startsAt()) }}</div>
                             <div class="truncate text-slate-600 dark:text-slate-300">{{ $demo->attendee_name }}</div>
                             <div class="truncate text-slate-400">{{ $demo->course?->name }}</div>
                             <x-ui.badge :color="$demo->status->color()" size="xs" class="mt-1">{{ $demo->status->label() }}</x-ui.badge>

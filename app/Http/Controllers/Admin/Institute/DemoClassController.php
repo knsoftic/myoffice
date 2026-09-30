@@ -7,11 +7,13 @@ namespace App\Http\Controllers\Admin\Institute;
 use App\Enums\DeliveryMode;
 use App\Enums\DemoClassStatus;
 use App\Http\Controllers\Controller;
+use App\Models\Institute\Classroom;
 use App\Models\Institute\Course;
 use App\Models\Institute\CourseInquiry;
 use App\Models\Institute\DemoClass;
 use App\Models\Institute\Student;
 use App\Models\Institute\StudentApplication;
+use App\Models\Institute\Teacher;
 use App\Services\Institute\DemoClassService;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
@@ -54,6 +56,8 @@ final class DemoClassController extends Controller
             'filters' => $request->only(['status', 'course_id', 'from', 'to', 'q']),
             'counts' => $this->counts($request),
             'unmarked' => $this->demos->unmarkedPast(),
+            'booking' => $request->user()?->can('demo_classes.create') ? $this->bookingOptions() : null,
+            'deliveryModes' => DeliveryMode::options(),
         ]);
     }
 
@@ -184,6 +188,36 @@ final class DemoClassController extends Controller
     | Internals
     |--------------------------------------------------------------------------
     */
+
+    /**
+     * What the "Book a demo" form offers: the people a demo can be booked for, and who and where.
+     *
+     * Each attendee list is the most recent 200 — an operator books a demo for somebody who enquired
+     * lately, and an unbounded dropdown is a page that grows with the institute.
+     *
+     * @return array<string, mixed>
+     */
+    private function bookingOptions(): array
+    {
+        return [
+            'inquiries' => CourseInquiry::query()->open()->latest('id')->limit(200)
+                ->get(['id', 'inquiry_number', 'name', 'course_id'])
+                ->map(fn (CourseInquiry $i): array => ['id' => $i->id, 'label' => $i->name.' · '.$i->inquiry_number, 'course_id' => $i->course_id])
+                ->values(),
+            'applications' => StudentApplication::query()->open()->latest('id')->limit(200)
+                ->get(['id', 'application_number', 'name', 'course_id'])
+                ->map(fn (StudentApplication $a): array => ['id' => $a->id, 'label' => $a->name.' · '.$a->application_number, 'course_id' => $a->course_id])
+                ->values(),
+            'students' => Student::query()->latest('id')->limit(200)
+                ->get(['id', 'student_code', 'name'])
+                ->map(fn (Student $s): array => ['id' => $s->id, 'label' => $s->name.' · '.$s->student_code, 'course_id' => null])
+                ->values(),
+            'courses' => Course::query()->orderBy('name')->pluck('name', 'id'),
+            'teachers' => Teacher::query()->teaching()->orderBy('name')->pluck('name', 'id'),
+            'classrooms' => Classroom::query()->active()->orderBy('code')->get(['id', 'code', 'name'])
+                ->mapWithKeys(fn (Classroom $room): array => [$room->id => trim($room->code.' — '.$room->name, ' —')]),
+        ];
+    }
 
     /**
      * @param  array<string, mixed>  $validated

@@ -69,7 +69,7 @@
                         <dd class="mt-1 text-sm text-slate-700 dark:text-slate-200">
                             {{ app_date($exam->scheduled_date) }}
                             @if ($exam->start_time)
-                                <span class="text-slate-400">{{ app_time($exam->start_time) }}@if ($exam->end_time) – {{ app_time($exam->end_time) }}@endif</span>
+                                <span class="text-slate-400">{{ app_clock($exam->start_time) }}@if ($exam->end_time) – {{ app_clock($exam->end_time) }}@endif</span>
                             @endif
                         </dd>
                     </div>
@@ -206,9 +206,9 @@
 
                             <div class="grid grid-cols-2 gap-3">
                                 <x-ui.form.input type="time" name="start_time" label="Starts"
-                                                 :value="app_time($exam->start_time, 'H:i')" />
+                                                 :value="app_clock($exam->start_time, 'H:i')" />
                                 <x-ui.form.input type="time" name="end_time" label="Ends"
-                                                 :value="app_time($exam->end_time, 'H:i')" />
+                                                 :value="app_clock($exam->end_time, 'H:i')" />
                             </div>
 
                             <x-ui.form.select name="classroom_id" label="Room" placeholder="No room">
