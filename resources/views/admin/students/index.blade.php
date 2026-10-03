@@ -67,6 +67,7 @@
                 <th class="px-4 py-3 text-right font-semibold">Admissions</th>
                 <th class="px-4 py-3 text-left font-semibold">Status</th>
                 <th class="px-4 py-3 text-left font-semibold">Joined</th>
+                <th class="px-4 py-3"><span class="sr-only">Actions</span></th>
             </x-slot:head>
 
             @foreach ($students as $student)
@@ -97,6 +98,30 @@
                     <td class="px-4 py-3"><x-ui.badge :color="$student->status->color()">{{ $student->status->label() }}</x-ui.badge></td>
                     <td class="px-4 py-3 text-sm text-slate-500">
                         {{ $student->joining_date ? app_date($student->joining_date) : '—' }}
+                    </td>
+                    <td class="px-4 py-3">
+                        <div class="flex items-center justify-end gap-1">
+                            <x-ui.icon-button icon="eye" size="sm" label="Open {{ $student->name }}"
+                                              :href="route('admin.students.show', $student)" />
+                            @can('update', $student)
+                                <x-ui.icon-button icon="pencil" size="sm" label="Edit {{ $student->name }}"
+                                                  :href="route('admin.students.edit', $student)" />
+                            @endcan
+                            {{-- Only a student nothing was ever recorded against can be deleted; the
+                                 destroy route asks the policy again. --}}
+                            @if (auth()->user()?->can('students.delete') && ! isset($withHistory[$student->id]))
+                                <x-ui.confirm
+                                    :action="route('admin.students.destroy', $student)"
+                                    :title="'Delete '.$student->name.'?'"
+                                    message="Nothing has been recorded against this student, so the record moves to the trash and can be restored."
+                                    confirm-label="Delete student"
+                                >
+                                    <x-slot:trigger>
+                                        <x-ui.icon-button icon="trash" size="sm" variant="danger" label="Delete {{ $student->name }}" />
+                                    </x-slot:trigger>
+                                </x-ui.confirm>
+                            @endif
+                        </div>
                     </td>
                 </tr>
             @endforeach

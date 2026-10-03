@@ -41,13 +41,20 @@ final class StudentController extends Controller
     {
         $query = $this->filtered($request);
 
+        $students = $query->clone()
+            ->with(['branch:id,name', 'collaborator:id,name'])
+            ->withCount('admissions')
+            ->orderByDesc('id')
+            ->paginate(per_page())
+            ->withQueryString();
+
         return view('admin.students.index', [
-            'students' => $query->clone()
-                ->with(['branch:id,name', 'collaborator:id,name'])
-                ->withCount('admissions')
-                ->orderByDesc('id')
-                ->paginate(per_page())
-                ->withQueryString(),
+            'students' => $students,
+            // Which rows may offer Delete: the policy refuses a student with history, and asking it per
+            // row would be four queries a row. The destroy route still asks the policy itself.
+            'withHistory' => $request->user()?->can('students.delete')
+                ? Student::idsWithHistory($students->getCollection()->modelKeys())
+                : [],
             'stats' => $this->stats($request),
             'statuses' => StudentStatus::options(),
             'branches' => Branch::query()->orderBy('name')->pluck('name', 'id'),

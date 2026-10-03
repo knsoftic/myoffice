@@ -798,7 +798,10 @@ ever recorded against.
 The student page had **no delete control at all**: `admin.students.destroy` existed and no view reached
 it, so the permission could never have been used from a screen. `admin/students/show.blade.php` now
 carries a confirm-dialog Delete behind `@can('delete', $student)`, which the policy hides for a student
-with history.
+with history. The **students list** had no row actions at all either; each row now has Open, Edit
+(`@can('update')`) and Delete. Which rows may offer Delete is decided for the whole page at once by
+`Student::idsWithHistory()` (one query per history table, not four per row); the destroy route still
+asks the policy.
 
 Applying it to an existing installation: `php artisan db:seed --class=RoleSeeder --force` then
 `php artisan permission:cache-reset` (RoleSeeder converges the 18 system roles' grants, D65).

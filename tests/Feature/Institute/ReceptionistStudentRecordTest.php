@@ -60,6 +60,24 @@ final class ReceptionistStudentRecordTest extends TestCase
     }
 
     #[Test]
+    public function the_students_list_offers_edit_on_every_row_and_delete_only_without_history(): void
+    {
+        $receptionist = $this->createUserWithRole('Receptionist');
+        // Named apart: the fixture names every student after the same counter.
+        $fresh = tap($this->fixtureStudent(), fn (Student $s) => $s->forceFill(['name' => 'Walk In Mistake'])->save());
+        $charged = tap($this->fixtureStudent(), fn (Student $s) => $s->forceFill(['name' => 'Paying Learner'])->save());
+        $this->charge(null, '1000.00', ['student_id' => $charged->getKey()]);
+
+        $this->actingAs($receptionist)
+            ->get(route('admin.students.index'))
+            ->assertOk()
+            ->assertSee(route('admin.students.edit', $fresh), false)
+            ->assertSee(route('admin.students.edit', $charged), false)
+            ->assertSee('Delete '.$fresh->name)
+            ->assertDontSee('Delete '.$charged->name);
+    }
+
+    #[Test]
     public function a_student_with_history_cannot_be_deleted_even_by_the_receptionist(): void
     {
         $receptionist = $this->createUserWithRole('Receptionist');
