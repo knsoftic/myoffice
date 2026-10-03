@@ -561,7 +561,13 @@ class RoleSeeder extends Seeder
                     PermissionRegistry::permissionNamesFor('admissions', $this->abilitiesExcept('admissions', [
                         'delete', 'restore',
                     ])),
-                    PermissionRegistry::permissionNamesFor('students', self::READ_CREATE_EDIT),
+                    // The front desk owns the student record end to end, so it may also remove one
+                    // entered by mistake (and bring it back). `StudentPolicy::delete()` still refuses
+                    // any student with history — charged, paid, enrolled or marked — so this reaches
+                    // only a record nothing was ever recorded against.
+                    PermissionRegistry::permissionNamesFor('students', [
+                        ...self::READ_CREATE_EDIT, Ability::Delete, Ability::Restore,
+                    ]),
                     PermissionRegistry::permissionNamesFor('student_fees', self::READ_CREATE),
                     // phase-04 §9.1.2: view the inquiries assigned to the front desk.
                     PermissionRegistry::permissionNamesFor('contact_inquiries', [Ability::View]),

@@ -18,6 +18,21 @@
                 <x-ui.button variant="primary" icon="user-plus"
                              :href="route('admin.admissions.create', ['student_id' => $student->id])">Start admission</x-ui.button>
             @endcan
+
+            {{-- The policy refuses a student with history, so this shows only for a record nothing was
+                 ever recorded against — typically one entered by mistake. --}}
+            @can('delete', $student)
+                <x-ui.confirm
+                    :action="route('admin.students.destroy', $student)"
+                    :title="'Delete '.$student->name.'?'"
+                    message="Nothing has been recorded against this student, so the record moves to the trash and can be restored."
+                    confirm-label="Delete student"
+                >
+                    <x-slot:trigger>
+                        <x-ui.icon-button icon="trash" variant="danger" label="Delete student" />
+                    </x-slot:trigger>
+                </x-ui.confirm>
+            @endcan
         </x-slot:actions>
     </x-ui.page-header>
 @endsection
