@@ -18,7 +18,8 @@ use Illuminate\Support\Facades\Schema;
  *
  * Four answers, and they are exclusive:
  *
- * - **all** — Super Admin, or a holder of `employees.view_any` (HR, Admin, Accountant).
+ * - **all** — Super Admin, or a holder of `employees.view_any` (HR, Admin, Accountant) or of
+ *   `attendance.create` (whoever keeps the staff register, e.g. the Receptionist).
  * - **team** — somebody who approves leave or attendance but cannot see everybody: themselves plus every
  *   descendant of their reporting tree, resolved iteratively with a **depth cap of 5**. The cap is not a
  *   guess about org charts; it stops a cycle in `reports_to_id` from becoming an infinite loop, and five
@@ -55,7 +56,10 @@ class EmployeeScopeResolver
             return $this->cache[$key];
         }
 
-        if ($user->can('employees.view_any')) {
+        // Recording attendance for staff (`attendance.create` — HR, and a front desk that keeps the
+        // register) means seeing every employee the register lists. It reaches no further than that:
+        // every other HR screen still asks its own permission, and none of them is implied by this.
+        if ($user->can('employees.view_any') || $user->can('attendance.create')) {
             return $this->cache[$key] = ['mode' => 'all', 'ids' => []];
         }
 

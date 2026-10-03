@@ -569,6 +569,11 @@ class RoleSeeder extends Seeder
                         ...self::READ_CREATE_EDIT, Ability::Delete, Ability::Restore,
                     ]),
                     PermissionRegistry::permissionNamesFor('student_fees', self::READ_CREATE),
+                    // The front desk keeps the staff register: it sees the day's attendance, punches or
+                    // marks staff in and out, and closes the day (which only fills and resolves the
+                    // missing rows — the nightly job does the same). Approving corrections, editing a
+                    // resolved row, exports and reports stay with HR.
+                    PermissionRegistry::permissionNamesFor('attendance', self::READ_CREATE),
                     // phase-04 §9.1.2: view the inquiries assigned to the front desk.
                     PermissionRegistry::permissionNamesFor('contact_inquiries', [Ability::View]),
                     // phase-08-09 §4.3: the front desk picks the referring partner at admission, and

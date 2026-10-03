@@ -787,6 +787,21 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-10-03 — The front desk keeps the staff attendance register
+
+Requested: the Receptionist should mark staff attendance. `RoleSeeder` now grants the Receptionist
+`attendance.view_any`, `view` and `create` — the register, punch in/out, manual mark and close-day
+(close only fills and resolves missing rows, as the nightly job does). Corrections, approvals, edits,
+exports and reports stay with HR.
+
+The register lists only the employees `EmployeeScopeResolver` lets a user see, and "everybody" needed
+`employees.view_any` — which would also have opened the staff directory. **Holding `attendance.create`
+now puts the HR scope at `all`**; every other HR screen still asks its own permission, so the
+Receptionist still gets 403 on Employees and payslips. Existing installations: `db:seed
+--class=RoleSeeder --force` then `permission:cache-reset`. Test: `Hr/ReceptionistAttendanceTest` (3);
+`tests/Feature/Hr` 39/39. `Isolation/PanelMatrixTest` fails 6 identically before this change (it sizes
+the matrix at 18 roles; RoleSeeder has shipped 19).
+
 ### 2026-10-03 — Edit and Delete wherever the backend already allowed them, and the Super Admin hole behind them
 
 Requested: "edit and delete everywhere it is needed, admissions included". An audit of every
