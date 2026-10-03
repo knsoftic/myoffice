@@ -113,6 +113,24 @@ class Income extends Model
     |--------------------------------------------------------------------------
     */
 
+    /**
+     * Deletable only while nothing has happened to it: recorded, never voided, no refund or reversal
+     * against it. Reads `reversals_exists` when a list loaded it with `withExists('reversals')`, so a
+     * register can ask this once a row without a query a row.
+     */
+    public function isDeletable(): bool
+    {
+        if ($this->status !== IncomeStatus::Recorded) {
+            return false;
+        }
+
+        $hasReversals = array_key_exists('reversals_exists', $this->getAttributes())
+            ? (bool) $this->getAttribute('reversals_exists')
+            : $this->reversals()->exists();
+
+        return ! $hasReversals;
+    }
+
     public function isFullyRefunded(): bool
     {
         return Money::compare((string) $this->refunded_amount, (string) $this->amount) >= 0;

@@ -20,8 +20,8 @@ use Illuminate\Auth\Access\Response;
  * money ability would let a role see a payment schedule while being unable to see the contract it adds up
  * to.
  *
- * Deleting is refused by `MilestoneService` while a payment references the row; this policy answers the
- * permission question, the service answers the business one.
+ * Deleting is refused while a payment references the row — by {@see delete()} so no button is offered,
+ * and again by `MilestoneService` inside its lock, which is the guard that holds under a race.
  */
 final class ProjectMilestonePolicy
 {
@@ -54,9 +54,14 @@ final class ProjectMilestonePolicy
         return $this->reaches($user, self::MODULE, Ability::Edit, $this->seesProject($user, $milestone->project));
     }
 
+    /**
+     * A milestone a client payment is booked against is evidence for that receipt (and its commission),
+     * so it is refused here as well as in `MilestoneService::delete()` — the screen then offers no
+     * button, and a hand-made DELETE is a 403 rather than a validation bounce.
+     */
     public function delete(User $user, ProjectMilestone $milestone): bool|Response
     {
-        if ($this->isTrashed($milestone)) {
+        if ($this->isTrashed($milestone) || $milestone->hasPayments()) {
             return false;
         }
 

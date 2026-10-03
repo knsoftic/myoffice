@@ -196,6 +196,22 @@
                             @endcan
                             <x-ui.icon-button icon="eye" label="Open {{ $course->name }}"
                                               :href="route('admin.courses.show', $course)" />
+                            {{-- Only a course nothing was sold against, and not an archived one; the
+                                 destroy route asks the policy again. --}}
+                            @if (auth()->user()?->can('courses.delete')
+                                && $course->status !== \App\Enums\CourseStatus::Archived
+                                && ! isset($sold[$course->id]))
+                                <x-ui.confirm
+                                    :action="route('admin.courses.destroy', $course)"
+                                    :title="'Delete '.$course->name.'?'"
+                                    message="Nothing has been sold against this course, so it moves to the trash and can be restored."
+                                    confirm-label="Delete course"
+                                >
+                                    <x-slot:trigger>
+                                        <x-ui.icon-button icon="trash" variant="danger" label="Delete {{ $course->name }}" />
+                                    </x-slot:trigger>
+                                </x-ui.confirm>
+                            @endif
                         </div>
                     </td>
                 </tr>

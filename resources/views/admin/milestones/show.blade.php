@@ -8,6 +8,20 @@
     <x-ui.page-header :title="$milestone->name" :subtitle="$milestone->project?->code" icon="flag">
         <x-slot:actions>
             <x-ui.button variant="secondary" :href="route('admin.milestones.index', $milestone->project)">All milestones</x-ui.button>
+            {{-- ProjectMilestonePolicy::delete refuses a milestone a payment is booked against; the
+                 explicit $hasPayments keeps the button away for Super Admin too, who skips policies. --}}
+            @if (! ($hasPayments ?? false) && $user?->can('delete', $milestone))
+                <x-ui.confirm
+                    :action="route('admin.milestones.destroy', $milestone)"
+                    :title="'Delete '.$milestone->name.'?'"
+                    message="Its tasks are kept and simply detached from it. No payment is booked against this milestone."
+                    confirm-label="Delete milestone"
+                >
+                    <x-slot:trigger>
+                        <x-ui.icon-button icon="trash" variant="danger" label="Delete milestone {{ $milestone->name }}" />
+                    </x-slot:trigger>
+                </x-ui.confirm>
+            @endif
         </x-slot:actions>
     </x-ui.page-header>
 @endsection

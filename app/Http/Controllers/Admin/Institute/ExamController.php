@@ -46,6 +46,9 @@ final class ExamController extends Controller
     {
         $exams = $this->filtered($request)
             ->with(['course:id,name', 'batch:id,code,name', 'teacher:id,name', 'classroom:id,code'])
+            // What the delete policy asks (nobody has a result) for the whole page in one subquery.
+            // The destroy action still asks the policy itself.
+            ->withExists('results')
             ->orderByDesc('scheduled_date')
             ->paginate(20)
             ->withQueryString();
@@ -93,7 +96,9 @@ final class ExamController extends Controller
             'scale' => $this->resolvedScale($exam),
             'canEdit' => (bool) $request->user()?->can('update', $exam),
             'canChangeStatus' => (bool) $request->user()?->can('changeStatus', $exam),
-            'canDelete' => (bool) $request->user()?->can('delete', $exam),
+            // Asked again on its own: Gate::before waves a Super Admin past the policy, and the model
+            // refuses to delete an exam with results whoever asks.
+            'canDelete' => (bool) $request->user()?->can('delete', $exam) && ! $exam->trashed() && $exam->results()->doesntExist(),
             'canEnterResults' => (bool) $request->user()?->can('create', ExamResult::class),
             // The reschedule panel needs somewhere to move it to.
             'classrooms' => Classroom::query()->orderBy('code')->get(['id', 'code', 'name']),
@@ -171,6 +176,14 @@ final class ExamController extends Controller
     public function destroy(Request $request, Exam $exam): RedirectResponse
     {
         Gate::authorize('delete', $exam);
+
+        // The model refuses this with a LogicException (a 500); say it properly instead.
+        if ($exam->results()->exists()) {
+            return back()->with('toast', [
+                'type' => 'error',
+                'message' => 'This exam has results against it. Cancel it with a reason instead - removing it would take the marks with it.',
+            ]);
+        }
 
         $exam->delete();
 

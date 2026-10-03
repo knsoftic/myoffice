@@ -2090,6 +2090,9 @@ Route::prefix('admin')
 
             Route::get('admissions/{admission}', [AdmissionController::class, 'show'])->whereNumber('admission')->middleware('can:view,admission')->name('admissions.show');
             Route::get('admissions/{admission}/print', [AdmissionController::class, 'print'])->whereNumber('admission')->middleware('can:print,admission')->name('admissions.print');
+            Route::get('admissions/{admission}/edit', [AdmissionController::class, 'edit'])->whereNumber('admission')->middleware('can:update,admission')->name('admissions.edit');
+            Route::put('admissions/{admission}', [AdmissionController::class, 'update'])->whereNumber('admission')->middleware('can:update,admission')->name('admissions.update');
+            Route::delete('admissions/{admission}', [AdmissionController::class, 'destroy'])->whereNumber('admission')->middleware('can:delete,admission')->name('admissions.destroy');
             Route::put('admissions/{admission}/figures', [AdmissionController::class, 'figures'])->whereNumber('admission')->middleware('can:updateFigures,admission')->name('admissions.figures');
 
             Route::post('admissions/{admission}/register', [AdmissionController::class, 'register'])->whereNumber('admission')->middleware('can:changeStatus,admission')->name('admissions.register');

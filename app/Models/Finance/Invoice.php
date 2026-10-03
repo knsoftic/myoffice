@@ -182,6 +182,17 @@ class Invoice extends Model
     }
 
     /**
+     * Only an unissued draft with no receipt. An issued invoice keeps its number for ever and is
+     * cancelled, never deleted — a deleted one would leave a gap the series cannot explain.
+     */
+    public function isDeletable(): bool
+    {
+        return $this->invoice_number === null
+            && $this->status !== InvoiceStatus::Cancelled
+            && ! $this->hasReceipts();
+    }
+
+    /**
      * An overpaid invoice is `paid` with a negative balance. The register shows the credit rather than
      * hiding it, because a client who has overpaid will ask about it.
      */

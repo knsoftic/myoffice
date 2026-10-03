@@ -12,6 +12,9 @@
     $user = auth()->user();
     $mine = $mine ?? false;
     $canCreate = (bool) $user?->can('tasks.create');
+    // Every row here already passed Task::visibleTo(), which is the row half of TaskPolicy::delete;
+    // the permission is the rest. Asking the policy per row would re-run that query once per task.
+    $canDeleteRows = (bool) $user?->can('tasks.delete');
 @endphp
 
 @section('header')
@@ -39,7 +42,7 @@
             <x-ui.form.select name="project_id" :options="$projects" :selected="request('project_id')" placeholder="Any project" size="sm" aria-label="Filter by project" />
         </x-ui.filter-bar>
 
-        <x-ui.table loading="navigating" :is-empty="$tasks->isEmpty()" :columns="6">
+        <x-ui.table loading="navigating" :is-empty="$tasks->isEmpty()" :columns="7">
             <x-slot:head>
                 <th scope="col" class="px-4 py-3">Task</th>
                 <th scope="col" class="px-4 py-3">Project</th>
@@ -47,6 +50,7 @@
                 <th scope="col" class="px-4 py-3">Priority</th>
                 <th scope="col" class="px-4 py-3">Due</th>
                 <th scope="col" class="px-4 py-3">Status</th>
+                <th scope="col" class="px-4 py-3 text-right"><span class="sr-only">Actions</span></th>
             </x-slot:head>
 
             @foreach ($tasks as $task)
@@ -62,6 +66,24 @@
                     <td class="whitespace-nowrap"><x-ui.badge :color="$task->priority->color()" size="xs" variant="outline">{{ $task->priority->label() }}</x-ui.badge></td>
                     <td class="whitespace-nowrap text-sm">{{ $task->due_date ? app_date($task->due_date) : '—' }}</td>
                     <td class="whitespace-nowrap"><x-ui.badge :color="$task->status->color()" size="xs">{{ $task->status->label() }}</x-ui.badge></td>
+                    <td class="whitespace-nowrap">
+                        <div class="flex items-center justify-end gap-1">
+                            <x-ui.icon-button icon="eye" size="sm" label="Open {{ $task->title }}"
+                                              :href="route('admin.tasks.show', $task)" />
+                            @if ($canDeleteRows)
+                                <x-ui.confirm
+                                    :action="route('admin.tasks.destroy', $task)"
+                                    :title="'Delete '.$task->title.'?'"
+                                    message="The task moves to the trash with its checklist and comments, and can be restored. Hours already logged against it stay on the project. A task with a running timer cannot be deleted until the timer is stopped."
+                                    confirm-label="Delete task"
+                                >
+                                    <x-slot:trigger>
+                                        <x-ui.icon-button icon="trash" size="sm" variant="danger" label="Delete {{ $task->title }}" />
+                                    </x-slot:trigger>
+                                </x-ui.confirm>
+                            @endif
+                        </div>
+                    </td>
                 </tr>
             @endforeach
 

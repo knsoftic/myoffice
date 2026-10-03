@@ -26,6 +26,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -127,14 +128,17 @@ final class ExpenseController extends Controller
 
     public function destroy(Request $request, Expense $expense): RedirectResponse
     {
-        if (! $expense->status->isDeletable()) {
-            return back()->with('toast', [
-                'type' => 'error',
-                'message' => sprintf('%s is %s. Once somebody has decided about an expense it is voided '
-                    .'with a reason, never deleted — the decision is part of the record.',
-                    $expense->expense_no, strtolower($expense->status->label())),
-            ]);
-        }
+        // The route checks the permission; the policy and the row's own state decide the act. The state
+        // check is repeated here because Super Admin passes every policy, and a decided expense is not
+        // deletable by anybody.
+        Gate::authorize('delete', $expense);
+
+        abort_unless($expense->isDeletable(), 403, sprintf(
+            '%s is %s. Once somebody has decided about an expense it is voided with a reason, never '
+            .'deleted — the decision is part of the record.',
+            $expense->expense_no,
+            $expense->isDerived() ? 'derived from payroll' : strtolower($expense->status->label()),
+        ));
 
         $expense->delete();
 

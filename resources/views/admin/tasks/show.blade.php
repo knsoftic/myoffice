@@ -13,6 +13,7 @@
     $user = auth()->user();
     $canWrite = (bool) ($canWrite ?? false);
     $canAssign = (bool) $user?->can('assign', $task);
+    $canDelete = (bool) $user?->can('delete', $task);
 @endphp
 
 @section('header')
@@ -21,6 +22,18 @@
             @if ($task->project)
                 <x-ui.button variant="secondary" :href="route('admin.projects.show', $task->project)">Project</x-ui.button>
                 <x-ui.button variant="secondary" icon="view-columns" :href="route('admin.projects.board', $task->project)">Board</x-ui.button>
+            @endif
+            @if ($canDelete)
+                <x-ui.confirm
+                    :action="route('admin.tasks.destroy', $task)"
+                    :title="'Delete '.$task->title.'?'"
+                    message="The task moves to the trash with its checklist and comments, and can be restored. Hours already logged against it stay on the project. A task with a running timer cannot be deleted until the timer is stopped."
+                    confirm-label="Delete task"
+                >
+                    <x-slot:trigger>
+                        <x-ui.icon-button icon="trash" variant="danger" label="Delete {{ $task->title }}" />
+                    </x-slot:trigger>
+                </x-ui.confirm>
             @endif
         </x-slot:actions>
     </x-ui.page-header>
@@ -67,7 +80,21 @@
                                 @else
                                     <span class="flex h-5 w-5 items-center justify-center rounded border border-slate-300 text-xs dark:border-slate-600">{{ $item->is_done ? '✓' : '' }}</span>
                                 @endif
-                                <span @class(['text-sm', 'line-through text-slate-400 dark:text-slate-500' => $item->is_done, 'text-slate-700 dark:text-slate-200' => ! $item->is_done])>{{ $item->title }}</span>
+                                <span @class(['min-w-0 flex-1 text-sm', 'line-through text-slate-400 dark:text-slate-500' => $item->is_done, 'text-slate-700 dark:text-slate-200' => ! $item->is_done])>{{ $item->title }}</span>
+                                {{-- TaskChecklistItemPolicy::delete is TaskPolicy::update on the parent,
+                                     which is exactly $canWrite. --}}
+                                @if ($canWrite)
+                                    <x-ui.confirm
+                                        :action="route('admin.checklist.destroy', $item)"
+                                        title="Remove this checklist line?"
+                                        :message="'“'.$item->title.'” is removed and the task’s progress is recalculated.'"
+                                        confirm-label="Remove line"
+                                    >
+                                        <x-slot:trigger>
+                                            <x-ui.icon-button icon="trash" size="sm" variant="danger" label="Remove checklist line {{ $item->title }}" />
+                                        </x-slot:trigger>
+                                    </x-ui.confirm>
+                                @endif
                             </li>
                         @endforeach
                     </ul>

@@ -9,6 +9,7 @@ use App\Enums\DeliveryMode;
 use App\Enums\PreferredTiming;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\Institute\StoreAdmissionRequest;
+use App\Http\Requests\Admin\Institute\UpdateAdmissionRequest;
 use App\Models\Institute\Course;
 use App\Models\Institute\Student;
 use App\Models\Institute\StudentAdmission;
@@ -153,6 +154,45 @@ final class AdmissionController extends Controller
             'modes' => DeliveryMode::options(),
             'timings' => PreferredTiming::options(),
         ]);
+    }
+
+    /**
+     * The non-financial details. Money stays on `figures`, the stage on the pipeline steps.
+     */
+    public function edit(StudentAdmission $admission): View
+    {
+        $admission->load(['student:id,name,student_code', 'course:id,name', 'counselor:id,name']);
+
+        return view('admin.admissions.edit', [
+            'admission' => $admission,
+            'modes' => DeliveryMode::options(),
+            'timings' => PreferredTiming::options(),
+            'counselors' => User::query()->permission('admissions.create')->orderBy('name')->pluck('name', 'id'),
+        ]);
+    }
+
+    public function update(UpdateAdmissionRequest $request, StudentAdmission $admission): RedirectResponse
+    {
+        $this->admissions->updateDetails($admission, $request->details(), $request->user());
+
+        return redirect()
+            ->route('admin.admissions.show', $admission)
+            ->with('toast', ['type' => 'success', 'message' => sprintf('Admission %s updated.', $admission->admission_number)]);
+    }
+
+    /**
+     * A soft delete for an admission entered by mistake. The service refuses, naming what it found,
+     * once a fee row, a seat or a commission entitlement points at it.
+     */
+    public function destroy(Request $request, StudentAdmission $admission): RedirectResponse
+    {
+        $number = $admission->admission_number;
+
+        $this->admissions->delete($admission, $request->user());
+
+        return redirect()
+            ->route('admin.admissions.index')
+            ->with('toast', ['type' => 'success', 'message' => sprintf('Admission %s deleted.', $number)]);
     }
 
     public function figures(Request $request, StudentAdmission $admission): RedirectResponse

@@ -146,6 +146,25 @@
                             @endif
                             <x-ui.icon-button icon="eye" label="Open {{ $income->income_no }}"
                                               :href="route('admin.income.show', $income)" />
+                            @can('update', $income)
+                                <x-ui.icon-button icon="pencil" label="Edit {{ $income->income_no }}"
+                                                  :href="route('admin.income.edit', $income)" />
+                            @endcan
+                            {{-- Only a recorded row nothing has happened to; a voided or refunded one stays as the record. The destroy route asks the policy and the row's state again. --}}
+                            @if ($income->isDeletable())
+                                @can('delete', $income)
+                                    <x-ui.confirm
+                                        :action="route('admin.income.destroy', $income)"
+                                        :title="'Delete '.$income->income_no.'?'"
+                                        message="Nothing has been refunded or voided against this entry, so it moves to the trash and leaves every report."
+                                        confirm-label="Delete income"
+                                    >
+                                        <x-slot:trigger>
+                                            <x-ui.icon-button icon="trash" variant="danger" label="Delete {{ $income->income_no }}" />
+                                        </x-slot:trigger>
+                                    </x-ui.confirm>
+                                @endcan
+                            @endif
                         </div>
                     </td>
                 </tr>

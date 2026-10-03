@@ -55,12 +55,21 @@ final class CollaboratorController extends Controller
 
         $term = trim((string) $request->query('q', ''));
 
+        $collaborators = $this->filtered($request, $term)
+            ->withCount('skills')
+            ->orderBy('name')
+            ->paginate(20)
+            ->withQueryString();
+
         return view('admin.collaborators.index', [
-            'collaborators' => $this->filtered($request, $term)
-                ->withCount('skills')
-                ->orderBy('name')
-                ->paginate(20)
-                ->withQueryString(),
+            'collaborators' => $collaborators,
+            'canEdit' => (bool) $request->user()?->can('collaborators.edit'),
+            'canDelete' => (bool) $request->user()?->can('collaborators.delete'),
+            // CollaboratorPolicy::delete refuses a partner with commission, a payout or a referral on
+            // record. Asked once for the page instead of three queries a row; destroy asks the policy.
+            'withMoney' => $request->user()?->can('collaborators.delete')
+                ? $this->idsWithMoney($collaborators->getCollection()->modelKeys())
+                : [],
             'statuses' => $this->statusOptions(),
             'types' => $this->typeOptions(),
             'term' => $term,
@@ -393,6 +402,18 @@ final class CollaboratorController extends Controller
     /**
      * The index / export query, so a filtered export matches the list it was taken from.
      */
+    /**
+     * Which of these collaborators carry commission, payout or referral rows — the same tables
+     * CollaboratorPolicy::delete() checks, one query each for the whole page.
+     *
+     * @param  array<int, int|string>  $ids
+     * @return array<int, true>
+     */
+    private function idsWithMoney(array $ids): array
+    {
+        return Collaborator::idsWithMoneyRows($ids);
+    }
+
     private function filtered(Request $request, string $term): Builder
     {
         return Collaborator::query()

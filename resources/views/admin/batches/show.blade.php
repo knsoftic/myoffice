@@ -19,6 +19,20 @@
             @can('assign', $batch)
                 <x-ui.button icon="user-plus" x-on:click="$dispatch('open-modal', 'enroll-student')">Enrol a student</x-ui.button>
             @endcan
+            {{-- The policy refuses a batch anyone was ever enrolled in, so this shows only for one
+                 opened by mistake. A batch that ran is cancelled or completed, never deleted. --}}
+            @if ($canDelete)
+                <x-ui.confirm
+                    :action="route('admin.batches.destroy', $batch)"
+                    :title="'Delete '.$batch->code.'?'"
+                    message="Nobody was ever enrolled in this batch, so it moves to the trash and can be restored."
+                    confirm-label="Delete batch"
+                >
+                    <x-slot:trigger>
+                        <x-ui.icon-button icon="trash" variant="danger" label="Delete batch" />
+                    </x-slot:trigger>
+                </x-ui.confirm>
+            @endif
         </x-slot:actions>
     </x-ui.page-header>
 @endsection

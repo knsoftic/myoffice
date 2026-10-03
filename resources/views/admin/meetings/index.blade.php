@@ -13,6 +13,10 @@
     cannot disagree about which meetings exist.
 --}}
 
+@php
+    $user = auth()->user();
+@endphp
+
 @section('header')
     <x-ui.page-header title="Meetings"
                       subtitle="Everything in the diary. A meeting that will not happen is cancelled with a reason; one that moves leaves a successor pointing back at it."
@@ -64,6 +68,7 @@
                 <th class="px-4 py-3 text-left font-semibold">Organiser</th>
                 <th class="px-4 py-3 text-right font-semibold">Accepted</th>
                 <th class="px-4 py-3 text-left font-semibold">Status</th>
+                <th class="px-4 py-3 text-right font-semibold"><span class="sr-only">Actions</span></th>
             </x-slot:head>
 
             @foreach ($meetings as $meeting)
@@ -88,6 +93,27 @@
                     </td>
                     <td class="px-4 py-3">
                         <x-ui.badge :color="$meeting->status->color()" size="sm">{{ $meeting->status->label() }}</x-ui.badge>
+                    </td>
+                    <td class="px-4 py-3">
+                        <div class="flex items-center justify-end gap-1">
+                            <x-ui.icon-button icon="eye" size="sm" label="Open {{ $meeting->title }}"
+                                              :href="route('admin.meetings.show', $meeting)" />
+                            {{-- MeetingPolicy::delete: only a cancelled or postponed meeting is tidied away;
+                                 a scheduled one is cancelled first and a completed one is a record. The
+                                 status is repeated here because Super Admin skips the policy. --}}
+                            @if ($user?->can('delete', $meeting) && $meeting->status->isTerminal() && $meeting->status !== \App\Enums\MeetingStatus::Completed)
+                                <x-ui.confirm
+                                    :action="route('admin.meetings.destroy', $meeting)"
+                                    :title="'Remove '.$meeting->title.' from the diary?'"
+                                    message="The meeting is hidden from the diary. Its participants, attendance and notes are kept."
+                                    confirm-label="Remove meeting"
+                                >
+                                    <x-slot:trigger>
+                                        <x-ui.icon-button icon="trash" size="sm" variant="danger" label="Delete {{ $meeting->title }}" />
+                                    </x-slot:trigger>
+                                </x-ui.confirm>
+                            @endif
+                        </div>
                     </td>
                 </tr>
             @endforeach

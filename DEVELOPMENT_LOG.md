@@ -787,6 +787,51 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-10-03 — Edit and Delete wherever the backend already allowed them, and the Super Admin hole behind them
+
+Requested: "edit and delete everywhere it is needed, admissions included". An audit of every
+`admin.*.edit` / `admin.*.destroy` route against the views found 26 that no screen ever linked to
+(two more were false positives built dynamically). Each was wired, behind its policy, with a
+confirm dialog; index lists that had no row actions got Open / Edit / Delete. Rows that may not be
+deleted show no control, and which rows qualify is precomputed per page (one query per history
+table), never asked per row.
+
+**The pattern that recurred: `Gate::before` lets a Super Admin past every policy**, so every "has
+history" rule that lived only in a policy was a rule a Super Admin did not obey. Batches with
+enrolments, teachers with classes, converted inquiries and collaborators with commission were really
+soft-deleted; exams with results and assignments with submissions were a 500 from the model's
+`deleting` hook. Each such rule is now also enforced in the controller or service, so it holds for
+everybody: ordinary roles get the policy's 403, a Super Admin gets an error toast and the row stays.
+
+| Area | Added | Never deletable |
+|---|---|---|
+| Admissions | **New** `admissions.edit` / `.update` (date, counsellor, delivery mode, timing, notes — never money, stage, number, student, course or branch; figures keep their own route) and `.destroy` (soft delete; a live admission is first recorded as cancelled, because the one-live-admission unique guard counts deleted rows) | anything charged or paid, figures locked, a batch seat, fee / enrolment / entitlement rows |
+| Institute | Delete on batches, courses, course inquiries, course materials, teachers; employee-link removal on a teacher; row actions on exams, assignments, certificates (Open), applications (Open) | batch with enrolments; course archived or with sales history; converted inquiry; teacher with batches or classes; exam with results; assignment with submissions |
+| Projects / workspace | Delete (archive) on projects + Restore; milestones; tasks; checklist lines; time entries (discard with a reason); meetings | milestone with a payment; meeting not cancelled/postponed; tickets (by design) |
+| Finance / HR | Delete on expenses, income, invoices, employees, collaborators (row actions) | expense approved/rejected/voided or from payroll; income voided or reversed; invoice issued, paid or cancelled; employee with attendance, leave, advance or payroll history; collaborator with commission, payout or referral rows |
+| Website | Edit/Delete on media cards (only when not in use) | — |
+
+Bugs found on the way and fixed: `MilestoneService::blockingPayment()` filtered on
+`project_payments.deleted_at`, a column the append-only table does not have — every milestone delete
+was a 500; `ProjectController::show` and the two project-payment views read `milestone.title` (the
+column is `name`), so the milestone name was blank; `SeoService` read `title` / `banner_media_id` /
+`og_image_media_id` / `featured_media_id` on models without them, so every service / portfolio /
+blog category editor and Page SEO was a 500 under strict models (`optionalAttribute()`); the
+milestone destroy redirected back to the deleted milestone (404).
+
+Collaborators: the money-rows question now lives once on `Collaborator::hasMoneyRows()` /
+`idsWithMoneyRows()` and is asked by the policy, the list and `CollaboratorService::delete()`.
+
+Tests: `AdmissionEditDeleteTest` (8), `InstituteRowActionsTest` (16), `ProjectRowActionsTest` (12),
+`FinanceRowActionsTest` (7), `HrRowActionsTest` (3), `CmsRowActionsTest` (16),
+`CollaboratorManagementTest::a_collaborator_with_a_referral_is_not_removed_even_by_a_super_admin`.
+Together with the Project, Hr, admission, scheduling, catalogue, expense, invoice and project-payment
+suites: **224 tests, all pass**. `tests/Feature/Cms/Http`: 4 failures, against 20+ on the commit
+before this work — the SeoService fix cleared the rest, and the 4 left (three CMS manifest checks and
+`site/quote` raw echoes) fail identically there. Still unreachable, left for a separate change:
+`tasks.update`, `milestones.update`, `meetings.update`, `course-inquiries.update` and
+`demo-classes.update` have no edit form; `teachers.employee-link.store` has no picker.
+
 ### 2026-10-03 — Unpaid Leave could never be applied for
 
 Reported as "errors when applying for leave". The form was driven with every type across full days,

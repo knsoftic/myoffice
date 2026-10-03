@@ -106,6 +106,8 @@ final class CourseMaterialController extends Controller
             'canPublish' => (bool) $request->user()?->can('changeStatus', $material),
             'canDownload' => (bool) $request->user()?->can('download', $material),
             'canSeeEngagement' => (bool) $request->user()?->can('viewReports', $material),
+            // Asked again on its own: Gate::before waves a Super Admin past the policy's trashed rule.
+            'canDelete' => (bool) $request->user()?->can('delete', $material) && ! $material->trashed(),
         ]);
     }
 

@@ -73,8 +73,8 @@ final class InvoicePolicy
     public function delete(User $user, Invoice $invoice): bool
     {
         return $this->holds($user, self::MODULE, Ability::Delete)
-            && $invoice->invoice_number === null
-            && ! $invoice->hasReceipts();
+            && ! $this->isTrashed($invoice)
+            && $invoice->isDeletable();
     }
 
     public function restore(User $user, Invoice $invoice): bool

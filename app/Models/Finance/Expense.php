@@ -142,6 +142,15 @@ class Expense extends Model
         return $this->source_type !== null;
     }
 
+    /**
+     * Only a hand-entered claim nobody has decided about yet. Approved, rejected and voided rows are part
+     * of the record and are voided or reversed, never deleted.
+     */
+    public function isDeletable(): bool
+    {
+        return ! $this->isDerived() && $this->status->isDeletable();
+    }
+
     public function isFullyRefunded(): bool
     {
         return Money::compare((string) $this->refunded_amount, (string) $this->amount) >= 0;

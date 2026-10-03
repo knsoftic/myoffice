@@ -9,12 +9,15 @@ use App\Models\Concerns\Blameable;
 use App\Models\Concerns\LogsActivityWithContext;
 use App\Models\Crm\Concerns\RelatesToLaterPhases;
 use App\Models\Project\Concerns\GuardsServiceOwnedColumns;
+use App\Policies\Project\ProjectMilestonePolicy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * One milestone of a project (phase-06 §2.4, requirement §21).
@@ -128,6 +131,38 @@ class ProjectMilestone extends Model
     public function isPayable(): bool
     {
         return $this->amount !== null;
+    }
+
+    /**
+     * Is a client payment booked against this milestone? Such a milestone is evidence for that receipt
+     * and its commission, so it is never deleted ({@see ProjectMilestonePolicy::delete()}).
+     */
+    public function hasPayments(): bool
+    {
+        return $this->getKey() !== null && self::idsWithPayments([(int) $this->getKey()]) !== [];
+    }
+
+    /**
+     * The same question for a whole list in one query, so a screen can decide which rows get a Delete
+     * control without asking once per row.
+     *
+     * @param  list<int>  $ids
+     * @return array<int, true> keyed by milestone id
+     */
+    public static function idsWithPayments(array $ids): array
+    {
+        if ($ids === [] || ! Schema::hasTable('project_payments')) {
+            return [];
+        }
+
+        // `project_payments` is append-only (CLAUDE.md §3, D16): there is no `deleted_at` to filter on,
+        // and a voided or refunded receipt is still a receipt that pointed here.
+        return DB::table('project_payments')
+            ->whereIn('project_milestone_id', $ids)
+            ->distinct()
+            ->pluck('project_milestone_id')
+            ->mapWithKeys(static fn ($id): array => [(int) $id => true])
+            ->all();
     }
 
     public function project(): BelongsTo

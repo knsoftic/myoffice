@@ -60,8 +60,8 @@ final class ExpensePolicy
         // Only while nobody has decided about it. Once somebody has, the decision is part of the
         // record and the act is a void with a reason.
         return $this->holds($user, self::MODULE, Ability::Delete)
-            && ! $expense->isDerived()
-            && $expense->status->isDeletable();
+            && ! $this->isTrashed($expense)
+            && $expense->isDeletable();
     }
 
     public function restore(User $user, Expense $expense): bool

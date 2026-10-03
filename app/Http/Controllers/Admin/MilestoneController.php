@@ -34,9 +34,13 @@ final class MilestoneController extends Controller
     {
         $this->authorize('view', $project);
 
+        $milestones = $project->milestones()->with('tasks:id,project_milestone_id,status')->get();
+
         return view('admin.milestones.index', [
             'project' => $project,
-            'milestones' => $project->milestones()->with('tasks:id,project_milestone_id,status')->get(),
+            'milestones' => $milestones,
+            // One query for the whole list: a milestone a payment points at offers no Delete control.
+            'withPayments' => ProjectMilestone::idsWithPayments($milestones->modelKeys()),
             'statuses' => MilestoneStatus::options(),
             'showMoney' => $request->user()->can('projects.view_financial'),
         ]);
@@ -64,6 +68,7 @@ final class MilestoneController extends Controller
 
         return view('admin.milestones.show', [
             'milestone' => $milestone->load(['project:id,code,name', 'tasks']),
+            'hasPayments' => $milestone->hasPayments(),
             'statuses' => $this->allowedStatusOptions($milestone),
             'showMoney' => $request->user()->can('projects.view_financial'),
         ]);
@@ -82,9 +87,14 @@ final class MilestoneController extends Controller
     {
         $this->authorize('delete', $milestone);
 
+        $project = $milestone->project;
+
         $this->milestones->delete($milestone, $request->user());
 
-        return back()->with('toast', ['type' => 'success', 'message' => 'Milestone removed; its tasks were detached.']);
+        // Not back(): from the milestone's own page that would be a 404 on the row just removed.
+        return redirect()
+            ->route('admin.milestones.index', $project)
+            ->with('toast', ['type' => 'success', 'message' => 'Milestone removed; its tasks were detached.']);
     }
 
     public function status(Request $request, ProjectMilestone $milestone): RedirectResponse

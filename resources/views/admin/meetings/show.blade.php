@@ -20,6 +20,19 @@
                 <x-ui.button variant="secondary" icon="calendar-days" :href="route('admin.meetings.ics', $meeting)">Add to calendar</x-ui.button>
             @endif
             <x-ui.button variant="ghost" :href="route('admin.meetings.index')">Back to the diary</x-ui.button>
+            {{-- MeetingPolicy::delete: cancelled or postponed only; repeated for Super Admin. --}}
+            @if (auth()->user()?->can('delete', $meeting) && $meeting->status->isTerminal() && $meeting->status !== \App\Enums\MeetingStatus::Completed)
+                <x-ui.confirm
+                    :action="route('admin.meetings.destroy', $meeting)"
+                    :title="'Remove '.$meeting->title.' from the diary?'"
+                    message="The meeting is hidden from the diary. Its participants, attendance and notes are kept."
+                    confirm-label="Remove meeting"
+                >
+                    <x-slot:trigger>
+                        <x-ui.icon-button icon="trash" variant="danger" label="Delete {{ $meeting->title }}" />
+                    </x-slot:trigger>
+                </x-ui.confirm>
+            @endif
         </x-slot:actions>
     </x-ui.page-header>
 @endsection

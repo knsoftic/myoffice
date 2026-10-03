@@ -75,6 +75,7 @@
                 <th class="px-4 py-3 text-right font-semibold">Out of</th>
                 <th class="px-4 py-3 text-right font-semibold">Sat / passed</th>
                 <th class="px-4 py-3 text-left font-semibold">Status</th>
+                <th class="px-4 py-3 text-right font-semibold"><span class="sr-only">Actions</span></th>
             </x-slot:head>
 
             @foreach ($exams as $exam)
@@ -120,6 +121,30 @@
                         @endif
                     </td>
                     <td class="px-4 py-3"><x-ui.badge :color="$exam->status->color()" size="xs">{{ $exam->status->label() }}</x-ui.badge></td>
+                    <td class="px-4 py-3">
+                        <div class="flex items-center justify-end gap-1">
+                            <x-ui.icon-button icon="eye" size="sm" label="Open {{ $exam->name }}"
+                                              :href="route('admin.exams.show', $exam)" />
+                            @can('update', $exam)
+                                <x-ui.icon-button icon="pencil" size="sm" label="Edit {{ $exam->name }}"
+                                                  :href="route('admin.exams.edit', $exam)" />
+                            @endcan
+                            {{-- Only an exam nobody has a result against; once anybody is marked it is
+                                 cancelled with a reason instead. The destroy action asks the policy. --}}
+                            @if (auth()->user()?->can('exams.delete') && ! $exam->trashed() && ! $exam->results_exists)
+                                <x-ui.confirm
+                                    :action="route('admin.exams.destroy', $exam)"
+                                    :title="'Remove '.$exam->name.'?'"
+                                    message="Nobody has a result against it, so it can go. Once anybody is marked, an exam is cancelled with a reason instead."
+                                    confirm-label="Remove exam"
+                                >
+                                    <x-slot:trigger>
+                                        <x-ui.icon-button icon="trash" size="sm" variant="danger" label="Remove {{ $exam->name }}" />
+                                    </x-slot:trigger>
+                                </x-ui.confirm>
+                            @endif
+                        </div>
+                    </td>
                 </tr>
             @endforeach
 

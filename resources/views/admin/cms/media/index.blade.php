@@ -23,7 +23,8 @@
                                        with Accept: application/json. Success: 201/200 JSON (any body).
                                        Refusal: 422 JSON {"errors": {"file": ["that is a .php file renamed to .jpg"]}}
                                        — the uploader prints the first message beside the file name.
-    Detail, alt text, regenerate and delete live on admin.website.media.show.
+    Detail, alt text, regenerate and delete live on admin.website.media.show; each card also carries an
+    Edit shortcut (to the detail screen) and, while the file is unused, a confirmed Delete (DELETE destroy).
 --}}
 
 @php
@@ -134,7 +135,7 @@
                             $status = $asset->derivatives_status instanceof MediaProcessingStatus ? $asset->derivatives_status : MediaProcessingStatus::tryFrom((string) $asset->derivatives_status);
                             $thumb = $isVideo ? null : ($cards[(int) $asset->id]['thumbnail_url'] ?? $mediaService->url($asset, 384));
                         @endphp
-                        <li>
+                        <li class="relative">
                             <a href="{{ route('admin.website.media.show', $asset) }}" class="group block overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200/70 transition hover:ring-brand-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:bg-slate-900 dark:ring-slate-800 dark:hover:ring-brand-500/60">
                                 <div class="relative aspect-[4/3] bg-slate-100 dark:bg-slate-800">
                                     @if ($thumb)
@@ -164,6 +165,31 @@
                                     @endif
                                 </div>
                             </a>
+
+                            {{-- Row actions sit beside the card link, never inside it (a form inside <a> is invalid).
+                                 Editing (title, alt text, caption) happens on the detail screen; delete is offered only
+                                 while nothing uses the file (the cached usage_count — no query; checked here as well as
+                                 in MediaPolicy::delete because Gate::before lets a Super Admin past the policy). --}}
+                            @php
+                                $assetLabel = $asset->title ?: $asset->original_name;
+                            @endphp
+                            <div class="absolute right-2 top-2 flex items-center gap-1">
+                                @can('update', $asset)
+                                    <x-ui.icon-button icon="pencil" variant="secondary" size="xs" label="Edit {{ $assetLabel }}" :href="route('admin.website.media.show', $asset)" />
+                                @endcan
+                                @if (! $asset->isInUse() && auth()->user()?->can('delete', $asset))
+                                    <x-ui.confirm
+                                        :action="route('admin.website.media.destroy', $asset)"
+                                        :title="'Delete '.$assetLabel.'?'"
+                                        message="Nothing uses it. The library entry moves to the trash; the stored file is kept so nothing live can lose an image."
+                                        confirm-label="Delete file"
+                                    >
+                                        <x-slot:trigger>
+                                            <x-ui.icon-button icon="trash" variant="danger" size="xs" label="Delete {{ $assetLabel }}" />
+                                        </x-slot:trigger>
+                                    </x-ui.confirm>
+                                @endif
+                            </div>
                         </li>
                     @endforeach
                 </ul>

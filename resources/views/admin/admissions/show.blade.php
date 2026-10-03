@@ -43,6 +43,23 @@
                 <x-ui.button variant="ghost" icon="printer" :href="route('admin.admissions.print', $admission)">Print</x-ui.button>
             @endcan
 
+            @if (auth()->user()?->can('update', $admission) && $admission->stage->isLive())
+                <x-ui.button variant="ghost" icon="pencil" :href="route('admin.admissions.edit', $admission)">Edit</x-ui.button>
+            @endif
+
+            @if (auth()->user()?->can('delete', $admission) && $admission->looksDeletable())
+                <x-ui.confirm
+                    :action="route('admin.admissions.destroy', $admission)"
+                    :title="'Delete '.$admission->admission_number.'?'"
+                    message="Nothing has been charged or seated against this admission, so it is closed as cancelled and moved to the trash, where it can be restored."
+                    confirm-label="Delete admission"
+                >
+                    <x-slot:trigger>
+                        <x-ui.button variant="ghost" icon="trash">Delete</x-ui.button>
+                    </x-slot:trigger>
+                </x-ui.confirm>
+            @endif
+
             @can('withdraw', $admission)
                 <x-ui.button variant="ghost" icon="arrow-uturn-left"
                              x-on:click.prevent="$dispatch('open-modal', 'withdraw-admission')">Withdraw</x-ui.button>

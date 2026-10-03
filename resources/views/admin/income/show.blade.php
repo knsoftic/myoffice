@@ -36,6 +36,20 @@
                 <x-ui.button variant="danger" icon="no-symbol"
                              x-on:click.prevent="$dispatch('open-modal', 'void-income')">Void</x-ui.button>
             @endif
+            @if ($income->isDeletable())
+                @can('delete', $income)
+                    <x-ui.confirm
+                        :action="route('admin.income.destroy', $income)"
+                        :title="'Delete '.$income->income_no.'?'"
+                        message="Nothing has been refunded or voided against this entry, so it moves to the trash and leaves every report."
+                        confirm-label="Delete income"
+                    >
+                        <x-slot:trigger>
+                            <x-ui.icon-button icon="trash" variant="danger" label="Delete {{ $income->income_no }}" />
+                        </x-slot:trigger>
+                    </x-ui.confirm>
+                @endcan
+            @endif
         </x-slot:actions>
     </x-ui.page-header>
 @endsection

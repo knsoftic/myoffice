@@ -12,6 +12,7 @@
 @php
     $user = auth()->user();
     $canLog = (bool) $user?->can('time_tracking.create');
+    $discardable = $discardable ?? [];
 @endphp
 
 @section('header')
@@ -56,7 +57,7 @@
 
         <div class="grid gap-4 lg:grid-cols-3">
             <div class="lg:col-span-2">
-                <x-ui.table :is-empty="$entries->isEmpty()" :columns="6">
+                <x-ui.table :is-empty="$entries->isEmpty()" :columns="7">
                     <x-slot:head>
                         <th scope="col" class="px-4 py-3">Date</th>
                         <th scope="col" class="px-4 py-3">Project</th>
@@ -66,6 +67,7 @@
                         @endif
                         <th scope="col" class="px-4 py-3 text-right">Hours</th>
                         <th scope="col" class="px-4 py-3">Source</th>
+                        <th scope="col" class="px-4 py-3 text-right"><span class="sr-only">Actions</span></th>
                     </x-slot:head>
 
                     @foreach ($entries as $entry)
@@ -78,6 +80,27 @@
                             @endif
                             <td class="whitespace-nowrap text-right tabular-nums text-sm">{{ app_number((float) $entry->duration_hours, 2) }}</td>
                             <td class="whitespace-nowrap"><x-ui.badge :color="$entry->source->color()" size="xs" variant="outline">{{ $entry->source->label() }}</x-ui.badge></td>
+                            <td class="whitespace-nowrap text-right">
+                                {{-- Discard is a soft delete with a mandatory reason (phase-06 §6.1); the
+                                     entry leaves every total and the reason stays on the row. --}}
+                                @if (isset($discardable[$entry->id]))
+                                    <x-ui.confirm
+                                        :action="route('admin.time.destroy', $entry)"
+                                        title="Discard this time entry?"
+                                        :message="app_number((float) $entry->duration_hours, 2).' h on '.app_date($entry->work_date).' leaves every total. Say why — the reason is kept with the entry.'"
+                                        confirm-label="Discard entry"
+                                        id="time-discard-{{ $entry->id }}"
+                                    >
+                                        <x-slot:trigger>
+                                            <x-ui.icon-button icon="trash" size="sm" variant="danger" label="Discard time entry of {{ app_date($entry->work_date) }}" />
+                                        </x-slot:trigger>
+                                        <div class="mt-3">
+                                            <label for="time-discard-reason-{{ $entry->id }}" class="block text-xs font-medium text-slate-600 dark:text-slate-300">Reason <span class="text-rose-500">*</span></label>
+                                            <input id="time-discard-reason-{{ $entry->id }}" type="text" name="discard_reason" form="time-discard-{{ $entry->id }}" required minlength="5" maxlength="255" class="mt-1.5 block w-full rounded-lg border-slate-300 text-sm shadow-sm focus:border-rose-500 focus:ring-rose-500/30 dark:border-slate-700 dark:bg-slate-950/40 dark:text-white">
+                                        </div>
+                                    </x-ui.confirm>
+                                @endif
+                            </td>
                         </tr>
                     @endforeach
 

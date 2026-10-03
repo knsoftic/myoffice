@@ -27,6 +27,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -178,13 +179,12 @@ final class InvoiceController extends Controller
      */
     public function destroy(Request $request, Invoice $invoice): RedirectResponse
     {
-        if ($invoice->invoice_number !== null || $invoice->hasReceipts()) {
-            return back()->with('toast', [
-                'type' => 'error',
-                'message' => 'An issued invoice is never deleted — it is cancelled, and it keeps its '
-                    .'number so the series stays explainable.',
-            ]);
-        }
+        // Policy first, then the document's own state again: Super Admin passes every policy, and an
+        // issued, paid or cancelled invoice is not deletable by anybody.
+        Gate::authorize('delete', $invoice);
+
+        abort_unless($invoice->isDeletable(), 403, 'An issued invoice is never deleted — it is cancelled, '
+            .'and it keeps its number so the series stays explainable.');
 
         $invoice->delete();
 

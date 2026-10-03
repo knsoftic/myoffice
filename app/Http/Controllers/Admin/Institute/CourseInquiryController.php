@@ -81,7 +81,7 @@ final class CourseInquiryController extends Controller
             ->with('toast', ['type' => 'success', 'message' => sprintf('Inquiry %s recorded.', $inquiry->inquiry_number)]);
     }
 
-    public function show(CourseInquiry $inquiry): View
+    public function show(Request $request, CourseInquiry $inquiry): View
     {
         $inquiry->load([
             'course:id,name,slug', 'assignee:id,name', 'collaborator:id,name,referral_code',
@@ -96,7 +96,16 @@ final class CourseInquiryController extends Controller
             'statuses' => CourseInquiryStatus::options(),
             'assignees' => User::query()->permission('course_inquiries.edit')->orderBy('name')->pluck('name', 'id'),
             'followUpDays' => (int) setting('institute.inquiry_followup_days', 2),
+            // The policy's conversion rule asked again on its own: Gate::before waves a Super Admin
+            // past every policy.
+            'canDelete' => (bool) $request->user()?->can('delete', $inquiry) && ! $this->wasConverted($inquiry),
         ]);
+    }
+
+    /** An inquiry that became an application or a student is the first line of their story. */
+    private function wasConverted(CourseInquiry $inquiry): bool
+    {
+        return $inquiry->converted_student_id !== null || $inquiry->converted_application_id !== null;
     }
 
     public function update(StoreCourseInquiryRequest $request, CourseInquiry $inquiry): RedirectResponse
@@ -113,6 +122,14 @@ final class CourseInquiryController extends Controller
 
     public function destroy(CourseInquiry $inquiry): RedirectResponse
     {
+        if ($this->wasConverted($inquiry)) {
+            return back()->with('toast', [
+                'type' => 'error',
+                'message' => 'This inquiry became an application or a student, so it is kept: it is where '
+                    .'their story starts, and the conversion rate counts it.',
+            ]);
+        }
+
         $inquiry->delete();
 
         return redirect()

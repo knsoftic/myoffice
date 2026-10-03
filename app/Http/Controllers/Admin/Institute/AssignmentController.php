@@ -42,6 +42,9 @@ final class AssignmentController extends Controller
     {
         $assignments = $this->filtered($request)
             ->with(['course:id,name', 'batch:id,code,name', 'teacher:id,employee_id'])
+            // What the delete policy asks (nothing handed in) for the whole page in one subquery.
+            // The destroy action still asks the policy itself.
+            ->withExists('submissions')
             ->orderByDesc('deadline_at')
             ->paginate(20)
             ->withQueryString();
@@ -92,7 +95,9 @@ final class AssignmentController extends Controller
             'stats' => $this->assignments->statistics($assignment),
             'canEdit' => (bool) $request->user()?->can('update', $assignment),
             'canPublish' => (bool) $request->user()?->can('changeStatus', $assignment),
-            'canDelete' => (bool) $request->user()?->can('delete', $assignment),
+            // Asked again on its own: Gate::before waves a Super Admin past the policy, and the model
+            // refuses to delete an assignment with work handed in whoever asks.
+            'canDelete' => (bool) $request->user()?->can('delete', $assignment) && ! $assignment->trashed() && $assignment->submissions()->doesntExist(),
             'canPrint' => (bool) $request->user()?->can('print', $assignment),
             'canDownloadBrief' => (bool) $request->user()?->can('download', $assignment),
             'hasGradedWork' => $assignment->hasGradedWork(),
@@ -207,6 +212,14 @@ final class AssignmentController extends Controller
     public function destroy(Request $request, Assignment $assignment): RedirectResponse
     {
         Gate::authorize('delete', $assignment);
+
+        // The model refuses this with a LogicException (a 500); say it properly instead.
+        if ($assignment->submissions()->exists()) {
+            return back()->with('toast', [
+                'type' => 'error',
+                'message' => 'Work has been handed in for this assignment. Close or archive it instead - removing it would hide what a class was marked on.',
+            ]);
+        }
 
         $assignment->delete();
 

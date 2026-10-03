@@ -288,6 +288,128 @@ final class AdmissionService
 
     /*
     |--------------------------------------------------------------------------
+    | Details and removal
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * The admission's non-financial details: when, who counselled, how and when it is taught, notes.
+     *
+     * **Nothing here moves money, the stage or a number.** The figures go through `updateFigures()`
+     * (and freeze on the first charge), the stage only through the pipeline steps, and the admission
+     * number is issued once. `branch_id` is deliberately absent: it decides who can see the row and
+     * which branch's fees it books against, so moving it is not a detail.
+     *
+     * @param  array<string, mixed>  $details  `admission_date`, `counselor_id`, `delivery_mode`,
+     *                                         `preferred_timing`, `notes`
+     */
+    public function updateDetails(StudentAdmission $admission, array $details, ?User $actor = null): StudentAdmission
+    {
+        if (! $admission->stage->isLive()) {
+            throw CourseRuleException::refuse('stage', sprintf(
+                '%s is %s. A closed admission is the record of what happened, so its details no longer change.',
+                $admission->admission_number,
+                $admission->stage->label(),
+            ));
+        }
+
+        $allowed = ['admission_date', 'counselor_id', 'delivery_mode', 'preferred_timing', 'notes'];
+
+        return $this->db->transaction(function () use ($admission, $details, $allowed, $actor): StudentAdmission {
+            $admission->forceFill(array_merge(
+                array_intersect_key($details, array_flip($allowed)),
+                ['updated_by' => $actor?->getKey()],
+            ))->save();
+
+            return $admission->refresh();
+        }, 3);
+    }
+
+    /**
+     * Remove an admission that was entered by mistake — a soft delete, restorable.
+     *
+     * **Refused the moment anything hangs off it.** A charge, a receipt, a seat or a commission
+     * entitlement each point at this row; soft-deleting it would hide the parent of a fee or a payout
+     * from every screen while the child kept counting. Those are corrected where they live (a fee
+     * adjustment, a seat release, a reversal) — or the admission is cancelled, which keeps the record.
+     * Trashed child rows count too: a soft-deleted fee row is still history that names this admission.
+     *
+     * **A live admission is closed as cancelled before it is trashed.** `uq_sadm_live` is
+     * `(student_id, course_id, active_guard)` and reads trashed rows as well, so a deleted admission
+     * still at a live stage would block that student from ever being admitted to that course again.
+     * Recording it as cancelled — with the reason — frees the pair and leaves an honest row behind.
+     */
+    public function delete(StudentAdmission $admission, ?User $actor = null): void
+    {
+        $this->db->transaction(function () use ($admission, $actor): void {
+            /** @var StudentAdmission $locked */
+            $locked = StudentAdmission::query()->whereKey($admission->getKey())->lockForUpdate()->firstOrFail();
+
+            $this->assertDeletable($locked);
+
+            $reason = 'Deleted: entered by mistake'.($actor !== null ? ' ('.$actor->name.')' : '').'.';
+
+            if ($locked->stage->isLive()) {
+                $locked->withReason($reason);
+                $locked->forceFill([
+                    'stage' => AdmissionStage::Cancelled->value,
+                    'cancelled_at' => Carbon::now(),
+                    'cancelled_by' => $actor?->getKey(),
+                    'cancellation_reason' => $reason,
+                    'updated_by' => $actor?->getKey(),
+                ])->save();
+            }
+
+            $locked->withReason($reason);
+            $locked->delete();
+        }, 3);
+    }
+
+    /**
+     * Everything that would be left pointing at a deleted admission, named with a count.
+     */
+    private function assertDeletable(StudentAdmission $admission): void
+    {
+        $blockers = [];
+
+        if ($admission->figuresAreLocked()
+            || Money::compare((string) $admission->charged_amount, Money::ZERO) > 0
+            || Money::compare((string) $admission->paid_amount, Money::ZERO) > 0) {
+            $blockers[] = 'its figures are locked by a charge';
+        }
+
+        if ($admission->batch_id !== null) {
+            $blockers[] = 'it holds a batch seat';
+        }
+
+        $children = [
+            'student_fees' => 'fee row',
+            'student_batch_enrollments' => 'batch enrolment',
+            'collaborator_commission_entitlements' => 'commission entitlement',
+        ];
+
+        foreach ($children as $table => $label) {
+            $count = $this->db->table($table)->where('student_admission_id', $admission->getKey())->count();
+
+            if ($count > 0) {
+                $blockers[] = sprintf('%d %s%s', $count, $label, $count === 1 ? '' : 's');
+            }
+        }
+
+        if ($blockers === []) {
+            return;
+        }
+
+        throw CourseRuleException::refuse('admission', sprintf(
+            '%s cannot be deleted: %s. Deleting it would orphan that history — cancel or withdraw the '
+            .'admission instead, which keeps the record.',
+            $admission->admission_number,
+            implode(', ', $blockers),
+        ));
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | Steps 4 to 7
     |--------------------------------------------------------------------------
     */

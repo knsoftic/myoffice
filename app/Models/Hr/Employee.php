@@ -332,4 +332,62 @@ class Employee extends Model
     {
         return $this->hasMany(PayrollRunItem::class, 'employee_id');
     }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Deletability
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * The tables whose rows are evidence of somebody having worked here: attendance is payroll evidence,
+     * a leave request was a decision, an advance is money lent, a payroll item is money paid. An employee
+     * with any of them is exited through their status, never archived out of the lists — the screens that
+     * explain a payslip or a balance are the ones that would stop finding them.
+     *
+     * @var list<string>
+     */
+    public const HISTORY_TABLES = [
+        'attendances',
+        'attendance_monthly_summaries',
+        'leave_requests',
+        'employee_advances',
+        'payroll_run_items',
+    ];
+
+    public function hasWorkHistory(): bool
+    {
+        return isset(self::idsWithHistory([(int) $this->getKey()])[(int) $this->getKey()]);
+    }
+
+    /**
+     * Which of these employees carry history, in one query per table — so a list can decide its Delete
+     * controls without asking the policy once a row.
+     *
+     * @param  array<int, int|string>  $ids
+     * @return array<int, true>
+     */
+    public static function idsWithHistory(array $ids): array
+    {
+        $ids = array_values(array_filter(array_map('intval', $ids)));
+        $found = [];
+
+        if ($ids === []) {
+            return $found;
+        }
+
+        $connection = (new self)->getConnection();
+
+        foreach (self::HISTORY_TABLES as $table) {
+            if (! $connection->getSchemaBuilder()->hasTable($table)) {
+                continue;
+            }
+
+            foreach ($connection->table($table)->whereIn('employee_id', $ids)->distinct()->pluck('employee_id') as $id) {
+                $found[(int) $id] = true;
+            }
+        }
+
+        return $found;
+    }
 }

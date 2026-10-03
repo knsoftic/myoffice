@@ -83,6 +83,7 @@
                 <th class="px-4 py-3 text-left font-semibold">Assigned</th>
                 <th class="px-4 py-3 text-left font-semibold">Next follow-up</th>
                 <th class="px-4 py-3 text-right font-semibold">Tries</th>
+                <th class="px-4 py-3 text-right font-semibold"><span class="sr-only">Actions</span></th>
             </x-slot:head>
 
             @foreach ($inquiries as $inquiry)
@@ -122,6 +123,28 @@
                         @endif
                     </td>
                     <td class="px-4 py-3 text-right text-sm tabular-nums text-slate-500">{{ app_number($inquiry->contact_attempts) }}</td>
+                    <td class="px-4 py-3">
+                        <div class="flex items-center justify-end gap-1">
+                            <x-ui.icon-button icon="eye" size="sm" label="Open {{ $inquiry->inquiry_number }}"
+                                              :href="route('admin.course-inquiries.show', $inquiry)" />
+                            {{-- A converted inquiry is the first line of a student's story and the
+                                 denominator of the conversion rate, so the policy keeps it. --}}
+                            @if (auth()->user()?->can('delete', $inquiry)
+                                && $inquiry->converted_student_id === null
+                                && $inquiry->converted_application_id === null)
+                                <x-ui.confirm
+                                    :action="route('admin.course-inquiries.destroy', $inquiry)"
+                                    :title="'Delete inquiry '.$inquiry->inquiry_number.'?'"
+                                    message="It was never converted, so it moves to the trash and can be restored."
+                                    confirm-label="Delete inquiry"
+                                >
+                                    <x-slot:trigger>
+                                        <x-ui.icon-button icon="trash" size="sm" variant="danger" label="Delete {{ $inquiry->inquiry_number }}" />
+                                    </x-slot:trigger>
+                                </x-ui.confirm>
+                            @endif
+                        </div>
+                    </td>
                 </tr>
             @endforeach
 
