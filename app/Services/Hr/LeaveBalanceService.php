@@ -336,7 +336,9 @@ class LeaveBalanceService
             $available = Money::round((string) $balance->available_days, 4);
             $wanted = Money::round((string) $request->total_days, 4);
 
-            if (Money::lessThan($available, $wanted) && ! $type->allowsNegative()) {
+            // A type with no allowance (Unpaid Leave) has a balance of zero by definition, so a ceiling
+            // would refuse every request against it — "take the days as unpaid" on the unpaid type.
+            if (Money::lessThan($available, $wanted) && ! $type->allowsNegative() && ! $type->hasNoAllowance()) {
                 throw HrRuleException::refuse('total_days', sprintf(
                     'That is %s day(s) of %s and only %s are available. Either take the days as unpaid, or '
                     .'ask HR to allow a negative balance for this type.',

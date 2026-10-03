@@ -459,6 +459,52 @@ final class HrPayrollTest extends TestCase
         $this->assertSame('11.6700', (string) $grant->days);
     }
 
+    /**
+     * Unpaid Leave has no allowance — nothing accrues, no quota — so its balance is always zero. The
+     * balance ceiling used to refuse every request against it with "take the days as unpaid", on the
+     * unpaid type. A paid type with a quota is still held to it.
+     */
+    #[Test]
+    public function unpaid_leave_needs_no_balance_while_a_paid_quota_still_holds(): void
+    {
+        $actor = $this->createSuperAdmin();
+        $this->actingAs($actor);
+
+        $employee = $this->employee('Unpaid Taker');
+        app(LeaveBalanceService::class)->grantYear(2026, $employee);
+
+        $unpaid = new LeaveType;
+        $unpaid->forceFill([
+            'code' => 'HRT-UL', 'name' => 'Unpaid', 'annual_quota_days' => '0.00', 'is_paid' => false,
+            'accrual_method' => 'none', 'excludes_weekends' => true, 'excludes_holidays' => true,
+            'allow_half_day' => false, 'approval_levels' => 1, 'color' => 'slate', 'is_active' => true,
+        ])->save();
+
+        $request = app(LeaveRequestService::class)->apply(
+            employee: $employee,
+            type: $unpaid->fresh(),
+            from: Carbon::parse('2026-03-17'),
+            to: Carbon::parse('2026-03-18'),
+            portion: LeaveDayPortion::FullDay,
+            reason: 'Family matter.',
+            actor: $actor,
+        );
+
+        $this->assertSame('2.0000', (string) $request->total_days);
+
+        $this->expectException(HrRuleException::class);
+
+        app(LeaveRequestService::class)->apply(
+            employee: $employee,
+            type: $this->leaveType(),
+            from: Carbon::parse('2026-04-01'),
+            to: Carbon::parse('2026-04-30'),
+            portion: LeaveDayPortion::FullDay,
+            reason: 'More than the quota.',
+            actor: $actor,
+        );
+    }
+
     #[Test]
     public function nobody_approves_their_own_leave(): void
     {

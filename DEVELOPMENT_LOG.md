@@ -787,6 +787,23 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-10-03 — Unpaid Leave could never be applied for
+
+Reported as "errors when applying for leave". The form was driven with every type across full days,
+half days, ranges, weekends, past dates and over-quota ranges, from self-service and from HR's
+on-behalf form. Every refusal but one was a rule doing its job (weekend-only range, over quota, a date
+already on another request, a type's notice). The one that was not: **Unpaid Leave was refused every
+time** — "That is 1 day(s) of Unpaid Leave and only 0 are available. Either take the days as unpaid…".
+The type has no allowance (accrual `none`, quota 0), so its balance is zero by definition and
+`LeaveBalanceService::reserve()`'s ceiling refused all of it. `LeaveType::hasNoAllowance()` (no accrual,
+unpaid, zero quota) now lifts the ceiling for such a type only; a paid type is still held to its
+quota. Fixed in code rather than by setting `allow_negative_balance` on the row, so existing
+installations need no data change. Test: `HrPayrollTest::unpaid_leave_needs_no_balance_while_a_paid_quota_still_holds`;
+`tests/Feature/Hr` 33/33.
+
+Left as designed: two half-days of different types on one date are refused ("a date cannot be counted
+against two quotas", HR-8 / `uq_lrd_day`).
+
 ### 2026-10-03 — The front desk may delete a student entered by mistake, and now has a button to
 
 Requested: the Receptionist should be able to edit and delete students. Edit was already granted
