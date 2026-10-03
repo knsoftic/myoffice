@@ -48,6 +48,9 @@ class Student extends Model
     use LogsActivityWithContext;
     use SoftDeletes;
 
+    /** The tables whose rows make a student undeletable — {@see hasHistory()}. */
+    private const HISTORY_TABLES = ['student_fees', 'student_fee_payments', 'student_batch_enrollments', 'student_attendances'];
+
     protected $table = 'students';
 
     /**
@@ -162,7 +165,7 @@ class Student extends Model
      */
     public function hasHistory(): bool
     {
-        foreach (['student_fees', 'student_fee_payments', 'student_batch_enrollments', 'student_attendances'] as $table) {
+        foreach (self::HISTORY_TABLES as $table) {
             if (! $this->getConnection()->getSchemaBuilder()->hasTable($table)) {
                 continue;
             }
@@ -173,6 +176,37 @@ class Student extends Model
         }
 
         return false;
+    }
+
+    /**
+     * {@see hasHistory()} for a whole page of students at once — one query per table instead of one
+     * per table per row, so a list can decide which rows offer Delete without an N+1.
+     *
+     * @param  array<int, int>  $ids
+     * @return array<int, true> student id => true, for every id that has history
+     */
+    public static function idsWithHistory(array $ids): array
+    {
+        $ids = array_values(array_filter(array_map('intval', $ids)));
+        $found = [];
+
+        if ($ids === []) {
+            return $found;
+        }
+
+        $connection = (new self)->getConnection();
+
+        foreach (self::HISTORY_TABLES as $table) {
+            if (! $connection->getSchemaBuilder()->hasTable($table)) {
+                continue;
+            }
+
+            foreach ($connection->table($table)->whereIn('student_id', $ids)->distinct()->pluck('student_id') as $id) {
+                $found[(int) $id] = true;
+            }
+        }
+
+        return $found;
     }
 
     /*

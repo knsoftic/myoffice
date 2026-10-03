@@ -787,6 +787,28 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-10-03 — The front desk may delete a student entered by mistake, and now has a button to
+
+Requested: the Receptionist should be able to edit and delete students. Edit was already granted
+(`READ_CREATE_EDIT`). `RoleSeeder` now also gives the Receptionist `students.delete` and
+`students.restore`. **`StudentPolicy::delete()` is unchanged**, so a student with any fee, payment,
+enrolment or attendance row is still not removable by anybody — this reaches only a record nothing was
+ever recorded against.
+
+The student page had **no delete control at all**: `admin.students.destroy` existed and no view reached
+it, so the permission could never have been used from a screen. `admin/students/show.blade.php` now
+carries a confirm-dialog Delete behind `@can('delete', $student)`, which the policy hides for a student
+with history. The **students list** had no row actions at all either; each row now has Open, Edit
+(`@can('update')`) and Delete. Which rows may offer Delete is decided for the whole page at once by
+`Student::idsWithHistory()` (one query per history table, not four per row); the destroy route still
+asks the policy.
+
+Applying it to an existing installation: `php artisan db:seed --class=RoleSeeder --force` then
+`php artisan permission:cache-reset` (RoleSeeder converges the 18 system roles' grants, D65).
+Test: `Institute/ReceptionistStudentRecordTest` (edit; delete from the page; a student with history shows
+no button and is refused with 403). `Rbac/PermissionCatalogueTest` and `Dashboard/ReceptionDashboardTest`
+still pass.
+
 ### 2026-09-30 — Eight "broken" screens: four real 500s, a screen with no controls, and a seeder that never finished
 
 Reported as not working: apply for leave, my salary slip, demo classes, timetable, classes, attendance, fee
