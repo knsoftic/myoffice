@@ -183,7 +183,7 @@ class Student extends Model
      * per table per row, so a list can decide which rows offer Delete without an N+1.
      *
      * @param  array<int, int>  $ids
-     * @return array<int, true>  student id => true, for every id that has history
+     * @return array<int, true> student id => true, for every id that has history
      */
     public static function idsWithHistory(array $ids): array
     {
