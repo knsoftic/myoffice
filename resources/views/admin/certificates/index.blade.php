@@ -80,6 +80,7 @@
                 <th class="px-4 py-3 text-right font-semibold">Result</th>
                 <th class="px-4 py-3 text-right font-semibold">Prints / scans</th>
                 <th class="px-4 py-3 text-left font-semibold">Status</th>
+                <th class="px-4 py-3 text-right font-semibold"><span class="sr-only">Actions</span></th>
             </x-slot:head>
 
             @foreach ($certificates as $certificate)
@@ -124,6 +125,12 @@
                     </td>
                     <td class="px-4 py-3">
                         <x-ui.badge :color="$certificate->status->color()" size="xs">{{ $certificate->status->label() }}</x-ui.badge>
+                    </td>
+                    <td class="px-4 py-3">
+                        <div class="flex items-center justify-end gap-1">
+                            <x-ui.icon-button icon="eye" size="sm" label="Open certificate"
+                                              :href="route('admin.certificates.show', $certificate)" />
+                        </div>
                     </td>
                 </tr>
             @endforeach

@@ -17,6 +17,8 @@
     $manual = $project->progress_mode->value === 'manual';
     $canEdit = (bool) $user?->can('update', $project);
     $canStatus = (bool) $user?->can('changeStatus', $project);
+    $canArchive = (bool) $user?->can('delete', $project);
+    $milestonesWithPayments = $milestonesWithPayments ?? [];
 @endphp
 
 @section('header')
@@ -29,6 +31,20 @@
             <x-ui.button variant="secondary" icon="user-group" :href="route('admin.projects.members.index', $project)">Team</x-ui.button>
             @if ($canEdit)
                 <x-ui.button icon="pencil-square" :href="route('admin.projects.edit', $project)">Edit</x-ui.button>
+            @endif
+            {{-- Archiving is a soft delete (phase-06 §6.1 archive()): tasks, time, revisions and every
+                 payment stay exactly where they are, and projects.restore brings it back. --}}
+            @if ($canArchive)
+                <x-ui.confirm
+                    :action="route('admin.projects.destroy', $project)"
+                    :title="'Archive '.$project->code.'?'"
+                    message="The project leaves every list and any running timer on it is stopped. Its tasks, hours, value history and payments are kept, and it can be restored from the archived filter."
+                    confirm-label="Archive project"
+                >
+                    <x-slot:trigger>
+                        <x-ui.icon-button icon="trash" variant="danger" label="Archive {{ $project->code }}" />
+                    </x-slot:trigger>
+                </x-ui.confirm>
             @endif
         </x-slot:actions>
     </x-ui.page-header>
@@ -83,7 +99,22 @@
                             @foreach ($project->milestones as $milestone)
                                 <li class="flex items-center justify-between gap-3">
                                     <a href="{{ route('admin.milestones.show', $milestone) }}" class="truncate text-sm text-slate-900 hover:text-brand-700 dark:text-white dark:hover:text-brand-300">{{ $milestone->name }}</a>
-                                    <x-ui.badge :color="$milestone->status->color()" size="xs">{{ app_number((float) $milestone->progress_percent, 0) }}%</x-ui.badge>
+                                    <span class="flex shrink-0 items-center gap-1">
+                                        <x-ui.badge :color="$milestone->status->color()" size="xs">{{ app_number((float) $milestone->progress_percent, 0) }}%</x-ui.badge>
+                                        {{-- A milestone a payment is booked against is never offered for deletion. --}}
+                                        @if (! isset($milestonesWithPayments[$milestone->id]) && $user?->can('project_milestones.delete'))
+                                            <x-ui.confirm
+                                                :action="route('admin.milestones.destroy', $milestone)"
+                                                :title="'Delete '.$milestone->name.'?'"
+                                                message="Its tasks are kept and simply detached from it. No payment is booked against this milestone."
+                                                confirm-label="Delete milestone"
+                                            >
+                                                <x-slot:trigger>
+                                                    <x-ui.icon-button icon="trash" size="sm" variant="danger" label="Delete milestone {{ $milestone->name }}" />
+                                                </x-slot:trigger>
+                                            </x-ui.confirm>
+                                        @endif
+                                    </span>
                                 </li>
                             @endforeach
                         </ul>
@@ -121,7 +152,7 @@
                                             </span>
 
                                             @if ($payment->milestone)
-                                                <span class="block truncate text-xs text-slate-500 dark:text-slate-400">{{ $payment->milestone->title }}</span>
+                                                <span class="block truncate text-xs text-slate-500 dark:text-slate-400">{{ $payment->milestone->name }}</span>
                                             @endif
 
                                             @if ($payment->collaborator)

@@ -7,6 +7,8 @@ namespace Tests\Feature\Collaborator;
 use App\Enums\CollaborationType;
 use App\Enums\CollaboratorActivityEvent;
 use App\Enums\CollaboratorStatus;
+use App\Enums\ReferralSource;
+use App\Enums\ReferralSubject;
 use App\Enums\ReferralVisitOutcome;
 use App\Enums\UserStatus;
 use App\Models\Activity;
@@ -20,8 +22,11 @@ use App\Services\Collaborator\CollaboratorService;
 use App\Services\Collaborator\Exceptions\InvalidStatusTransition;
 use App\Services\Collaborator\Exceptions\ReferralCodeLockedException;
 use App\Services\Collaborator\Exceptions\ReferralCodeTakenException;
+use App\Services\Collaborator\ReferralService;
+use App\Services\Institute\StudentService;
 use App\Support\Collaborator\CollaboratorData;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -418,6 +423,41 @@ final class CollaboratorManagementTest extends TestCase
             'The record is kept.');
         $this->assertFalse(Collaborator::query()->whereKey($collaborator->getKey())->exists(),
             'It simply leaves the lists.');
+    }
+
+    /**
+     * `Gate::before` lets a Super Admin past the policy, so the service is what keeps a collaborator with
+     * money on record from being removed — for everybody.
+     */
+    #[Test]
+    public function a_collaborator_with_a_referral_is_not_removed_even_by_a_super_admin(): void
+    {
+        $super = $this->createSuperAdmin();
+        $this->actingAs($super);
+        $collaborator = $this->collaborator([], CollaboratorStatus::Active);
+
+        $student = app(StudentService::class)->create([
+            'name' => 'Referred Student',
+            'phone' => '03990000001',
+        ]);
+
+        app(ReferralService::class)->attachSubject(
+            ReferralSubject::Student,
+            (int) $student->getKey(),
+            $collaborator,
+            ReferralSource::ManualSelection,
+            null,
+            Carbon::parse('2026-01-01'),
+        );
+
+        $this->assertTrue($collaborator->hasMoneyRows());
+
+        $this->actingAs($super)
+            ->delete(route('admin.collaborators.destroy', $collaborator), ['reason' => 'Trying anyway.'])
+            ->assertSessionHasErrors('reason');
+
+        $this->assertTrue(Collaborator::query()->whereKey($collaborator->getKey())->exists(),
+            'The collaborator is still listed.');
     }
 
     #[Test]

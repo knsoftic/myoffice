@@ -56,19 +56,28 @@ final class EmployeeController extends Controller
 
         $this->scopes->apply($query, $request->user(), 'id');
 
+        $employees = $query
+            ->when($term !== '', fn ($scoped) => $scoped->where(fn ($inner) => $inner
+                ->where('name', 'like', '%'.$term.'%')
+                ->orWhere('employee_code', 'like', '%'.$term.'%')
+                ->orWhere('email', 'like', '%'.$term.'%')))
+            ->when($request->filled('department_id'), fn ($scoped) => $scoped
+                ->where('department_id', $request->integer('department_id')))
+            ->when($request->filled('status'), fn ($scoped) => $scoped
+                ->where('status', $request->string('status')->toString()))
+            ->orderBy('name')
+            ->paginate(20)
+            ->withQueryString();
+
         return view('admin.hr.employees.index', [
-            'employees' => $query
-                ->when($term !== '', fn ($scoped) => $scoped->where(fn ($inner) => $inner
-                    ->where('name', 'like', '%'.$term.'%')
-                    ->orWhere('employee_code', 'like', '%'.$term.'%')
-                    ->orWhere('email', 'like', '%'.$term.'%')))
-                ->when($request->filled('department_id'), fn ($scoped) => $scoped
-                    ->where('department_id', $request->integer('department_id')))
-                ->when($request->filled('status'), fn ($scoped) => $scoped
-                    ->where('status', $request->string('status')->toString()))
-                ->orderBy('name')
-                ->paginate(20)
-                ->withQueryString(),
+            'employees' => $employees,
+            // The list is already narrowed to the user's window, so the row actions need only the
+            // permission — plus, for Delete, whether the row carries history, asked once for the page.
+            'canEdit' => (bool) $request->user()?->can('employees.edit'),
+            'canDelete' => (bool) $request->user()?->can('employees.delete'),
+            'withHistory' => $request->user()?->can('employees.delete')
+                ? Employee::idsWithHistory($employees->getCollection()->modelKeys())
+                : [],
             'departments' => Department::query()->orderBy('name')->get(['id', 'name']),
             'statuses' => EmployeeStatus::options(),
             'showMoney' => $showMoney,
@@ -141,6 +150,12 @@ final class EmployeeController extends Controller
     public function destroy(Employee $employee): RedirectResponse
     {
         $this->authorize('delete', $employee);
+
+        // Again for Super Admin, who passes every policy: history is never archived out of the lists.
+        abort_if($employee->hasWorkHistory(), 403, sprintf(
+            '%s has attendance, leave or payroll history. Exit them through their status instead.',
+            $employee->name,
+        ));
 
         $employee->delete();
 

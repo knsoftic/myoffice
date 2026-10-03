@@ -8,6 +8,7 @@ use App\Enums\EmploymentType;
 use App\Enums\LeaveAccrualMethod;
 use App\Models\Concerns\Blameable;
 use App\Models\Concerns\LogsActivityWithContext;
+use App\Support\Money;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -115,6 +116,18 @@ class LeaveType extends Model
     {
         return $this->allow_negative_balance
             || (bool) setting('hr.leave_negative_balance_allowed', false);
+    }
+
+    /**
+     * A type with no allowance behind it at all — nothing accrues and no quota is granted, the shape of
+     * Unpaid Leave. Its balance is always zero, so a balance ceiling would refuse every request ever made
+     * against it; the days are still counted and approved like any other leave.
+     */
+    public function hasNoAllowance(): bool
+    {
+        return $this->accrual_method === LeaveAccrualMethod::None
+            && ! $this->is_paid
+            && Money::isZero((string) ($this->annual_quota_days ?? '0'));
     }
 
     public function moduleSlug(): string

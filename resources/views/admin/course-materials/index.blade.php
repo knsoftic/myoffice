@@ -71,6 +71,7 @@
                 <th class="px-4 py-3 text-left font-semibold">Available</th>
                 <th class="px-4 py-3 text-right font-semibold">Opened</th>
                 <th class="px-4 py-3 text-left font-semibold">Status</th>
+                <th class="px-4 py-3 text-right font-semibold"><span class="sr-only">Actions</span></th>
             </x-slot:head>
 
             @foreach ($materials as $material)
@@ -114,6 +115,28 @@
                         </div>
                     </td>
                     <td class="px-4 py-3"><x-ui.badge :color="$material->status->color()" size="xs">{{ $material->status->label() }}</x-ui.badge></td>
+                    <td class="px-4 py-3">
+                        <div class="flex items-center justify-end gap-1">
+                            <x-ui.icon-button icon="eye" size="sm" label="Open {{ $material->title }}"
+                                              :href="route('admin.course-materials.show', $material)" />
+                            @can('update', $material)
+                                <x-ui.icon-button icon="pencil" size="sm" label="Edit {{ $material->title }}"
+                                                  :href="route('admin.course-materials.edit', $material)" />
+                            @endcan
+                            @can('delete', $material)
+                                <x-ui.confirm
+                                    :action="route('admin.course-materials.destroy', $material)"
+                                    :title="'Delete '.$material->title.'?'"
+                                    message="Students stop seeing it at once. The file and its download history are kept, so it can be restored."
+                                    confirm-label="Delete material"
+                                >
+                                    <x-slot:trigger>
+                                        <x-ui.icon-button icon="trash" size="sm" variant="danger" label="Delete {{ $material->title }}" />
+                                    </x-slot:trigger>
+                                </x-ui.confirm>
+                            @endcan
+                        </div>
+                    </td>
                 </tr>
             @endforeach
 

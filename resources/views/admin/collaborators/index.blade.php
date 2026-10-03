@@ -56,6 +56,7 @@
                 <th class="px-4 py-3 text-left font-semibold">Referral code</th>
                 <th class="px-4 py-3 text-left font-semibold">Status</th>
                 <th class="px-4 py-3 text-right font-semibold">Skills</th>
+                <th class="px-4 py-3"><span class="sr-only">Actions</span></th>
             </x-slot:head>
 
             @foreach ($collaborators as $collaborator)
@@ -81,6 +82,38 @@
                         <x-ui.badge :color="$collaborator->status->color()" size="xs">{{ $collaborator->status->label() }}</x-ui.badge>
                     </td>
                     <td class="px-4 py-3 text-right tabular-nums text-slate-600 dark:text-slate-300">{{ $collaborator->skills_count }}</td>
+                    <td class="px-4 py-3 text-right">
+                        <div class="flex items-center justify-end gap-1">
+                            <x-ui.icon-button icon="eye" size="sm" label="Open {{ $collaborator->displayName() }}"
+                                              :href="route('admin.collaborators.show', $collaborator)" />
+                            @if ($canEdit && ! $collaborator->trashed())
+                                <x-ui.icon-button icon="pencil" size="sm" label="Edit {{ $collaborator->displayName() }}"
+                                                  :href="route('admin.collaborators.edit', $collaborator)" />
+                            @endif
+                            {{-- Only a partner with no commission, payout or referral on record; the reason is
+                                 required by the destroy route, which asks the policy again. --}}
+                            @if ($canDelete && ! $collaborator->trashed() && ! isset($withMoney[$collaborator->id]))
+                                <x-ui.confirm
+                                    :action="route('admin.collaborators.destroy', $collaborator)"
+                                    :title="'Remove '.$collaborator->displayName().'?'"
+                                    message="The record and its history are kept — it only leaves the lists."
+                                    confirm-label="Remove collaborator"
+                                    id="remove-collaborator-{{ $collaborator->id }}"
+                                >
+                                    <x-slot:trigger>
+                                        <x-ui.icon-button icon="trash" size="sm" variant="danger" label="Delete {{ $collaborator->displayName() }}" />
+                                    </x-slot:trigger>
+                                    <div class="mt-3">
+                                        <label for="remove-collaborator-reason-{{ $collaborator->id }}"
+                                               class="block text-xs font-medium text-slate-600 dark:text-slate-300">Why</label>
+                                        <textarea id="remove-collaborator-reason-{{ $collaborator->id }}" name="reason"
+                                                  form="remove-collaborator-{{ $collaborator->id }}" rows="2" required maxlength="255"
+                                                  class="mt-1.5 block w-full rounded-lg border-slate-300 text-sm shadow-sm focus:border-rose-500 focus:ring-rose-500/30 dark:border-slate-700 dark:bg-slate-950/40 dark:text-white"></textarea>
+                                    </div>
+                                </x-ui.confirm>
+                            @endif
+                        </div>
+                    </td>
                 </tr>
             @endforeach
 

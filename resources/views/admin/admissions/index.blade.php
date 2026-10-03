@@ -71,6 +71,7 @@
                     <th class="px-4 py-3 text-right font-semibold">Net payable</th>
                     <th class="px-4 py-3 text-right font-semibold">Balance</th>
                 @endif
+                <th class="px-4 py-3 text-right font-semibold"><span class="sr-only">Actions</span></th>
             </x-slot:head>
 
             @foreach ($admissions as $admission)
@@ -91,6 +92,31 @@
                         <td class="px-4 py-3 text-right tabular-nums">{{ money($admission->net_payable) }}</td>
                         <td class="px-4 py-3 text-right tabular-nums">{{ money($admission->balance_amount) }}</td>
                     @endif
+                    <td class="px-4 py-3">
+                        <div class="flex items-center justify-end gap-1">
+                            <x-ui.icon-button icon="eye" size="sm" label="Open {{ $admission->admission_number }}"
+                                              :href="route('admin.admissions.show', $admission)" />
+                            @if (auth()->user()?->can('update', $admission) && $admission->stage->isLive())
+                                <x-ui.icon-button icon="pencil" size="sm" label="Edit {{ $admission->admission_number }}"
+                                                  :href="route('admin.admissions.edit', $admission)" />
+                            @endif
+                            {{-- The policy reads only columns on this row, so asking per row costs no query.
+                                 The destroy route asks again, and the service checks the fee, seat and
+                                 commission tables before anything is removed. --}}
+                            @if (auth()->user()?->can('delete', $admission) && $admission->looksDeletable())
+                                <x-ui.confirm
+                                    :action="route('admin.admissions.destroy', $admission)"
+                                    :title="'Delete '.$admission->admission_number.'?'"
+                                    message="Nothing has been charged or seated against this admission, so it is closed as cancelled and moved to the trash, where it can be restored."
+                                    confirm-label="Delete admission"
+                                >
+                                    <x-slot:trigger>
+                                        <x-ui.icon-button icon="trash" size="sm" variant="danger" label="Delete {{ $admission->admission_number }}" />
+                                    </x-slot:trigger>
+                                </x-ui.confirm>
+                            @endif
+                        </div>
+                    </td>
                 </tr>
             @endforeach
 

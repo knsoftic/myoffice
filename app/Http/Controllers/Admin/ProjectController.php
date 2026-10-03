@@ -22,6 +22,7 @@ use App\Http\Requests\Project\UpdateProjectRequest;
 use App\Models\Crm\Client;
 use App\Models\Finance\ProjectPayment;
 use App\Models\Project\Project;
+use App\Models\Project\ProjectMilestone;
 use App\Models\User;
 use App\Services\Project\ProjectProgressService;
 use App\Services\Project\ProjectService;
@@ -153,6 +154,8 @@ final class ProjectController extends Controller
             'payments' => $this->paymentTrail($project, $request),
             'taskCounts' => $this->taskCounts($project),
             'milestoneStatuses' => MilestoneStatus::options(),
+            // One query: a milestone a payment is booked against offers no Delete control.
+            'milestonesWithPayments' => ProjectMilestone::idsWithPayments($project->milestones->modelKeys()),
             'memberRoles' => ProjectMemberRole::options(),
             'statuses' => $this->allowedStatusOptions($project),
         ]);
@@ -180,7 +183,7 @@ final class ProjectController extends Controller
 
         return ProjectPayment::query()
             ->where('project_id', $project->getKey())
-            ->with('milestone:id,title', 'collaborator:id,collaborator_code,name,company_name')
+            ->with('milestone:id,name', 'collaborator:id,collaborator_code,name,company_name')
             ->latest('paid_on')
             ->latest('id')
             ->limit(20)

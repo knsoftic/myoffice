@@ -89,6 +89,7 @@
                     <th class="px-4 py-3 text-right font-semibold">Balance</th>
                 @endif
                 <th class="px-4 py-3 text-left font-semibold">Status</th>
+                <th class="px-4 py-3"><span class="sr-only">Actions</span></th>
             </x-slot:head>
 
             @foreach ($invoices as $invoice)
@@ -141,6 +142,31 @@
 
                     <td class="px-4 py-3">
                         <x-ui.badge :color="$invoice->status->color()" size="xs">{{ $invoice->status->label() }}</x-ui.badge>
+                    </td>
+                    <td class="px-4 py-3 text-right">
+                        <div class="flex items-center justify-end gap-1">
+                            <x-ui.icon-button icon="eye" label="Open {{ $invoice->draft_reference }}"
+                                              :href="route('admin.invoices.show', $invoice)" />
+                            @can('update', $invoice)
+                                <x-ui.icon-button icon="pencil" label="Edit {{ $invoice->draft_reference }}"
+                                                  :href="route('admin.invoices.edit', $invoice)" />
+                            @endcan
+                            {{-- Only an unissued draft with no receipt; an issued invoice is cancelled and keeps its number. The destroy route asks the policy and the row's state again. --}}
+                            @if ($invoice->isDeletable())
+                                @can('delete', $invoice)
+                                    <x-ui.confirm
+                                        :action="route('admin.invoices.destroy', $invoice)"
+                                        :title="'Delete '.$invoice->draft_reference.'?'"
+                                        message="This draft was never issued and holds no receipt, so it takes no invoice number with it."
+                                        confirm-label="Delete draft"
+                                    >
+                                        <x-slot:trigger>
+                                            <x-ui.icon-button icon="trash" variant="danger" label="Delete {{ $invoice->draft_reference }}" />
+                                        </x-slot:trigger>
+                                    </x-ui.confirm>
+                                @endcan
+                            @endif
+                        </div>
                     </td>
                 </tr>
             @endforeach

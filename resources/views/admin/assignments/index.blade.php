@@ -61,6 +61,7 @@
                 <th class="px-4 py-3 text-right font-semibold">Handed in</th>
                 <th class="px-4 py-3 text-right font-semibold">Marked</th>
                 <th class="px-4 py-3 text-left font-semibold">Status</th>
+                <th class="px-4 py-3 text-right font-semibold"><span class="sr-only">Actions</span></th>
             </x-slot:head>
 
             @foreach ($assignments as $assignment)
@@ -97,6 +98,30 @@
                         {{ app_number($assignment->graded_count) }}
                     </td>
                     <td class="px-4 py-3"><x-ui.badge :color="$assignment->status->color()" size="xs">{{ $assignment->status->label() }}</x-ui.badge></td>
+                    <td class="px-4 py-3">
+                        <div class="flex items-center justify-end gap-1">
+                            <x-ui.icon-button icon="eye" size="sm" label="Open {{ $assignment->title }}"
+                                              :href="route('admin.assignments.show', $assignment)" />
+                            @can('update', $assignment)
+                                <x-ui.icon-button icon="pencil" size="sm" label="Edit {{ $assignment->title }}"
+                                                  :href="route('admin.assignments.edit', $assignment)" />
+                            @endcan
+                            {{-- Only an assignment nobody has handed anything in for; the destroy action
+                                 asks the policy again. --}}
+                            @if (auth()->user()?->can('assignments.delete') && ! $assignment->trashed() && ! $assignment->submissions_exists)
+                                <x-ui.confirm
+                                    :action="route('admin.assignments.destroy', $assignment)"
+                                    :title="'Delete '.$assignment->title.'?'"
+                                    message="Nothing has been handed in, so it moves to the trash and can be restored."
+                                    confirm-label="Delete assignment"
+                                >
+                                    <x-slot:trigger>
+                                        <x-ui.icon-button icon="trash" size="sm" variant="danger" label="Delete {{ $assignment->title }}" />
+                                    </x-slot:trigger>
+                                </x-ui.confirm>
+                            @endif
+                        </div>
+                    </td>
                 </tr>
             @endforeach
 

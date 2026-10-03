@@ -57,6 +57,53 @@ class Collaborator extends Model
     use LogsActivityWithContext;
     use SoftDeletes;
 
+    /** Tables whose rows mean money is or was in motion for this collaborator — {@see hasMoneyRows()}. */
+    private const MONEY_TABLES = [
+        'collaborator_commission_ledger_entries',
+        'collaborator_payouts',
+        'collaborator_referrals',
+    ];
+
+    /**
+     * Commission, payouts or referrals recorded against this collaborator. Such a record is never
+     * removed, even softly, because the screens that chase the money are the ones that would stop
+     * showing it. The policy, the service and the list all ask this one question.
+     */
+    public function hasMoneyRows(): bool
+    {
+        return isset(self::idsWithMoneyRows([(int) $this->getKey()])[(int) $this->getKey()]);
+    }
+
+    /**
+     * {@see hasMoneyRows()} for a page of collaborators at once — one query per table.
+     *
+     * @param  array<int, int>  $ids
+     * @return array<int, true>
+     */
+    public static function idsWithMoneyRows(array $ids): array
+    {
+        $ids = array_values(array_filter(array_map('intval', $ids)));
+        $found = [];
+
+        if ($ids === []) {
+            return $found;
+        }
+
+        $connection = (new self)->getConnection();
+
+        foreach (self::MONEY_TABLES as $table) {
+            if (! $connection->getSchemaBuilder()->hasTable($table)) {
+                continue;
+            }
+
+            foreach ($connection->table($table)->whereIn('collaborator_id', $ids)->distinct()->pluck('collaborator_id') as $id) {
+                $found[(int) $id] = true;
+            }
+        }
+
+        return $found;
+    }
+
     protected $table = 'collaborators';
 
     /**

@@ -2494,6 +2494,21 @@ return [
     ],
 
     [
+        'route' => 'admin.admissions.edit',
+        'panel' => 'admin',
+        'kind' => 'form',
+        'params' => static fn (?object $fixture = null): array => ['admission' => $first(StudentAdmission::class)],
+        'permissions' => ['admissions.edit'],
+        'module' => 'admissions',
+        'owner_phase' => 15,
+        'query_budget' => 20,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
         'route' => 'admin.admissions.export',
         'panel' => 'admin',
         'kind' => 'export',

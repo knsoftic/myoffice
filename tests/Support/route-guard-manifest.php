@@ -3977,6 +3977,30 @@ return [
     ],
 
     [
+        'route' => 'admin.admissions.destroy',
+        'methods' => ['DELETE'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:delete,admission'],
+        'permission' => 'admissions.delete',
+        'policy' => 'StudentAdmissionPolicy::delete',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.admissions.edit',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:update,admission'],
+        'permission' => 'admissions.edit',
+        'policy' => 'StudentAdmissionPolicy::update',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
         'route' => 'admin.admissions.export',
         'methods' => ['GET', 'HEAD'],
         'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:admissions.export'],
@@ -4073,6 +4097,18 @@ return [
         'methods' => ['POST'],
         'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:batches.assign'],
         'permission' => 'batches.assign',
+        'panel' => 'admin',
+        'state_changing' => true,
+        'rationale' => null,
+        'owner_phase' => 15,
+    ],
+
+    [
+        'route' => 'admin.admissions.update',
+        'methods' => ['PUT'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:admissions', 'can:update,admission'],
+        'permission' => 'admissions.edit',
+        'policy' => 'StudentAdmissionPolicy::update',
         'panel' => 'admin',
         'state_changing' => true,
         'rationale' => null,

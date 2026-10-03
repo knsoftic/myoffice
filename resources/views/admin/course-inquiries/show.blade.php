@@ -27,6 +27,20 @@
                                  :disabled="$inquiry->course_id === null">Admit directly</x-ui.button>
                 </form>
             @endcan
+
+            {{-- The policy refuses an inquiry that became an application or a student. --}}
+            @if ($canDelete)
+                <x-ui.confirm
+                    :action="route('admin.course-inquiries.destroy', $inquiry)"
+                    :title="'Delete inquiry '.$inquiry->inquiry_number.'?'"
+                    message="It was never converted, so it moves to the trash and can be restored."
+                    confirm-label="Delete inquiry"
+                >
+                    <x-slot:trigger>
+                        <x-ui.icon-button icon="trash" variant="danger" label="Delete inquiry" />
+                    </x-slot:trigger>
+                </x-ui.confirm>
+            @endif
         </x-slot:actions>
     </x-ui.page-header>
 @endsection

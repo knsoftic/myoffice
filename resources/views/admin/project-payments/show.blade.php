@@ -52,7 +52,7 @@
                     <dd>{{ $payment->client?->name }}</dd></div>
                 @if ($payment->milestone)
                     <div class="flex justify-between"><dt class="text-slate-500">Milestone</dt>
-                        <dd>{{ $payment->milestone->title }} · {{ money($payment->milestone->amount) }}</dd></div>
+                        <dd>{{ $payment->milestone->name }} · {{ money($payment->milestone->amount) }}</dd></div>
                 @endif
                 <div class="flex justify-between"><dt class="text-slate-500">Against an invoice</dt>
                     <dd>{{ $payment->is_advance ? 'No — recorded as an advance' : 'Yes' }}</dd></div>

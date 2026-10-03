@@ -19,6 +19,18 @@
                 <x-ui.button variant="ghost" icon="pencil"
                              :href="route('admin.course-materials.edit', $material)">Edit</x-ui.button>
             @endif
+            @if ($canDelete)
+                <x-ui.confirm
+                    :action="route('admin.course-materials.destroy', $material)"
+                    :title="'Delete '.$material->title.'?'"
+                    message="Students stop seeing it at once. The file and its download history are kept, so it can be restored."
+                    confirm-label="Delete material"
+                >
+                    <x-slot:trigger>
+                        <x-ui.icon-button icon="trash" variant="danger" label="Delete material" />
+                    </x-slot:trigger>
+                </x-ui.confirm>
+            @endif
         </x-slot:actions>
     </x-ui.page-header>
 @endsection

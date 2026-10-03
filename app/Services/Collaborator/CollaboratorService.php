@@ -213,6 +213,14 @@ final class CollaboratorService
             );
         }
 
+        // Asked here as well as in the policy: `Gate::before` lets a Super Admin past every policy, so
+        // the service is the only guard that holds for everybody.
+        if ($collaborator->hasMoneyRows()) {
+            throw CollaboratorRuleException::refuse('reason',
+                'This collaborator has commission, payouts or referrals on record. Removing the record '
+                .'would hide that money rather than settle it — deactivate them instead.');
+        }
+
         $this->db->transaction(static function () use ($collaborator, $reason): void {
             $collaborator->withReason($reason)->delete();
         });

@@ -762,9 +762,9 @@ final class SeoService
     {
         $candidates = [
             $row?->og_image_media_id,
-            $model?->getAttribute('banner_media_id'),
-            $model?->getAttribute('og_image_media_id'),
-            $model?->getAttribute('featured_media_id'),
+            $this->optionalAttribute($model, 'banner_media_id'),
+            $this->optionalAttribute($model, 'og_image_media_id'),
+            $this->optionalAttribute($model, 'featured_media_id'),
         ];
 
         foreach ($candidates as $id) {
@@ -1016,7 +1016,7 @@ final class SeoService
         }
 
         foreach ($attributes as $attribute) {
-            $value = $model->getAttribute($attribute);
+            $value = $this->optionalAttribute($model, $attribute);
 
             if (is_string($value) && trim($value) !== '') {
                 return $value;
@@ -1024,6 +1024,28 @@ final class SeoService
         }
 
         return null;
+    }
+
+    /**
+     * Read an attribute only some SEO targets carry. The candidate lists are supersets ("title or
+     * name", "banner, og image or featured image"): a taxonomy term has `name` and no `title`, a page
+     * has no `og_image_media_id`. Outside production `Model::shouldBeStrict()` turns reading an absent
+     * column into a MissingAttributeException (the category editors answered 500), so what the model
+     * lacks reads as null.
+     */
+    private function optionalAttribute(?Model $model, string $attribute): mixed
+    {
+        if ($model === null) {
+            return null;
+        }
+
+        if (! array_key_exists($attribute, $model->getAttributes())
+            && ! $model->hasGetMutator($attribute)
+            && ! $model->hasAttributeGetMutator($attribute)) {
+            return null;
+        }
+
+        return $model->getAttribute($attribute);
     }
 
     private function firstFilled(mixed ...$values): ?string

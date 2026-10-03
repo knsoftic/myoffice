@@ -37,6 +37,9 @@ final class TeacherController extends Controller
         return view('admin.teachers.index', [
             'teachers' => $this->filtered($request)
                 ->withCount(['batches', 'courses'])
+                // With `batches_count`, what the delete policy asks (no batch, no class) for the whole
+                // page at once. The destroy route still asks the policy itself.
+                ->withExists('sessions')
                 ->orderBy('sort_order')
                 ->orderBy('name')
                 ->paginate(per_page())
@@ -79,7 +82,16 @@ final class TeacherController extends Controller
             'statuses' => TeacherStatus::options(),
             'courses' => Course::query()->orderBy('name')->pluck('name', 'id'),
             'canSeeSalary' => $request->user()?->can('viewFinancial', $teacher) ?? false,
+            // The policy's history rule asked again on its own: Gate::before waves a Super Admin past
+            // every policy.
+            'canDelete' => (bool) $request->user()?->can('delete', $teacher) && ! $this->hasTaught($teacher),
         ]);
+    }
+
+    /** A teacher whose name is on a batch or a class register is kept; their attribution points at them. */
+    private function hasTaught(Teacher $teacher): bool
+    {
+        return $teacher->batches()->exists() || $teacher->sessions()->exists();
     }
 
     public function edit(Request $request, Teacher $teacher): View
@@ -98,6 +110,14 @@ final class TeacherController extends Controller
 
     public function destroy(Teacher $teacher): RedirectResponse
     {
+        if ($this->hasTaught($teacher)) {
+            return back()->with('toast', [
+                'type' => 'error',
+                'message' => $teacher->name.' has batches or classes on record, so the record is kept. '
+                    .'Move them to resigned instead.',
+            ]);
+        }
+
         $teacher->delete();
 
         return redirect()

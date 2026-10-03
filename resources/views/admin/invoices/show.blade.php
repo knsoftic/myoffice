@@ -50,6 +50,20 @@
                     Cancel
                 </x-ui.button>
             @endif
+            @if ($invoice->isDeletable())
+                @can('delete', $invoice)
+                    <x-ui.confirm
+                        :action="route('admin.invoices.destroy', $invoice)"
+                        :title="'Delete '.$invoice->draft_reference.'?'"
+                        message="This draft was never issued and holds no receipt, so deleting it takes no invoice number with it. Once issued, an invoice is cancelled instead."
+                        confirm-label="Delete draft"
+                    >
+                        <x-slot:trigger>
+                            <x-ui.icon-button icon="trash" variant="danger" label="Delete {{ $invoice->draft_reference }}" />
+                        </x-slot:trigger>
+                    </x-ui.confirm>
+                @endcan
+            @endif
         </x-slot:actions>
     </x-ui.page-header>
 @endsection

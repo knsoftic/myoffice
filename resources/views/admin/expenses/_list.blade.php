@@ -131,6 +131,25 @@
 
                     <x-ui.icon-button icon="eye" label="Open {{ $expense->expense_no }}"
                                       :href="route('admin.expenses.show', $expense)" />
+                    @can('update', $expense)
+                        <x-ui.icon-button icon="pencil" label="Edit {{ $expense->expense_no }}"
+                                          :href="route('admin.expenses.edit', $expense)" />
+                    @endcan
+                    {{-- Only a claim nobody has decided about yet; approved, rejected and voided rows are voided or reversed. The destroy route asks the policy and the row's state again. --}}
+                    @if ($expense->isDeletable())
+                        @can('delete', $expense)
+                            <x-ui.confirm
+                                :action="route('admin.expenses.destroy', $expense)"
+                                :title="'Delete '.$expense->expense_no.'?'"
+                                message="Nobody has decided about this claim yet, so it moves to the trash and never reaches a report."
+                                confirm-label="Delete expense"
+                            >
+                                <x-slot:trigger>
+                                    <x-ui.icon-button icon="trash" variant="danger" label="Delete {{ $expense->expense_no }}" />
+                                </x-slot:trigger>
+                            </x-ui.confirm>
+                        @endcan
+                    @endif
                 </div>
             </td>
         </tr>

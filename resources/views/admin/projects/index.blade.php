@@ -26,7 +26,13 @@
     $direction = $direction ?? 'desc';
     $isTrash = request()->boolean('trashed');
     $canCreate = (bool) $user?->can('projects.create');
-    $columnCount = 7 + ($showMoney ? 1 : 0);
+    $columnCount = 8 + ($showMoney ? 1 : 0);
+    // Every row on this page already passed Project::visibleTo(), so the row half of ProjectPolicy
+    // (seesProject) is settled; what is left is the permission and the trashed flag. Asking the policy
+    // per row would re-run the visibility query once per project for a user without view_any.
+    $canEditRows = (bool) $user?->can('projects.edit');
+    $canArchiveRows = (bool) $user?->can('projects.delete');
+    $canRestoreRows = (bool) $user?->can('projects.restore');
     $today = now()->toDateString();
 @endphp
 
@@ -75,6 +81,7 @@
                     <th scope="col" class="px-4 py-3 text-right">Value</th>
                 @endif
                 <x-ui.th-sortable column="status" :sort="$sort" :direction="$direction">Status</x-ui.th-sortable>
+                <th scope="col" class="px-4 py-3 text-right"><span class="sr-only">Actions</span></th>
             </x-slot:head>
 
             @foreach ($projects as $project)
@@ -132,6 +139,37 @@
                     @endif
                     <td class="whitespace-nowrap">
                         <x-ui.badge :color="$project->status->color()" size="xs">{{ $project->status->label() }}</x-ui.badge>
+                    </td>
+                    <td class="whitespace-nowrap">
+                        <div class="flex items-center justify-end gap-1">
+                            @if ($trashed)
+                                @if ($canRestoreRows)
+                                    <form method="POST" action="{{ route('admin.projects.restore', $project->id) }}">
+                                        @csrf
+                                        <x-ui.button type="submit" size="sm" variant="secondary" icon="arrow-path">Restore</x-ui.button>
+                                    </form>
+                                @endif
+                            @else
+                                <x-ui.icon-button icon="eye" size="sm" label="Open {{ $project->code }}"
+                                                  :href="route('admin.projects.show', $project)" />
+                                @if ($canEditRows)
+                                    <x-ui.icon-button icon="pencil" size="sm" label="Edit {{ $project->code }}"
+                                                      :href="route('admin.projects.edit', $project)" />
+                                @endif
+                                @if ($canArchiveRows)
+                                    <x-ui.confirm
+                                        :action="route('admin.projects.destroy', $project)"
+                                        :title="'Archive '.$project->code.'?'"
+                                        message="The project leaves every list and any running timer on it is stopped. Its tasks, hours, value history and payments are kept, and it can be restored from the archived filter."
+                                        confirm-label="Archive project"
+                                    >
+                                        <x-slot:trigger>
+                                            <x-ui.icon-button icon="trash" size="sm" variant="danger" label="Archive {{ $project->code }}" />
+                                        </x-slot:trigger>
+                                    </x-ui.confirm>
+                                @endif
+                            @endif
+                        </div>
                     </td>
                 </tr>
             @endforeach

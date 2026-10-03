@@ -60,6 +60,7 @@
                 <th class="px-4 py-3 text-left font-semibold">Referral</th>
                 <th class="px-4 py-3 text-left font-semibold">Status</th>
                 <th class="px-4 py-3 text-left font-semibold">Reviewer</th>
+                <th class="px-4 py-3 text-right font-semibold"><span class="sr-only">Actions</span></th>
             </x-slot:head>
 
             @foreach ($applications as $application)
@@ -99,6 +100,14 @@
                     </td>
                     <td class="px-4 py-3"><x-ui.badge :color="$application->status->color()">{{ $application->status->label() }}</x-ui.badge></td>
                     <td class="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">{{ $application->reviewer?->name ?? '—' }}</td>
+                    <td class="px-4 py-3">
+                        <div class="flex items-center justify-end gap-1">
+                            @can('view', $application)
+                                <x-ui.icon-button icon="eye" size="sm" label="Open application"
+                                                  :href="route('admin.student-applications.show', $application)" />
+                            @endcan
+                        </div>
+                    </td>
                 </tr>
             @endforeach
 

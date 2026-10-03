@@ -52,6 +52,20 @@
                 <x-ui.button variant="danger" icon="no-symbol"
                              x-on:click.prevent="$dispatch('open-modal', 'void-expense')">Void</x-ui.button>
             @endif
+            @if ($expense->isDeletable())
+                @can('delete', $expense)
+                    <x-ui.confirm
+                        :action="route('admin.expenses.destroy', $expense)"
+                        :title="'Delete '.$expense->expense_no.'?'"
+                        message="Nobody has decided about this claim yet, so it moves to the trash and never reaches a report. Once it is approved or rejected it can only be voided."
+                        confirm-label="Delete expense"
+                    >
+                        <x-slot:trigger>
+                            <x-ui.icon-button icon="trash" variant="danger" label="Delete {{ $expense->expense_no }}" />
+                        </x-slot:trigger>
+                    </x-ui.confirm>
+                @endcan
+            @endif
         </x-slot:actions>
     </x-ui.page-header>
 @endsection

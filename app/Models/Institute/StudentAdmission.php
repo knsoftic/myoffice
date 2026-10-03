@@ -139,6 +139,7 @@ class StudentAdmission extends Model
     {
         return [
             'stage', 'admission_date', 'registration_date', 'batch_id', 'counselor_id',
+            'delivery_mode', 'preferred_timing', 'notes',
             'course_fee', 'admission_fee', 'registration_fee', 'extra_fee',
             'discount_amount', 'scholarship_amount', 'discount_reason', 'tax_amount',
             'total_amount', 'net_payable', 'monthly_fee',
@@ -170,6 +171,21 @@ class StudentAdmission extends Model
     public function figuresAreLocked(): bool
     {
         return $this->figures_locked_at !== null;
+    }
+
+    /**
+     * Could this row be deleted, judging by its own columns alone? No charge, no receipt, no seat.
+     *
+     * The policy asks this, and so does the screen — separately, because `Gate::before` answers
+     * true for Super Admin without reaching the policy, and a Delete button on a charged admission
+     * would only lead to a refusal. `AdmissionService::delete()` still checks the child tables.
+     */
+    public function looksDeletable(): bool
+    {
+        return ! $this->figuresAreLocked()
+            && $this->batch_id === null
+            && Money::compare((string) $this->charged_amount, Money::ZERO) <= 0
+            && Money::compare((string) $this->paid_amount, Money::ZERO) <= 0;
     }
 
     /**

@@ -7,6 +7,9 @@
     $canEdit = $user?->can('update', $employee) === true;
     $canStatus = $user?->can('changeStatus', $employee) === true;
     $canPrint = $user?->can('print', $employee) === true;
+    // The policy refuses an employee with history; the state check repeats it for Super Admin, who passes
+    // every policy.
+    $canDelete = $user?->can('delete', $employee) === true && ! $employee->hasWorkHistory();
 @endphp
 
 @section('header')
@@ -17,6 +20,18 @@
             @endif
             @if ($canEdit)
                 <x-ui.button :href="route('admin.employees.edit', $employee)" icon="pencil">Edit</x-ui.button>
+            @endif
+            @if ($canDelete)
+                <x-ui.confirm
+                    :action="route('admin.employees.destroy', $employee)"
+                    :title="'Archive '.$employee->name.'?'"
+                    message="Nothing has been recorded against this employee, so the record moves to the trash and can be restored."
+                    confirm-label="Archive employee"
+                >
+                    <x-slot:trigger>
+                        <x-ui.icon-button icon="trash" variant="danger" label="Delete {{ $employee->name }}" />
+                    </x-slot:trigger>
+                </x-ui.confirm>
             @endif
         </x-slot:actions>
     </x-ui.page-header>

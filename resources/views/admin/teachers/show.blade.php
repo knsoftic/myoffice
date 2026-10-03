@@ -16,6 +16,20 @@
             @can('update', $teacher)
                 <x-ui.button icon="pencil" :href="route('admin.teachers.edit', $teacher)">Edit</x-ui.button>
             @endcan
+            {{-- The policy refuses a teacher who ever had a batch or a class (their name is on the
+                 registers), so this shows only for a record entered by mistake. --}}
+            @if ($canDelete)
+                <x-ui.confirm
+                    :action="route('admin.teachers.destroy', $teacher)"
+                    :title="'Delete '.$teacher->name.'?'"
+                    message="This teacher never had a batch or a class, so the record moves to the trash and can be restored."
+                    confirm-label="Delete teacher"
+                >
+                    <x-slot:trigger>
+                        <x-ui.icon-button icon="trash" variant="danger" label="Delete teacher" />
+                    </x-slot:trigger>
+                </x-ui.confirm>
+            @endif
         </x-slot:actions>
     </x-ui.page-header>
 @endsection
@@ -135,6 +149,45 @@
                         <dt class="text-slate-400">Branch</dt>
                         <dd class="text-slate-700 dark:text-slate-200">{{ $teacher->branch?->name ?? 'Every branch' }}</dd>
                     </div>
+                    @if ($teacher->isLinkedToEmployee())
+                        <div>
+                            <dt class="text-slate-400">Employee record</dt>
+                            <dd class="text-slate-700 dark:text-slate-200">
+                                Linked: name, email and salary come from HR.
+                                @can('update', $teacher)
+                                    <div class="mt-2">
+                                        <x-ui.confirm
+                                            :action="route('admin.teachers.employee-link.destroy', $teacher)"
+                                            id="unlink-employee-{{ $teacher->id }}"
+                                            :title="'Unlink '.$teacher->name.' from the employee record?'"
+                                            message="The copied name, email and salary stay on the teacher and become editable here. The reason goes on the record."
+                                            confirm-label="Remove link"
+                                            variant="warning"
+                                            icon="link"
+                                        >
+                                            <x-slot:trigger>
+                                                <x-ui.button variant="ghost" size="sm" icon="link">Remove employee link</x-ui.button>
+                                            </x-slot:trigger>
+                                            <div class="mt-4">
+                                                <label for="unlink-reason-{{ $teacher->id }}" class="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                    Reason <span class="text-rose-500">*</span>
+                                                </label>
+                                                <input
+                                                    id="unlink-reason-{{ $teacher->id }}"
+                                                    type="text"
+                                                    name="reason"
+                                                    form="unlink-employee-{{ $teacher->id }}"
+                                                    maxlength="255"
+                                                    required
+                                                    class="mt-1.5 block w-full rounded-lg border-slate-300 text-sm shadow-sm focus:border-brand-500 focus:ring-brand-500/30 dark:border-slate-700 dark:bg-slate-950/40 dark:text-white"
+                                                >
+                                            </div>
+                                        </x-ui.confirm>
+                                    </div>
+                                @endcan
+                            </dd>
+                        </div>
+                    @endif
                     <div>
                         <dt class="text-slate-400">Login</dt>
                         <dd class="text-slate-700 dark:text-slate-200">

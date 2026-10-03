@@ -9,6 +9,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Project\Project;
 use App\Models\Project\Task;
 use App\Models\Project\TimeEntry;
+use App\Policies\Project\TimeEntryPolicy;
 use App\Services\Project\TimeEntryService;
 use App\Services\Project\TimerService;
 use Illuminate\Contracts\View\View;
@@ -16,6 +17,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 
 /**
  * Time tracking — `admin.time.*` and `admin.timer.*` (phase-06 §7.5, §8.9), `module:time_tracking`.
@@ -56,10 +58,13 @@ final class TimeTrackingController extends Controller
             ->paginate(per_page())
             ->withQueryString();
 
+        $projects = Project::query()->visibleTo($actor)->orderBy('name')->pluck('name', 'id')->all();
+
         return view('admin.time.index', [
             'entries' => $entries,
+            'discardable' => $this->discardable($entries->getCollection(), $actor, $projects),
             'live' => $this->timers->live($actor),
-            'projects' => Project::query()->visibleTo($actor)->orderBy('name')->pluck('name', 'id')->all(),
+            'projects' => $projects,
             'seesAll' => $seesAll,
             'filters' => $request->only(['project_id', 'from', 'to']),
             // The browser ticks from this, never from a stored total.
@@ -182,6 +187,36 @@ final class TimeTrackingController extends Controller
         $this->entries->discard($entry, $data['discard_reason'], $request->user());
 
         return back()->with('toast', ['type' => 'success', 'message' => 'Entry discarded and removed from every total.']);
+    }
+
+    /**
+     * The entries on this page the actor may discard — {@see TimeEntryPolicy::delete()}
+     * answered for the whole page without its per-row project-visibility query: the project half is
+     * read from the visible-project list the screen loads anyway.
+     *
+     * @param  Collection<int, TimeEntry>  $entries
+     * @param  array<int, string>  $visibleProjects
+     * @return array<int, true>
+     */
+    private function discardable($entries, $actor, array $visibleProjects): array
+    {
+        if (! $actor->can('time_tracking.delete')) {
+            return [];
+        }
+
+        $seesAll = $actor->can('time_tracking.view_any');
+        $allProjects = $actor->can('projects.view_any');
+        $ids = [];
+
+        foreach ($entries as $entry) {
+            $own = $entry->user_id !== null && (int) $entry->user_id === (int) $actor->getKey();
+
+            if ($own || ($seesAll && ($allProjects || isset($visibleProjects[(int) $entry->project_id])))) {
+                $ids[(int) $entry->getKey()] = true;
+            }
+        }
+
+        return $ids;
     }
 
     /**

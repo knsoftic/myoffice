@@ -43,6 +43,9 @@ final class BatchController extends Controller
         return view('admin.batches.index', [
             'batches' => $this->filtered($request)
                 ->with(['course:id,name', 'teacher:id,name', 'classroom:id,code,name'])
+                // Which rows may offer Delete: the policy refuses a batch anyone was ever enrolled in.
+                // One subquery here instead of one query per row; the destroy route asks the policy.
+                ->withExists('enrollments')
                 ->orderByDesc('start_date')
                 ->paginate(per_page())
                 ->withQueryString(),
@@ -92,6 +95,9 @@ final class BatchController extends Controller
             'classrooms' => Classroom::query()->active()->orderBy('code')->get(),
             'enrollmentStatuses' => EnrollmentStatus::options(),
             'otherBatches' => Batch::query()->live()->where('id', '!=', $batch->getKey())->orderBy('code')->pluck('code', 'id'),
+            // The policy's history rule, asked again on its own: Gate::before waves a Super Admin past
+            // every policy, so `@can('delete')` alone would offer Delete on a batch that ran.
+            'canDelete' => (bool) $request->user()?->can('delete', $batch) && $batch->enrollments()->doesntExist(),
         ]);
     }
 
@@ -111,6 +117,15 @@ final class BatchController extends Controller
 
     public function destroy(Batch $batch): RedirectResponse
     {
+        // The policy refuses this too, but Gate::before lets a Super Admin past every policy.
+        if ($batch->enrollments()->exists()) {
+            return back()->with('toast', [
+                'type' => 'error',
+                'message' => $batch->label().' has students enrolled, or had them. A batch that ran is '
+                    .'cancelled or completed, never deleted - the enrolments have to keep pointing somewhere.',
+            ]);
+        }
+
         $batch->delete();
 
         return redirect()

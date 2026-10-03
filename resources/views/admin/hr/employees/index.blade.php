@@ -48,6 +48,7 @@
                     <th class="px-4 py-3 text-right font-semibold">Gross</th>
                 @endif
                 <th class="px-4 py-3 text-left font-semibold">Status</th>
+                <th class="px-4 py-3"><span class="sr-only">Actions</span></th>
             </x-slot:head>
 
             @foreach ($employees as $employee)
@@ -78,6 +79,31 @@
                     @endif
                     <td class="px-4 py-3">
                         <x-ui.badge :color="$employee->status->color()" size="xs">{{ $employee->status->label() }}</x-ui.badge>
+                    </td>
+                    <td class="px-4 py-3 text-right">
+                        <div class="flex items-center justify-end gap-1">
+                            <x-ui.icon-button icon="eye" size="sm" label="Open {{ $employee->name }}"
+                                              :href="route('admin.employees.show', $employee)" />
+                            @if ($canEdit)
+                                <x-ui.icon-button icon="pencil" size="sm" label="Edit {{ $employee->name }}"
+                                                  :href="route('admin.employees.edit', $employee)" />
+                            @endif
+                            {{-- Only somebody with no attendance, leave or payroll on record can be archived;
+                                 everybody else is exited through their status. The destroy route asks the
+                                 policy again. --}}
+                            @if ($canDelete && ! isset($withHistory[$employee->id]))
+                                <x-ui.confirm
+                                    :action="route('admin.employees.destroy', $employee)"
+                                    :title="'Archive '.$employee->name.'?'"
+                                    message="Nothing has been recorded against this employee, so the record moves to the trash and can be restored."
+                                    confirm-label="Archive employee"
+                                >
+                                    <x-slot:trigger>
+                                        <x-ui.icon-button icon="trash" size="sm" variant="danger" label="Delete {{ $employee->name }}" />
+                                    </x-slot:trigger>
+                                </x-ui.confirm>
+                            @endif
+                        </div>
                     </td>
                 </tr>
             @endforeach

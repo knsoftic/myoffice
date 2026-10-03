@@ -62,6 +62,11 @@ final class CourseController extends Controller
             'modes' => DeliveryMode::cases(),
             'counts' => $this->statusCounts($request),
             'canCreate' => (bool) $request->user()?->can('create', Course::class),
+            // Which rows may offer Delete: the policy refuses a course with sales history, and asking
+            // it per row would be five queries a row. The destroy route still asks the policy itself.
+            'sold' => $request->user()?->can('courses.delete')
+                ? $this->idsWithSalesHistory($courses->getCollection()->modelKeys())
+                : [],
         ]);
     }
 
@@ -98,7 +103,11 @@ final class CourseController extends Controller
             'gaps' => $course->publishingGaps(),
             'canEdit' => (bool) $request->user()?->can('update', $course),
             'canChangeStatus' => (bool) $request->user()?->can('changeStatus', $course),
-            'canDelete' => (bool) $request->user()?->can('delete', $course),
+            // The policy's rules asked again on their own: Gate::before waves a Super Admin past every
+            // policy, and the destroy action refuses a sold course whoever asks.
+            'canDelete' => (bool) $request->user()?->can('delete', $course)
+                && $course->status !== CourseStatus::Archived
+                && ! $course->hasSalesHistory(),
             'canEditOutline' => (bool) $request->user()?->can('course_outline.edit'),
             'canCreateOutline' => (bool) $request->user()?->can('course_outline.create'),
             'canDeleteOutline' => (bool) $request->user()?->can('course_outline.delete'),
@@ -125,6 +134,13 @@ final class CourseController extends Controller
 
     public function destroy(Course $course): RedirectResponse
     {
+        if ($course->status === CourseStatus::Archived) {
+            return back()->with('toast', [
+                'type' => 'error',
+                'message' => sprintf('%s is archived. An archived course is kept, not removed.', $course->name),
+            ]);
+        }
+
         if ($course->hasSalesHistory()) {
             return back()->with('toast', [
                 'type' => 'error',
@@ -299,6 +315,34 @@ final class CourseController extends Controller
     /**
      * @return array<string, mixed>
      */
+    /**
+     * {@see Course::hasSalesHistory()} for a whole page at once - one query per table instead of one
+     * per table per row.
+     *
+     * @param  array<int, int>  $ids
+     * @return array<int, true> course id => true, for every course something was sold against
+     */
+    private function idsWithSalesHistory(array $ids): array
+    {
+        $found = [];
+
+        if ($ids === []) {
+            return $found;
+        }
+
+        foreach (['batches', 'student_admissions', 'student_applications', 'student_batch_enrollments', 'student_fees'] as $table) {
+            if (! app('db')->getSchemaBuilder()->hasTable($table)) {
+                continue;
+            }
+
+            foreach (app('db')->table($table)->whereIn('course_id', $ids)->distinct()->pluck('course_id') as $id) {
+                $found[(int) $id] = true;
+            }
+        }
+
+        return $found;
+    }
+
     private function formData(Request $request): array
     {
         return [

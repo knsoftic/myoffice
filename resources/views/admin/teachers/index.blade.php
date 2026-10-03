@@ -92,10 +92,33 @@
                             <x-ui.badge color="sky" size="xs" class="ml-1">On the site</x-ui.badge>
                         @endif
                     </td>
-                    <td class="px-4 py-3 text-right">
-                        @can('teachers.view_reports')
-                            <x-ui.button variant="ghost" size="sm" icon="chart-bar" :href="route('admin.teachers.workload', $teacher)">Workload</x-ui.button>
-                        @endcan
+                    <td class="px-4 py-3">
+                        <div class="flex items-center justify-end gap-1">
+                            @can('teachers.view_reports')
+                                <x-ui.icon-button icon="chart-bar" size="sm" label="Workload of {{ $teacher->name }}"
+                                                  :href="route('admin.teachers.workload', $teacher)" />
+                            @endcan
+                            <x-ui.icon-button icon="eye" size="sm" label="Open {{ $teacher->name }}"
+                                              :href="route('admin.teachers.show', $teacher)" />
+                            @can('update', $teacher)
+                                <x-ui.icon-button icon="pencil" size="sm" label="Edit {{ $teacher->name }}"
+                                                  :href="route('admin.teachers.edit', $teacher)" />
+                            @endcan
+                            {{-- Only a teacher who never had a batch or a class; the destroy route asks
+                                 the policy again. --}}
+                            @if (auth()->user()?->can('teachers.delete') && (int) $teacher->batches_count === 0 && ! $teacher->sessions_exists)
+                                <x-ui.confirm
+                                    :action="route('admin.teachers.destroy', $teacher)"
+                                    :title="'Delete '.$teacher->name.'?'"
+                                    message="This teacher never had a batch or a class, so the record moves to the trash and can be restored."
+                                    confirm-label="Delete teacher"
+                                >
+                                    <x-slot:trigger>
+                                        <x-ui.icon-button icon="trash" size="sm" variant="danger" label="Delete {{ $teacher->name }}" />
+                                    </x-slot:trigger>
+                                </x-ui.confirm>
+                            @endif
+                        </div>
                     </td>
                 </tr>
             @endforeach

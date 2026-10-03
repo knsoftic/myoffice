@@ -49,8 +49,8 @@ final class IncomePolicy
     public function delete(User $user, Income $income): bool
     {
         return $this->holds($user, self::MODULE, Ability::Delete)
-            && $income->status === IncomeStatus::Recorded
-            && $income->reversals()->doesntExist();
+            && ! $this->isTrashed($income)
+            && $income->isDeletable();
     }
 
     public function restore(User $user, Income $income): bool

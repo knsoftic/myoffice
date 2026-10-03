@@ -244,9 +244,10 @@ final readonly class MilestoneService
             return null;
         }
 
+        // `project_payments` is append-only and has no `deleted_at` (CLAUDE.md §3, D16) — filtering on
+        // one made every milestone delete a 500 the moment the finance tables existed.
         $row = DB::table('project_payments')
             ->where('project_milestone_id', $milestone->getKey())
-            ->whereNull('deleted_at')
             ->first();
 
         if ($row === null) {

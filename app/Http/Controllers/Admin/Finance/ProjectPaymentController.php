@@ -57,7 +57,7 @@ final class ProjectPaymentController extends Controller
                 ->with([
                     'project:id,code,name,client_id',
                     'client:id,client_code,name',
-                    'milestone:id,title',
+                    'milestone:id,name',
                     'collaborator:id,collaborator_code,name,company_name',
                 ])
                 ->latest('paid_on')
@@ -88,7 +88,7 @@ final class ProjectPaymentController extends Controller
             'payment' => $payment->load([
                 'project:id,code,name,client_id,project_value,net_value',
                 'client:id,client_code,name',
-                'milestone:id,title,amount',
+                'milestone:id,name,amount',
                 'collaborator:id,collaborator_code,name,company_name',
                 'referral:id,referral_code,referral_source,effective_from',
                 'reversals',

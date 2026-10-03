@@ -65,12 +65,18 @@ final class StudentAdmissionPolicy
     /**
      * Never once anything has been charged: a deleted admission with fee rows against it is a hole in
      * the ledger. The FK from `student_fees` refuses too; this is what lets the screen say so.
+     *
+     * Only columns on the row are read, so the list may ask this once per row without a query each.
+     * A seat (`batch_id`) is refused here too; the rows that hang off an admission in other tables —
+     * fee rows, seats, commission entitlements — are checked by `AdmissionService::delete()`, which
+     * names what it found.
      */
     public function delete(User $user, StudentAdmission $admission): bool
     {
         return $this->holds($user, self::MODULE, Ability::Delete)
-            && ! $admission->figuresAreLocked()
-            && Money::compare((string) $admission->charged_amount, Money::ZERO) <= 0;
+            && ! $this->isTrashed($admission)
+            && $this->sharesBranch($user, $admission->branch_id === null ? null : (int) $admission->branch_id)
+            && $admission->looksDeletable();
     }
 
     public function restore(User $user, StudentAdmission $admission): bool

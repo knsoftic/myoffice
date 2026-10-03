@@ -60,6 +60,22 @@
                                  x-on:click.prevent="$dispatch('open-modal', 'archive-course')">Archive</x-ui.button>
                 @endif
             @endif
+
+            {{-- The policy refuses a course anything was sold against (batches, admissions,
+                 applications, enrolments, fees) and an archived one, so this shows only for a course
+                 created by mistake. The destroy route asks the policy again. --}}
+            @if ($canDelete)
+                <x-ui.confirm
+                    :action="route('admin.courses.destroy', $course)"
+                    :title="'Delete '.$course->name.'?'"
+                    message="Nothing has been sold against this course, so it moves to the trash and can be restored."
+                    confirm-label="Delete course"
+                >
+                    <x-slot:trigger>
+                        <x-ui.icon-button icon="trash" variant="danger" label="Delete course" />
+                    </x-slot:trigger>
+                </x-ui.confirm>
+            @endif
         </x-slot:actions>
     </x-ui.page-header>
 @endsection

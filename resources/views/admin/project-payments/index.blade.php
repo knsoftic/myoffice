@@ -130,7 +130,7 @@
                         <span class="block font-mono text-xs">{{ $payment->project?->code }}</span>
                         <span class="block text-xs text-slate-500">{{ $payment->client?->name }}</span>
                         @if ($payment->milestone)
-                            <span class="block text-xs text-slate-500">{{ $payment->milestone->title }}</span>
+                            <span class="block text-xs text-slate-500">{{ $payment->milestone->name }}</span>
                         @endif
                     </td>
 

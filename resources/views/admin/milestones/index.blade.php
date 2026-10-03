@@ -5,6 +5,10 @@
 @php
     $user = auth()->user();
     $canCreate = (bool) $user?->can('project_milestones.create');
+    // The project is already reached (the controller authorised `view` on it), so the row half of
+    // ProjectMilestonePolicy::delete is settled; the payment half comes from $withPayments, one query.
+    $canDeleteRows = (bool) $user?->can('project_milestones.delete');
+    $withPayments = $withPayments ?? [];
 @endphp
 
 @section('header')
@@ -36,6 +40,22 @@
                                 <div class="flex shrink-0 items-center gap-3">
                                     <span class="text-xs tabular-nums text-slate-600 dark:text-slate-300">{{ app_number((float) $milestone->progress_percent, 0) }}%</span>
                                     <x-ui.badge :color="$milestone->status->color()" size="xs">{{ $milestone->status->label() }}</x-ui.badge>
+                                    <x-ui.icon-button icon="eye" size="sm" label="Open {{ $milestone->name }}"
+                                                      :href="route('admin.milestones.show', $milestone)" />
+                                    @if ($canDeleteRows && ! isset($withPayments[$milestone->id]))
+                                        <x-ui.confirm
+                                            :action="route('admin.milestones.destroy', $milestone)"
+                                            :title="'Delete '.$milestone->name.'?'"
+                                            message="Its tasks are kept and simply detached from it. No payment is booked against this milestone."
+                                            confirm-label="Delete milestone"
+                                        >
+                                            <x-slot:trigger>
+                                                <x-ui.icon-button icon="trash" size="sm" variant="danger" label="Delete milestone {{ $milestone->name }}" />
+                                            </x-slot:trigger>
+                                        </x-ui.confirm>
+                                    @elseif ($canDeleteRows)
+                                        <span class="text-xs text-slate-400 dark:text-slate-500" title="A payment is booked against this milestone, so it is kept.">Paid</span>
+                                    @endif
                                 </div>
                             </li>
                         @endforeach

@@ -8,8 +8,6 @@ use App\Enums\Ability;
 use App\Models\Collaborator\Collaborator;
 use App\Models\User;
 use Illuminate\Auth\Access\Response;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
 /**
  * Who may read and change a partner record (phase-08-09 §9).
@@ -29,18 +27,6 @@ use Illuminate\Support\Facades\Schema;
 class CollaboratorPolicy
 {
     private const MODULE = 'collaborators';
-
-    /**
-     * Tables whose rows mean "this partner has financial history". Each is checked for existence first,
-     * because the spine's arrive with Phase 10 — and a missing table must not read as "no history".
-     *
-     * @var array<string, string>
-     */
-    private const FINANCIAL = [
-        'collaborator_commission_ledger_entries' => 'collaborator_id',
-        'collaborator_payouts' => 'collaborator_id',
-        'collaborator_referrals' => 'collaborator_id',
-    ];
 
     public function viewAny(User $user): bool
     {
@@ -181,16 +167,6 @@ class CollaboratorPolicy
 
     private function hasInFlightMoney(Collaborator $collaborator): bool
     {
-        foreach (self::FINANCIAL as $table => $column) {
-            if (! Schema::hasTable($table)) {
-                continue;
-            }
-
-            if (DB::table($table)->where($column, $collaborator->getKey())->exists()) {
-                return true;
-            }
-        }
-
-        return false;
+        return $collaborator->hasMoneyRows();
     }
 }

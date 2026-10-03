@@ -77,7 +77,24 @@ final class EmployeePolicy
             return false;
         }
 
-        return $this->reaches($user, self::MODULE, Ability::Delete, $this->seesEmployee($user, $employee));
+        $reaches = $this->reaches($user, self::MODULE, Ability::Delete, $this->seesEmployee($user, $employee));
+
+        if ($reaches !== true) {
+            return $reaches;
+        }
+
+        // Somebody who has attendance, leave, an advance or a payslip on record is exited through their
+        // status, never archived out of the lists: the screens that explain that history would stop
+        // finding them.
+        if ($employee->hasWorkHistory()) {
+            return Response::deny(sprintf(
+                '%s has attendance, leave or payroll history. Exit them through their status instead — '
+                .'the record stays, and so does everything it explains.',
+                $employee->name,
+            ));
+        }
+
+        return true;
     }
 
     public function restore(User $user, Employee $employee): bool

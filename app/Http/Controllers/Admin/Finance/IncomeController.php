@@ -27,6 +27,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -55,6 +56,8 @@ final class IncomeController extends Controller
         return view('admin.income.index', [
             'incomes' => $this->filtered($request)
                 ->with(['category:id,name', 'client:id,name,company_name', 'project:id,code,name'])
+                // Lets each row ask isDeletable() without a reversal query of its own.
+                ->withExists('reversals')
                 ->latest('received_on')->latest('id')
                 ->paginate(25)->withQueryString(),
             'fields' => $fields,
@@ -120,13 +123,15 @@ final class IncomeController extends Controller
 
     public function destroy(Income $income): RedirectResponse
     {
-        if ($income->status === IncomeStatus::Voided || $income->reversals()->exists()) {
-            return back()->with('toast', [
-                'type' => 'error',
-                'message' => sprintf('%s has a history against it. A voided row and a refunded one both '
-                    .'stay as the record of what happened.', $income->income_no),
-            ]);
-        }
+        // Policy first, then the row's own state again: Super Admin passes every policy, and a voided or
+        // refunded row is not deletable by anybody.
+        Gate::authorize('delete', $income);
+
+        abort_unless($income->isDeletable(), 403, sprintf(
+            '%s has a history against it. A voided row and a refunded one both stay as the record of what '
+            .'happened.',
+            $income->income_no,
+        ));
 
         $income->delete();
 

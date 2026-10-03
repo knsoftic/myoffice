@@ -63,6 +63,7 @@
                 <th class="px-4 py-3 text-left font-semibold">Runs</th>
                 <th class="px-4 py-3 text-left font-semibold">Seats</th>
                 <th class="px-4 py-3 text-left font-semibold">Status</th>
+                <th class="px-4 py-3 text-right font-semibold"><span class="sr-only">Actions</span></th>
             </x-slot:head>
 
             @foreach ($batches as $batch)
@@ -93,6 +94,30 @@
                     <td class="px-4 py-3">
                         <x-ui.badge :color="$batch->status->color()">{{ $batch->status->label() }}</x-ui.badge>
                         <x-ui.badge :color="$batch->delivery_mode->color()" size="xs" class="ml-1">{{ $batch->delivery_mode->label() }}</x-ui.badge>
+                    </td>
+                    <td class="px-4 py-3">
+                        <div class="flex items-center justify-end gap-1">
+                            <x-ui.icon-button icon="eye" size="sm" label="Open {{ $batch->code }}"
+                                              :href="route('admin.batches.show', $batch)" />
+                            @can('update', $batch)
+                                <x-ui.icon-button icon="pencil" size="sm" label="Edit {{ $batch->code }}"
+                                                  :href="route('admin.batches.edit', $batch)" />
+                            @endcan
+                            {{-- Only a batch nobody was ever enrolled in; the destroy route asks the
+                                 policy again. --}}
+                            @if (auth()->user()?->can('batches.delete') && ! $batch->enrollments_exists)
+                                <x-ui.confirm
+                                    :action="route('admin.batches.destroy', $batch)"
+                                    :title="'Delete '.$batch->code.'?'"
+                                    message="Nobody was ever enrolled in this batch, so it moves to the trash and can be restored."
+                                    confirm-label="Delete batch"
+                                >
+                                    <x-slot:trigger>
+                                        <x-ui.icon-button icon="trash" size="sm" variant="danger" label="Delete {{ $batch->code }}" />
+                                    </x-slot:trigger>
+                                </x-ui.confirm>
+                            @endif
+                        </div>
                     </td>
                 </tr>
             @endforeach
