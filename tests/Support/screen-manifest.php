@@ -9279,4 +9279,59 @@ return [
             ],
         'response' => 'html',
     ],
+
+    /*
+    |----------------------------------------------------------------------
+    | Advanced Reports (D177) — three screens; `.options` and `.export` are endpoints.
+    |----------------------------------------------------------------------
+    | No owner scope: the report is branch-scoped (a branch user sees their branch plus branch-less
+    | rows, and a student of another branch is a 404), not owner-scoped. The index's `params` is a
+    | closure rather than null so SEC-08 hammers it with injection payloads — its Form Request is
+    | what turns those into a 422 instead of a 500. The print sheet is a letterhead page, so it sits
+    | out the responsive sweep like every other print row.
+    */
+    [
+        'route' => 'admin.advanced-reports.index',
+        'panel' => 'admin',
+        'kind' => 'index',
+        'params' => static fn (?object $fixture = null): array => [],
+        'permissions' => ['advanced_reports.view_reports'],
+        'module' => 'advanced_reports',
+        'owner_phase' => 23,
+        'query_budget' => 40,
+        'budget_reason' => 'Constant in the row count by construction: one filtered base query feeds the page, the paginator\'s count and one aggregate for the eight summary cards, plus the course and batch selects. 5 statements warm and 8 cold measured through the controller on the empty dev database; the rest is the request pipeline (session, permissions, sidebar) every admin screen pays.',
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+    [
+        'route' => 'admin.advanced-reports.students.show',
+        'panel' => 'admin',
+        'kind' => 'show',
+        'params' => static fn (?object $fixture = null): array => ['student' => $first(Student::class)],
+        'permissions' => ['advanced_reports.view_reports'],
+        'module' => 'advanced_reports',
+        'owner_phase' => 23,
+        'query_budget' => 40,
+        'budget_reason' => 'One student, every admission of theirs for the course switcher, then the selected admission\'s enrolment, progress, timetable, fee summary, receipts and reversals: a fixed set of reads per page, none per row.',
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+    [
+        'route' => 'admin.advanced-reports.print',
+        'panel' => 'admin',
+        'kind' => 'print',
+        'params' => static fn (?object $fixture = null): array => [],
+        'permissions' => ['advanced_reports.print'],
+        'module' => 'advanced_reports',
+        'owner_phase' => 23,
+        'query_budget' => 25,
+        'responsive' => false,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
 ];

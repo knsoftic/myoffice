@@ -641,6 +641,17 @@ class RoleSeeder extends Seeder
                     $staffBase,
                     PermissionRegistry::permissionNamesFor($this->businessModulesIn(ModuleGroup::Institute)),
                     PermissionRegistry::permissionNamesFor('reports', self::FINANCIAL_REPORTING),
+                    // D177: Advanced Reports is a Shared module, so businessModulesIn(Institute) above
+                    // does not reach it. Granted ability by ability through the bundle (D149) —
+                    // `view_financial` included because the institute manager already holds every
+                    // institute money ability, and a report that hid the fees from them would only
+                    // send them to five other screens for the same figures. This is the **only**
+                    // seeded role granted it (Super Admin and Admin aside): every export carries each
+                    // student's phone, email and progress, and the institute manager already exports
+                    // students. The Accountant is deliberately not granted it — that role reads
+                    // students but may not export them or read progress, and this report would hand it
+                    // both in bulk. An administrator can still grant it on purpose.
+                    PermissionRegistry::permissionNamesFor('advanced_reports', self::FINANCIAL_REPORTING),
                     // phase-04 §13 (Q2): the blog editor role beside Admin.
                     PermissionRegistry::permissionNamesFor(['blog_posts', 'blog_categories', 'blog_tags']),
                 ),

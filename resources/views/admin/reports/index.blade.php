@@ -30,6 +30,17 @@
                     Analytics
                 </x-ui.button>
             @endcan
+            {{-- D177: its own module and permission, so gated on both — never a button that 403s —
+                 and on the Students module it reads, which closes it when off. --}}
+            @module('advanced_reports')
+                @module('students')
+                    @can('advanced_reports.view_reports')
+                        <x-ui.button variant="secondary" icon="document-chart-bar" :href="route('admin.advanced-reports.index')">
+                            Advanced Reports
+                        </x-ui.button>
+                    @endcan
+                @endmodule
+            @endmodule
         </x-slot:actions>
     </x-ui.page-header>
 @endsection

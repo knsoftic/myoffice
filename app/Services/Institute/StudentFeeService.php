@@ -1122,6 +1122,48 @@ final class StudentFeeService
     }
 
     /**
+     * `summaryFor()`'s status inputs for **every admission at once**, as a grouped subquery (D177).
+     *
+     * One row per `student_admission_id` that has at least one live charge:
+     * `student_admission_id, n_charges, n_overdue, n_partial, n_pending, overdue_amount`.
+     *
+     * It exists because a list cannot call `summaryFor()` per row — that is one query per admission —
+     * and a report that wrote its own `GROUP BY` over `student_fees` would be a second definition of
+     * "live charge" and "overdue" (D56). So the owning service publishes the aggregate and the report
+     * `leftJoinSub()`s it. "Live" is exactly `liveChargesFor()`'s rule: not cancelled, not trashed (the
+     * model's soft-delete scope rides along into the subquery). The counts are what `rollUpStatus()`
+     * looks at, in its order; an admission with no row here has no live charges, which `summaryFor()`
+     * reports as `FeeSummary::empty()`.
+     *
+     * `overdue_amount` is the canonical overdue figure — Σ `balance_amount` of charges stored as
+     * `overdue` that still owe something — the same one `FeeCollectionController::stats()` and
+     * `OverdueFeesWidget` show. Every status is bound from the enum, never spelled in the SQL.
+     *
+     * Read-only: it builds a query and runs nothing.
+     *
+     * @return Builder<StudentFee>
+     */
+    public function admissionChargeRollup(): Builder
+    {
+        $overdue = StudentFeeStatus::Overdue->value;
+
+        return StudentFee::query()
+            ->whereNotNull('student_fees.student_admission_id')
+            ->whereNot('student_fees.status', StudentFeeStatus::Cancelled->value)
+            ->groupBy('student_fees.student_admission_id')
+            ->select('student_fees.student_admission_id')
+            ->selectRaw('COUNT(*) AS n_charges')
+            ->selectRaw('SUM(CASE WHEN student_fees.status = ? THEN 1 ELSE 0 END) AS n_overdue', [$overdue])
+            ->selectRaw('SUM(CASE WHEN student_fees.status = ? THEN 1 ELSE 0 END) AS n_partial', [StudentFeeStatus::Partial->value])
+            ->selectRaw('SUM(CASE WHEN student_fees.status = ? THEN 1 ELSE 0 END) AS n_pending', [StudentFeeStatus::Pending->value])
+            ->selectRaw(
+                'COALESCE(SUM(CASE WHEN student_fees.status = ? AND student_fees.balance_amount > 0 '
+                .'THEN student_fees.balance_amount ELSE 0 END), 0) AS overdue_amount',
+                [$overdue],
+            );
+    }
+
+    /**
      * Repoint a batch on a subject's charges (§6.1 `reassignBatch()`).
      *
      * **It writes no money.** Not an amount, not a discount, not a receipt, not an installment line,

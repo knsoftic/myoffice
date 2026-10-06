@@ -366,6 +366,7 @@ kabhi private disk se bahar nahi jate**), `Contact Inquiries`.
 | Messages | `/admin/messages` | Kuch delete nahi hota — ghalat paighaam doosre se theek hota hai. |
 | Notifications | `/admin/notifications` | Archive karna delete nahi hai. |
 | Reports | `/admin/reports` | Har figure usi service se — report aur screen ikhtilaf nahi kar sakte. |
+| Advanced Reports | `/admin/advanced-reports` | **Har qatar aik student aik course par** — period (joining date), course, batch, student status, payment status aur search se filter. Excel / CSV / PDF / Print mein **wohi qataarein** jo screen par hain. Fees ki raqam sirf `view_financial` walon ko; baqi ko column hi nahi milta. Student ka naam kholein to course, batch, progress — aur `view_financial` ke saath paisay ki poori history. |
 | Analytics | `/admin/analytics` | Har chart wohi service parhta hai jo us module ki screen parhti hai. |
 | My Exports | `/admin/report-exports` | Muqarrara waqt tak, phir khud khatam. |
 | Global Search | upar search box | Jo kuch aap dekh sakte hain, aik jagah. |

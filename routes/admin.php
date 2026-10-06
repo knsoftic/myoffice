@@ -131,6 +131,7 @@ use App\Http\Controllers\Admin\ModuleController;
 use App\Http\Controllers\Admin\PermissionController;
 use App\Http\Controllers\Admin\ProjectController;
 use App\Http\Controllers\Admin\ProjectMemberController;
+use App\Http\Controllers\Admin\Reporting\AdvancedReportController;
 use App\Http\Controllers\Admin\Reporting\AnalyticsController;
 use App\Http\Controllers\Admin\Reporting\AuditTrailController;
 use App\Http\Controllers\Admin\Reporting\GlobalSearchController;
@@ -2919,6 +2920,66 @@ Route::prefix('admin')
                     ->middleware(['can:reports.view_reports', 'throttle:60,1'])
                     ->name('chart');
             });
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Advanced Reports - D177
+        |----------------------------------------------------------------------
+        |
+        | Students, enrolments and fees on one filterable screen, its detail
+        | page, and the files it exports. Its own module rather than a report
+        | inside `reports`: it is a screen with its own sorting, pagination and
+        | detail page, which the report engine does not do, and an Institute
+        | Manager can be given it without the whole report hub.
+        |
+        | Every route carries exactly ONE `can:`. SEC-21(b) gives a user only
+        | the route's own permission and expects no 403, so the money ability
+        | (`advanced_reports.view_financial`) is never demanded here - it is
+        | asked inside, and only hides the fee columns, cards and history.
+        |
+        | `advanced-reports.*` is deliberately not under `reports.*`: the
+        | sidebar's Reports item highlights `admin.reports.*`, and a second
+        | item lighting up the first would be the double highlight Finance
+        | Reports already has.
+        |
+        | `batches/options` is the batch select's option list for a course as
+        | JSON - the same list the page renders on the server after a course
+        | change; its name ends in `.options` so the manifest
+        | auditor reads it as an endpoint. `export/{format}` is throttled like
+        | the engine's own export, because each request counts and streams the
+        | whole filtered set.
+        |
+        | `module:advanced_reports,students`: the report reads the Students
+        | module's records, so switching Students off closes it too (403, as
+        | any disabled module answers) - a disabled module keeps its data away
+        | from every screen, this one included. With `student_fees` off the
+        | screen stays open but withholds every fee figure
+        | (AdvancedStudentReportService::canSeeMoney()).
+        |
+        */
+        Route::middleware('module:advanced_reports,students')->prefix('advanced-reports')->name('advanced-reports.')->group(static function (): void {
+            Route::get('/', [AdvancedReportController::class, 'index'])
+                ->middleware('can:advanced_reports.view_reports')
+                ->name('index');
+
+            Route::get('students/{student}', [AdvancedReportController::class, 'show'])
+                ->whereNumber('student')
+                ->middleware('can:advanced_reports.view_reports')
+                ->name('students.show');
+
+            Route::get('batches/options', [AdvancedReportController::class, 'batchOptions'])
+                ->middleware('can:advanced_reports.view_reports')
+                ->name('batches.options');
+
+            Route::get('export/{format}', [AdvancedReportController::class, 'export'])
+                ->where('format', 'csv|excel|pdf')
+                ->middleware(['can:advanced_reports.export', 'throttle:20,1'])
+                ->name('export');
+
+            Route::get('print', [AdvancedReportController::class, 'print'])
+                ->middleware('can:advanced_reports.print')
+                ->name('print');
         });
 
         /*
