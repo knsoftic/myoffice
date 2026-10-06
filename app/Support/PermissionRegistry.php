@@ -1503,6 +1503,24 @@ final class PermissionRegistry
                 'sort' => 1060,
                 'abilities' => self::merge(self::READ, self::REPORTS, self::MONEY),
             ],
+            /*
+            | Advanced Reports (D177): one filterable admission-grain screen over students,
+            | enrolments and fees, with its own export/print pipeline.
+            |
+            | **No READ.** There is no record to "view" — the screen is a report, so running it is
+            | `view_reports`, exactly as phase-19-23 §4 says. MONEY is declared because the fee
+            | columns, the money cards and the payment history are withheld column by column from
+            | a viewer without `view_financial`; the page itself never demands it (a module
+            | declares only what it enforces).
+            */
+            'advanced_reports' => [
+                'name' => 'Advanced Reports',
+                'group' => ModuleGroup::Shared,
+                'icon' => 'document-chart-bar',
+                'is_core' => false,
+                'sort' => 1065,
+                'abilities' => self::merge(self::REPORTS, self::MONEY),
+            ],
 
             /*
             |------------------------------------------------------------------
@@ -1841,6 +1859,16 @@ final class PermissionRegistry
         // other thirty with it. `global_search` likewise - every provider self-gates.
         'audit_trail' => ['activity_log'],
         'reports' => [],
+        // `advanced_reports` reads students, admissions, batches and fees, but it is an independent
+        // read-only module (D177) and deliberately declares no edge into them. A Shared module that
+        // depended on Institute modules would be "still needed outside the batch" whenever the
+        // Institute group is bulk-disabled, and the bulk switch would leave those modules on
+        // (ModuleDataSafetyTest). The screen follows its sources at runtime instead of depending: its
+        // routes carry `module:advanced_reports,students`, so with `students` off it answers 403 and
+        // leaves the menu, and with `student_fees` off it withholds every fee figure
+        // (AdvancedStudentReportService::canSeeMoney()) — so a disabled module's data stays locked
+        // away here too.
+        'advanced_reports' => [],
         'global_search' => [],
 
         // Website — phase-03, phase-04. Phase 3 adds no edge: faqs.faq_category_id is nullable (the

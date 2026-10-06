@@ -20838,4 +20838,121 @@ return [
         'rationale' => null,
         'owner_phase' => 24,
     ],
+
+    /*
+    |----------------------------------------------------------------------
+    | Advanced Reports (D177) — the student, enrolment and fee report.
+    |
+    | Its own module, `advanced_reports`, so every row carries `module:advanced_reports,students` (it
+    | reads the Students module's records, so Students switched off closes it too) and exactly
+    | one `can:`. That single permission is the point: SEC-21(b) hands a user exactly the row's
+    | `permission` and expects no 403, so the controller never asks for a second one — money is
+    | hidden by `advanced_reports.view_financial`, never refused by it. Not double-gated by
+    | `reports.view_reports` for the same reason (D177).
+    |
+    | Owned by Phase 23's reporting band, beside `admin.reports.*`. `.options` and `.export` are
+    | endpoints (ManifestAuditor::looksLikeEndpoint) and have no screen row; `.print` is a screen.
+    |----------------------------------------------------------------------
+    */
+    [
+        'route' => 'admin.advanced-reports.batches.options',
+        'methods' => [
+                'GET',
+            ],
+        'middleware' => [
+                'web',
+                'auth',
+                'active',
+                'panel:admin',
+                'module:advanced_reports,students',
+                'can:advanced_reports.view_reports',
+            ],
+        'permission' => 'advanced_reports.view_reports',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'policy' => null,
+        'rationale' => null,
+        'owner_phase' => 23,
+    ],
+    [
+        'route' => 'admin.advanced-reports.export',
+        'methods' => [
+                'GET',
+            ],
+        'middleware' => [
+                'web',
+                'auth',
+                'active',
+                'panel:admin',
+                'module:advanced_reports,students',
+                'can:advanced_reports.export',
+                'throttle:20,1',
+            ],
+        'permission' => 'advanced_reports.export',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'policy' => null,
+        'rationale' => null,
+        'owner_phase' => 23,
+    ],
+    [
+        'route' => 'admin.advanced-reports.index',
+        'methods' => [
+                'GET',
+            ],
+        'middleware' => [
+                'web',
+                'auth',
+                'active',
+                'panel:admin',
+                'module:advanced_reports,students',
+                'can:advanced_reports.view_reports',
+            ],
+        'permission' => 'advanced_reports.view_reports',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'policy' => null,
+        'rationale' => null,
+        'owner_phase' => 23,
+    ],
+    [
+        'route' => 'admin.advanced-reports.print',
+        'methods' => [
+                'GET',
+            ],
+        'middleware' => [
+                'web',
+                'auth',
+                'active',
+                'panel:admin',
+                'module:advanced_reports,students',
+                'can:advanced_reports.print',
+            ],
+        'permission' => 'advanced_reports.print',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'policy' => null,
+        'rationale' => null,
+        'owner_phase' => 23,
+    ],
+    [
+        'route' => 'admin.advanced-reports.students.show',
+        'methods' => [
+                'GET',
+            ],
+        'middleware' => [
+                'web',
+                'auth',
+                'active',
+                'panel:admin',
+                'module:advanced_reports,students',
+                'can:advanced_reports.view_reports',
+            ],
+        'permission' => 'advanced_reports.view_reports',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'policy' => null,
+        'rationale' => null,
+        'owner_phase' => 23,
+    ],
 ];

@@ -1201,6 +1201,19 @@ final class Sidebar
                         'module' => 'reports',
                         'permission' => 'reports.view_reports',
                     ],
+                    // D177. Beside Reports because that is where somebody looks for a report, but its
+                    // own module and permission: an Institute Manager may hold this without the hub.
+                    // The `admin.advanced-reports.*` prefix keeps Reports from lighting up as well.
+                    // It reads the Students module's records and its routes carry
+                    // `module:advanced_reports,students`, so it is not offered while Students is off.
+                    [
+                        'label' => 'Advanced Reports',
+                        'icon' => 'document-chart-bar',
+                        'route' => 'admin.advanced-reports.index',
+                        'module' => 'advanced_reports',
+                        'permission' => 'advanced_reports.view_reports',
+                        'when' => static fn (User $user): bool => Modules::enabled('students'),
+                    ],
                     [
                         'label' => 'Analytics',
                         'icon' => 'chart-bar',

@@ -338,6 +338,7 @@ final class SidebarVisibilityTest extends TestCase
                 'Messages',
                 'Notifications',
                 'Reports',
+                'Advanced Reports',
                 'Analytics',
                 'My Exports',
             ],
