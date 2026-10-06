@@ -297,10 +297,12 @@ final class IncomeController extends Controller
             amount: Money::of((string) $validated['amount']),
             valueDate: Carbon::parse((string) $validated['received_on']),
             paymentMethod: PaymentMethod::from((string) $validated['payment_method']),
-            branchId: $validated['branch_id'] ?? null,
-            projectId: $validated['project_id'] ?? null,
-            clientId: $validated['client_id'] ?? null,
-            paymentMethodId: $validated['payment_method_id'] ?? null,
+            // A form posts ids as strings; `integer` validates them but does not cast, and
+            // ExpenseData's `?int` parameters refuse a string under strict_types.
+            branchId: isset($validated['branch_id']) ? (int) $validated['branch_id'] : null,
+            projectId: isset($validated['project_id']) ? (int) $validated['project_id'] : null,
+            clientId: isset($validated['client_id']) ? (int) $validated['client_id'] : null,
+            paymentMethodId: isset($validated['payment_method_id']) ? (int) $validated['payment_method_id'] : null,
             description: $validated['description'] ?? null,
             counterparty: $validated['received_from'] ?? null,
             referenceNo: $validated['reference_no'] ?? null,

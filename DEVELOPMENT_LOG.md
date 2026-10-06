@@ -788,6 +788,19 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-10-05 — Choosing a project on the expense form was a TypeError
+
+Reported on `/admin/expenses`: `ExpenseData::__construct(): Argument #8 ($projectId) must be of type
+?int, string given`. A form posts every id as a string; `nullable|integer|exists` validates `"3"` but
+does not cast it, and `ExpenseController::dataFrom()` handed `$validated['project_id']` straight to
+`ExpenseData`'s `?int` parameter, which refuses a string under strict_types. The same was true of
+`branch_id` and `payment_method_id`, and `IncomeController::dataFrom()` had the identical pattern for
+`branch_id`, `project_id`, `client_id` and `payment_method_id` — so choosing any of them on either form
+failed, and only an expense or income with none of them chosen ever saved. Both controllers now cast
+each id to `int` when present; validation already guarantees it is one. `ExpenseTest` never saw it
+because it builds `ExpenseData` with real integers. Test: `FinanceFormIdsTest` posts both forms with
+string ids, as a browser does (2/2), and `ExpenseTest` still passes (21/21).
+
 ### 2026-10-05 — Advanced Reports: one row per admission, and every export is the rows on the screen
 
 Requested: a report over students, their courses, batches and fees — filter by period, course, batch,
