@@ -215,6 +215,7 @@ final class SidebarVisibilityTest extends TestCase
                 'Payments',
                 'Expenses',
                 'Expense Approvals',
+                'Expense Sheet',
                 'Income',
                 'Payment Methods',
                 'Finance Categories',

@@ -553,6 +553,16 @@ final class Sidebar
                         'module' => 'expenses',
                         'permission' => 'expenses.approve',
                     ],
+                    // The same register as a day, week and month sheet with charts. The same audience
+                    // as the table, so the view switcher on the index never links to a refusal.
+                    [
+                        'label' => 'Expense Sheet',
+                        'icon' => 'chart-bar',
+                        'route' => 'admin.expense-sheet.index',
+                        'module' => 'expenses',
+                        'permission' => 'expenses.view_any',
+                        'match' => 'admin.expense-sheet.index',
+                    ],
                     [
                         'label' => 'Income',
                         'icon' => 'arrow-trending-up',

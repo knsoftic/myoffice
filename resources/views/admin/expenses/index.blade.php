@@ -26,6 +26,8 @@
 @endsection
 
 @section('content')
+    @include('admin.expenses._view-switch')
+
     <div class="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <x-ui.stat-card label="Expenses" :value="$expenses->total()" icon="banknotes" color="slate"
                         :delta-label="$range->label()" />
