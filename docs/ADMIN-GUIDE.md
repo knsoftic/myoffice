@@ -302,6 +302,7 @@ Collaborator panel poora aik switch se band ho sakta hai: `System → Modules �
 | Payments | `/admin/payments` | Har rupaya jo aaya. Sirf parhne ke liye. **Do permissions chahiye.** |
 | Expenses | `/admin/expenses` | **Sirf manzoor shuda kharcha report mein ginta hai.** |
 | Expense Approvals | `/admin/expenses/approvals` | Manzoori ke intezar mein. |
+| Expense Sheet | `/admin/expenses/sheet` | Wohi kharchay din, hafta aur mahina ke hisaab se — chart, category/status split aur sheet. **Table wale filters yahan bhi lagte hain.** |
 | Income | `/admin/income` | Woh aamdani jo na fees hai na client ka paisa. |
 | Payment Methods | `/admin/payment-methods` | Kaunsa form kaunsa tareeqa offer kar sakta hai. |
 | Finance Categories | `/admin/finance-categories` | **Code aik bar banne ke baad fix hai.** |

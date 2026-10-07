@@ -2712,6 +2712,17 @@ return [
     ],
 
     [
+        'route' => 'admin.expense-sheet.index',
+        'methods' => ['GET', 'HEAD'],
+        'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:expenses', 'can:expenses.view_any'],
+        'permission' => 'expenses.view_any',
+        'panel' => 'admin',
+        'state_changing' => false,
+        'rationale' => null,
+        'owner_phase' => 13,
+    ],
+
+    [
         'route' => 'admin.expenses.show',
         'methods' => ['GET', 'HEAD'],
         'middleware' => ['web', 'auth', 'active', 'panel:admin', 'module:expenses', 'can:expenses.view'],

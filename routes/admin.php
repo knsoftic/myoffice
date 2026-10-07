@@ -1730,6 +1730,7 @@ Route::prefix('admin')
         Route::middleware('module:expenses')->group(static function (): void {
             Route::get('expenses', [ExpenseController::class, 'index'])->middleware('can:expenses.view_any')->name('expenses.index');
             Route::get('expenses/approvals', [ExpenseController::class, 'approvals'])->middleware('can:expenses.approve')->name('expenses.approvals');
+            Route::get('expenses/sheet', [ExpenseController::class, 'sheet'])->middleware('can:expenses.view_any')->name('expense-sheet.index');
             Route::get('expenses/create', [ExpenseController::class, 'create'])->middleware('can:expenses.create')->name('expenses.create');
             Route::get('expenses/export/{format}', [ExpenseController::class, 'export'])->middleware(['can:expenses.export', 'can:expenses.view_financial'])->name('expenses.export');
             Route::post('expenses', [ExpenseController::class, 'store'])->middleware('can:expenses.create')->name('expenses.store');

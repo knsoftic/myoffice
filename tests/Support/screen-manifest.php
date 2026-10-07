@@ -1851,6 +1851,21 @@ return [
     ],
 
     [
+        'route' => 'admin.expense-sheet.index',
+        'panel' => 'admin',
+        'kind' => 'index',
+        'params' => static fn (?object $fixture = null): array => [],
+        'permissions' => ['expenses.view_any'],
+        'module' => 'expenses',
+        'owner_phase' => 13,
+        'query_budget' => 25,
+        'responsive' => true,
+        'a11y' => true,
+        'idor' => ['owner' => null],
+        'response' => 'html',
+    ],
+
+    [
         'route' => 'admin.expenses.show',
         'panel' => 'admin',
         'kind' => 'show',

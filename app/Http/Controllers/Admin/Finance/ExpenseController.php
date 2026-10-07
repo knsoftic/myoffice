@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Admin\Finance;
 
 use App\DataObjects\Finance\ExpenseData;
+use App\DataObjects\Finance\ExpenseSheet;
 use App\DataObjects\Finance\RefundData;
 use App\Enums\ExpenseStatus;
 use App\Enums\FinanceCategoryType;
@@ -16,6 +17,7 @@ use App\Models\Finance\Expense;
 use App\Models\Finance\FinanceCategory;
 use App\Models\Project\Project;
 use App\Services\Finance\ExpenseService;
+use App\Services\Finance\ExpenseSheetService;
 use App\Services\Finance\PaymentMethodService;
 use App\Support\CsvWriter;
 use App\Support\DateRange;
@@ -299,6 +301,44 @@ final class ExpenseController extends Controller
                 ])),
             ),
         );
+    }
+
+    /**
+     * Expense Sheet & Analytics: the register's filtered set by day, week and month, as a stacked trend
+     * and a category pivot, plus where it went by category and by status.
+     *
+     * The same filters, the same audience (`expenses.view_any`) and the same money rule as the table:
+     * without `expenses.view_financial` every figure is a count and no amount is ever selected. The
+     * arithmetic lives in ExpenseSheetService; `?period=` only picks the panel the page opens on, and
+     * anything but day, week or month is ignored.
+     */
+    public function sheet(Request $request, ExpenseSheetService $sheets): View
+    {
+        $fields = FinanceVisibility::for($request->user(), 'expenses');
+        $range = $this->range($request);
+        $status = $request->input('status');
+        $period = $request->query('period');
+
+        $sheet = $sheets->build(
+            $this->filtered($request),
+            $range,
+            $fields->seesMoney,
+            is_string($status) ? $status : null,
+        );
+
+        return view('admin.expenses.sheet', [
+            'sheet' => $sheet,
+            'requestedPeriod' => ExpenseSheet::isPeriod($period) ? $period : null,
+            'fields' => $fields,
+            'route' => 'admin.expense-sheet.index',
+            'statuses' => ExpenseStatus::cases(),
+            'contexts' => FinanceContext::cases(),
+            'categories' => $this->categories(FinanceCategoryType::Expense),
+            'range' => $range,
+            // The same filtered set the index counts, read off the sheet rather than asked again.
+            'pendingCount' => $sheet->statusCount(ExpenseStatus::Pending),
+            'canApprove' => (bool) $request->user()?->can('expenses.approve'),
+        ]);
     }
 
     /*
