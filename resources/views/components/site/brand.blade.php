@@ -9,7 +9,12 @@
 ])
 
 {{--
-    x-site.brand — the company mark: logo (light and dark variants) plus, optionally, the name.
+    x-site.brand — the company mark: the logo (light and dark variants) **or** the name, never both.
+
+    Exactly one of three things renders, in this order:
+      · a logo, when one is uploaded — and then the name is its alt text, not a second label;
+      · the company name, when there is no logo and `showName` is on;
+      · a monogram of the name, when there is no logo and `showName` is off.
 
         <x-site.brand :logo-light="$media['logo_override_light'] ?? null"
                       :logo-dark="$media['logo_override_dark'] ?? null"
@@ -27,8 +32,9 @@
 
     Every image goes through `<x-site.image>` — there is no bare image tag in the public site.
 
-    Accessible name: when the company name is printed beside the logo the logo is decorative
-    (empty alt), so a screen reader hears the name once, not twice.
+    Accessible name: the logo's alt text is the company name, because the name is no longer printed
+    beside it; when the name is printed (no logo), the link's text is the name; when only the
+    monogram shows, the link carries an `aria-label`. A screen reader hears the name once in each case.
 
     Settings are read defensively (`function_exists` + `rescue`) because this component is also
     used by the holding and maintenance pages, which Phase 2's middleware renders before every
@@ -83,7 +89,23 @@
             false,
         );
 
-        return is_array($snapshot) ? $snapshot : ['url' => $url];
+        if (is_array($snapshot)) {
+            return $snapshot;
+        }
+
+        // No derivatives came back. A path on the public disk that is not actually there is not a
+        // logo: rendering it is a broken image, and now that a logo *replaces* the name instead of
+        // sitting beside it, a broken image would leave a header with no name in it at all. So a
+        // missing file counts as no logo and the name takes its place. An absolute URL cannot be
+        // checked from here and is trusted, as before; if the disk check itself fails, the old
+        // behaviour (render the URL) is kept rather than guessing.
+        $local = is_string($path) && preg_match('~^https?://~i', $path) !== 1;
+
+        if ($local && ! rescue(static fn (): bool => Storage::disk('public')->exists(ltrim($path, '/')), true, false)) {
+            return null;
+        }
+
+        return ['url' => $url];
     };
 
     $companyName = trim((string) ($name ?? $siteSetting('company.name', '') ?? ''));
@@ -101,7 +123,24 @@
         $lightMedia = $darkMedia;
     }
 
-    $nameVisible = (bool) $showName && $companyName !== '';
+    /*
+    | One mark, never two.
+    |
+    | An uploaded logo is almost always a wordmark — knsoftic.com's says "KN Softic" in the image itself
+    | — so printing the name beside it put the company's name on screen twice in the header, twice in
+    | the mobile drawer and twice in the footer. The owner asked for exactly one: the logo when there is
+    | one, the name when there is not.
+    |
+    | So the name is shown only when no logo will be rendered, and `showName` now decides between the
+    | name and the monogram for a site with no logo yet. With a logo the name moves into the image's
+    | alt text below, so a screen reader still hears it — once.
+    |
+    | "Will be rendered" means `$lightMedia`, because that is the only branch of the template that
+    | draws a logo: a dark-only upload with no light one falls through to the name, as it always fell
+    | through to the monogram.
+    */
+    $hasLogo = $lightMedia !== null;
+    $nameVisible = ! $hasLogo && (bool) $showName && $companyName !== '';
     $altText = $nameVisible ? '' : $companyName;
 
     $withAlt = static fn (?array $media): ?array => $media === null ? null : array_merge($media, ['alt' => $altText]);
@@ -158,7 +197,8 @@
                 img-class="{{ $logoHeight }} w-auto max-w-[11rem] object-contain"
             />
         @endif
-    @elseif ($initials !== '')
+    @elseif ($initials !== '' && ! $nameVisible)
+        {{-- Only when the name is off: a monogram beside the name is two marks again. --}}
         <span
             class="{{ $monogramSize }} inline-flex shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 font-bold tracking-tight text-white shadow-sm ring-1 ring-inset ring-white/20"
             aria-hidden="true"

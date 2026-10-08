@@ -877,7 +877,10 @@ class SectionRegistry
             'requirement' => '§8',
             'fields' => [
                 'show_company_name' => [
-                    'label' => 'Show the company name beside the logo',
+                    // Never "beside the logo" any more: <x-site.brand> renders the logo OR the name,
+                    // so this switch only matters on a site with no logo, where it picks the name
+                    // over the monogram.
+                    'label' => 'Show the company name when no logo is uploaded',
                     'type' => self::TYPE_BOOLEAN,
                     'default' => true,
                     'span' => 6,

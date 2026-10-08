@@ -143,23 +143,29 @@ final class SettingsImageDerivativesTest extends TestCase
     }
 
     /**
-     * A path that is not on the disk degrades to the plain url rather than throwing.
+     * A logo setting pointing at a file that is not on the disk degrades to the company name.
      *
-     * `<x-site.brand>` also renders the holding and maintenance pages. A logo that has been deleted
-     * from the disk — or a settings row pointing at a path that was never uploaded — must cost a
-     * plain `<img>`, never the only page the site has left.
+     * `<x-site.brand>` also renders the holding and maintenance pages, so a logo deleted from the disk
+     * — or a settings row pointing at a path that was never uploaded — must never cost the page. It
+     * used to degrade to the dead URL, which was tolerable while the name was printed beside the logo
+     * anyway. Since the brand shows the logo **or** the name, a dead URL would leave a broken image and
+     * no name at all, so a missing file now counts as no logo.
      */
     #[Test]
-    public function a_missing_file_degrades_instead_of_failing_the_page(): void
+    public function a_missing_file_degrades_to_the_name_instead_of_a_broken_image(): void
     {
         $this->writeSetting('branding.logo_light', 'settings/was-deleted.png');
 
         $this->assertNull(app(SettingsImageService::class)->snapshot('settings/was-deleted.png', 'logo'));
 
+        $name = (string) site_setting('company.name', '');
+        $this->assertNotSame('', $name, 'No company name is seeded, so this test cannot see the fallback.');
+
         $html = Blade::render('<x-site.brand />');
 
-        $this->assertStringContainsString('was-deleted.png', $html, 'The brand dropped the logo entirely instead of falling back to it.');
-        $this->assertStringNotContainsString('srcset', $html, 'A srcset was claimed for a file that does not exist.');
+        $this->assertStringNotContainsString('was-deleted.png', $html, 'A logo URL for a file that does not exist was rendered — a broken image.');
+        $this->assertStringNotContainsString('<img', $html);
+        $this->assertStringContainsString(e($name), $html, 'With no usable logo the company name must take its place.');
     }
 
     /**

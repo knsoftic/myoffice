@@ -291,13 +291,27 @@ destroys evidence, and for anything financial the answer is a forward fix.
 ## Step 9 — Reference data
 
 ```bash
-php artisan db:seed --class=ProductionSeeder --force
+php artisan db:seed --class=ModuleSeeder --force
+php artisan db:seed --class=PermissionSeeder --force
+php artisan db:seed --class=RoleSeeder --force
+php artisan db:seed --class=SettingSeeder --force
 ```
 
-Modules, permissions, roles, setting keys, payment methods, leave types, salary components, categories and
-website sections. The seeder is idempotent by construction (`firstOrCreate` / `syncPermissions`) and
-**deletes nothing**, which is what makes it safe as a deploy step: new modules, permissions, roles and
-setting keys appear, and nothing existing is touched.
+**There is no `ProductionSeeder`.** This step used to name one, and the class has never existed — a
+deploy following the runbook to the letter stopped here with "Target class [ProductionSeeder] does not
+exist". **Never run a bare `php artisan db:seed` on production either**: `DatabaseSeeder` calls
+`DemoUserSeeder`, which creates one demo account per role.
+
+The four above are the reference-data seeders, run by name, and each was read for what it does to a live
+database rather than assumed: `ModuleSeeder` and `PermissionSeeder` use `firstOrNew`, and a module the
+owner switched off stays off — only a module new to this release arrives enabled. `RoleSeeder` calls
+`syncPermissions` only on a role it is creating; on an existing role it converges **additively** (D65),
+granting what the registry now adds and never revoking anything. One consequence to know: a default
+permission an administrator deliberately removed from a seeded role is granted back. `SettingSeeder`
+gives the registry default only to a key that has no row yet; an existing value is never overwritten,
+only its label and help text are refreshed. Run the others
+(`PaymentMethodSeeder`, `LeaveTypeSeeder`, `FinanceCategorySeeder` and the rest) only when a release says
+it added reference rows to them.
 
 **Working looks like**: exit 0, and running it twice changes nothing. New permissions from this release
 exist; the roles that should hold them hold them.
