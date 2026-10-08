@@ -142,7 +142,7 @@
                     @if ($canSeeSalary)
                         <div>
                             <dt class="text-slate-400">Salary</dt>
-                            <dd class="font-medium text-slate-700 dark:text-slate-200">{{ $teacher->salary !== null ? app_money($teacher->salary) : '—' }}</dd>
+                            <dd class="font-medium text-slate-700 dark:text-slate-200">{{ '$' . number_format($teacher->salary, 2) }}</dd>
                         </div>
                     @endif
                     <div>
