@@ -55,7 +55,7 @@
         ])>{{ $title }}</h1>
 
         @if ($subtitle !== '')
-            <p data-fx="rise" data-fx-delay="2" class="mt-5 max-w-2xl text-pretty text-lg leading-relaxed text-slate-600 sm:text-xl dark:text-slate-300">{{ $subtitle }}</p>
+            <p data-fx="rise" data-fx-lcp data-fx-delay="2" class="mt-5 max-w-2xl text-pretty text-lg leading-relaxed text-slate-600 sm:text-xl dark:text-slate-300">{{ $subtitle }}</p>
         @endif
     </div>
 </section>

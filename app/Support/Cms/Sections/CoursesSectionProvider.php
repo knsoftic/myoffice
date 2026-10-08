@@ -67,9 +67,11 @@ final class CoursesSectionProvider extends MarketingSectionProvider
             | thing a course card has that a service card does not: how long it takes. The fee is
             | rendered separately by the card so it can be styled as a price rather than as prose.
             */
-            $duration = $course->duration_value === null
-                ? null
-                : trim(sprintf('%d %s', $course->duration_value, (string) $course->duration_unit?->value));
+            //
+            // Through `Course::durationLabel()`, never the raw enum value: the value is `months`
+            // whatever the number, so the live home page printed "1 MONTHS" on three cards. The
+            // model already answers "1 month" / "4 months" and every other screen asks it.
+            $duration = $course->durationLabel();
 
             return [
                 // Phase 3's shared teaser card reads title / excerpt / media / meta.

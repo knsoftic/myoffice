@@ -131,7 +131,7 @@
                     @endif
 
                     @if ($subtitle !== '')
-                        <p data-fx="rise" data-fx-delay="1" @class([
+                        <p data-fx="rise" data-fx-lcp data-fx-delay="1" @class([
                             'text-pretty text-lg leading-relaxed text-slate-600 sm:text-xl dark:text-slate-300',
                             'mt-6' => $heading !== '',
                             'mx-auto max-w-2xl' => ! $alignLeft,

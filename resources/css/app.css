@@ -410,9 +410,14 @@
     | condition a performance audit measures — that puts the page's headline behind the whole
     | JavaScript critical path, for an entrance animation.
     |
-    | So the hero heading keeps its rise and gives up its fade. It paints with the HTML, at its
+    | So the page heading keeps its rise and gives up its fade. It paints with the HTML, at its
     | starting offset, and slides into place when the effects wake up. The travel is the part a
     | reader notices; the fade is the part that costs the metric.
+    |
+    | **The standfirst under it too, and that is measured.** On a 375px phone the hero subtitle
+    | wraps to more lines than the heading and *becomes* the LCP element: on the live home page
+    | first contentful paint was 176 ms and LCP 592 ms, the subtitle, still waiting on the bundle
+    | to fade it in. Exempting only the `<h1>` fixed desktop and left mobile exactly where it was.
     |
     | Only for something above the fold on arrival. Below the fold the fade is free — the reader
     | cannot see it happen — and there it is worth keeping.

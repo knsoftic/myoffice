@@ -167,6 +167,65 @@ final class PublicSiteSurvivesAMissingBundleTest extends TestCase
         );
     }
 
+    /**
+     * The paragraph under each page heading is an LCP candidate too.
+     *
+     * Exempting only the `<h1>` fixed desktop and missed mobile. On a 375px phone the hero subtitle
+     * wraps to more lines than the heading and becomes the Largest Contentful Paint element — measured
+     * on the live home page at FCP 176 ms, LCP 592 ms, the subtitle, still fading in behind the bundle.
+     * A test that only looked at `<h1>` passed the whole time, which is why this one names the four
+     * standfirsts explicitly rather than trusting a pattern to find them.
+     */
+    #[Test]
+    public function the_standfirst_under_each_page_heading_paints_immediately(): void
+    {
+        $views = [
+            'resources/views/site/sections/hero.blade.php',
+            'resources/views/site/marketing/partials/page-hero.blade.php',
+            'resources/views/site/courses/index.blade.php',
+            'resources/views/site/courses/show.blade.php',
+        ];
+
+        $missing = [];
+
+        foreach ($views as $view) {
+            $source = File::get(base_path($view));
+
+            // Anchor on the animated heading *tag*, not the first "<h1" in the file: every one of
+            // these views opens with a docblock that mentions "<h1>" in prose, and anchoring there
+            // made the first draft of this test pick up page-hero's eyebrow — a <p> that sits above
+            // the real heading — and report the wrong element.
+            $heading = preg_match('/<h1\b[^>]*\bdata-fx=/', $source, $h1, PREG_OFFSET_CAPTURE) === 1
+                ? $h1[0][1]
+                : false;
+
+            // The first animated paragraph after that heading is its standfirst. `<p\b`, not `<p`,
+            // so `<picture` and `<path` cannot match. Only the attributes before the first `>` are
+            // captured; in a tag carrying `@class([...])` that stops at the first `=>`, which comes
+            // after `data-fx-lcp` in every one of these views.
+            $found = $heading !== false
+                && preg_match('/<p\b[^>]*\bdata-fx=[^>]*/', $source, $match, 0, $heading) === 1;
+
+            if (! $found) {
+                $missing[] = $view.' (no animated paragraph after the <h1> — the view changed shape)';
+
+                continue;
+            }
+
+            if (! str_contains($match[0], 'data-fx-lcp')) {
+                $missing[] = $view;
+            }
+        }
+
+        $this->assertSame(
+            [],
+            $missing,
+            "The paragraph under the page heading fades in without `data-fx-lcp`. On a phone it is "
+                ."often the largest text on screen, so LCP waits for the JavaScript bundle:\n  - "
+                .implode("\n  - ", $missing),
+        );
+    }
+
     /** The stylesheet half of `data-fx-lcp`: without this rule the attribute is decoration. */
     #[Test]
     public function the_lcp_exemption_exists_in_the_stylesheet(): void

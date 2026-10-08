@@ -330,14 +330,25 @@ a performance audit, which then reports a number nobody will ever see again. It 
 never fails the deploy (a logo that will not encode leaves the original being served, which is slow
 but not broken), and it needs `storage:link` to have worked.
 
-**There is deliberately no `cache:clear` here, and that is a recent change.** The public page cache
-stores finished HTML with the content-hashed asset URLs inside it, and until decision **D175** nothing
-invalidated it when `npm run build` renamed those assets — so a deploy left every cached page requesting
-files it had just deleted, answering 200 with a stylesheet that 404s, until somebody cleared the cache by
-hand. The cache key now carries the Vite manifest's content hash, so a rebuild that moves the asset names
-invalidates the pages that embed them and a rebuild that does not keeps the cache warm. **On a release
-that predates D175 you still have to clear it by hand** — `php artisan cache:clear`, or the Flush button
-on the Website overview.
+**When the public page cache has to be cleared by hand, and when it does not.** The page cache stores
+finished HTML. Until decision **D175** nothing invalidated it when `npm run build` renamed the assets, so
+a deploy left every cached page requesting files it had just deleted — 200 with a stylesheet that 404s.
+The cache key now carries the Vite manifest's content hash, so **a release that changes the built assets
+invalidates the cached pages on its own.**
+
+**A release that changes templates but not the built assets does not.** The manifest hash is the same,
+the key is the same, and visitors keep getting the HTML rendered before the deploy — the new Blade is
+live and nobody sees it. This is not hypothetical: the release that added `data-fx-lcp` to the page
+standfirsts and fixed "1 MONTHS" on the course cards changed four views and one CSS *comment*, which
+the build strips, so the stylesheet hash did not move. Whenever a release touches `resources/views/site/`
+or anything a public page renders, run:
+
+```bash
+php artisan cache:clear
+```
+
+— or press Flush on the Website overview. Clearing when it was not needed costs one cold render per page;
+not clearing when it was needed costs the release.
 
 **Working looks like**: `php artisan about` reports Config, Routes, Views and Events as **CACHED**, and
 `media:warm-settings-images` reports each logo as `ready` with the byte saving beside it. That `about`

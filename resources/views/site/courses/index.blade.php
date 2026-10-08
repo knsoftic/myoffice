@@ -33,7 +33,7 @@
             <h1 data-fx="rise" data-fx-lcp class="text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">
                 {{ $category?->name ?? 'Courses' }}
             </h1>
-            <p data-fx="rise" data-fx-delay="1" class="mt-2 max-w-2xl text-slate-600 dark:text-slate-300">{{ $pageDescription }}</p>
+            <p data-fx="rise" data-fx-lcp data-fx-delay="1" class="mt-2 max-w-2xl text-slate-600 dark:text-slate-300">{{ $pageDescription }}</p>
         </div>
     </section>
 

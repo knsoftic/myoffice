@@ -43,7 +43,7 @@
                 </h1>
 
                 @if (filled($course->short_description))
-                    <p data-fx="rise" data-fx-delay="1" class="mt-3 max-w-2xl text-lg text-slate-600 dark:text-slate-300">{{ $course->short_description }}</p>
+                    <p data-fx="rise" data-fx-lcp data-fx-delay="1" class="mt-3 max-w-2xl text-lg text-slate-600 dark:text-slate-300">{{ $course->short_description }}</p>
                 @endif
 
                 <div class="mt-5 flex flex-wrap items-center gap-2 text-sm">
