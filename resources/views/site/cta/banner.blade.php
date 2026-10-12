@@ -16,7 +16,7 @@
     <div
         @class([
             'relative isolate overflow-hidden rounded-3xl px-6 py-16 text-center shadow-2xl sm:px-12 sm:py-20 lg:px-20',
-            'bg-slate-900 ring-1 ring-white/10' => $color === null,
+            'bg-gradient-to-br from-slate-900 via-slate-900 to-brand-950 ring-1 ring-white/10' => $color === null,
             'ring-1 ring-white/10' => $color !== null && $tone === 'dark',
             'ring-1 ring-slate-900/10 dark:!bg-slate-900 dark:ring-white/10' => $color !== null && $tone === 'light',
         ])
@@ -28,12 +28,14 @@
                 <div class="absolute inset-0 bg-slate-950/70"></div>
             </div>
         @elseif ($color === null)
+            {{-- The hero's faint grid, fading out from the centre, under the same two brand glows. --}}
+            <div class="pointer-events-none absolute inset-0 -z-10 opacity-50 [mask-image:radial-gradient(ellipse_at_center,black_15%,transparent_70%)]" aria-hidden="true" style="background-image: linear-gradient(to right, rgb(255 255 255 / 0.06) 1px, transparent 1px), linear-gradient(to bottom, rgb(255 255 255 / 0.06) 1px, transparent 1px); background-size: 2.5rem 2.5rem;"></div>
             <div class="pointer-events-none absolute -top-24 left-1/2 -z-10 h-72 w-[48rem] -translate-x-1/2 rounded-full bg-brand-500/30 blur-3xl" aria-hidden="true" data-fx-parallax style="--fx-far: 50px"></div>
             <div class="pointer-events-none absolute -bottom-32 -right-24 -z-10 h-72 w-72 rounded-full bg-brand-400/20 blur-3xl" aria-hidden="true" data-fx-parallax style="--fx-far: -80px"></div>
         @endif
 
         <div class="mx-auto max-w-2xl">
-            <{{ $headingTag }} class="text-balance text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl dark:text-white">{{ $heading }}</{{ $headingTag }}>
+            <{{ $headingTag }} class="text-balance text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl lg:leading-[1.1] dark:text-white">{{ $heading }}</{{ $headingTag }}>
 
             @if ($subheading !== '')
                 <p class="mt-4 text-pretty text-lg text-slate-700 dark:text-slate-200">{{ $subheading }}</p>

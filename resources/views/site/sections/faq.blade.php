@@ -28,28 +28,56 @@
 @endphp
 
 @if ($questions !== [])
+    @php
+        // One column with a heading: the heading beside the questions on a wide screen, held in view while
+        // the reader scrolls the answers. Two columns keep the centred heading above the grid.
+        $split = $columns === 1 && ($heading !== '' || $description !== '');
+        $hasShowAll = is_array($showAll) && filled($showAll['label'] ?? null) && filled($showAll['url'] ?? null);
+    @endphp
     <x-site.section :anchor="data_get($section ?? null, 'anchor')" background="muted" :label="$heading !== '' ? $heading : null">
-        <x-site.heading data-fx="rise" :title="$heading" :subtitle="$description" align="center" />
-
-        <x-site.accordion
-            data-fx="rise"
-            data-fx-delay="1"
-            :items="$questions"
-            :columns="$columns"
-            :open-first="$openFirst"
-            :id-prefix="'faq-'.(data_get($section ?? null, 'id') ?? 'x')"
-            @class([
-                'mx-auto',
-                'mt-12' => $heading !== '' || $description !== '',
-                'max-w-3xl' => $columns === 1,
-                'max-w-6xl' => $columns === 2,
-            ])
-        />
-
-        @if (is_array($showAll) && filled($showAll['label'] ?? null) && filled($showAll['url'] ?? null))
-            <div data-fx="rise" class="mt-10 text-center">
-                <x-site.button :link="$showAll" icon="arrow-right" />
+        @if ($split)
+            <div class="grid gap-10 lg:grid-cols-12 lg:gap-16">
+                <div class="lg:col-span-5">
+                    <div class="lg:sticky lg:top-28">
+                        <x-site.heading data-fx="rise" :title="$heading" :subtitle="$description" align="left" :accent="true" />
+                        @if ($hasShowAll)
+                            <div data-fx="rise" class="mt-8">
+                                <x-site.button :link="$showAll" icon="arrow-right" />
+                            </div>
+                        @endif
+                    </div>
+                </div>
+                <x-site.accordion
+                    data-fx="rise"
+                    data-fx-delay="1"
+                    :items="$questions"
+                    :columns="1"
+                    :open-first="$openFirst"
+                    :id-prefix="'faq-'.(data_get($section ?? null, 'id') ?? 'x')"
+                    class="lg:col-span-7"
+                />
             </div>
+        @else
+            <x-site.heading data-fx="rise" :title="$heading" :subtitle="$description" align="center" :accent="true" />
+            <x-site.accordion
+                data-fx="rise"
+                data-fx-delay="1"
+                :items="$questions"
+                :columns="$columns"
+                :open-first="$openFirst"
+                :id-prefix="'faq-'.(data_get($section ?? null, 'id') ?? 'x')"
+                @class([
+                    'mx-auto',
+                    'mt-12' => $heading !== '' || $description !== '',
+                    'max-w-3xl' => $columns === 1,
+                    'max-w-6xl' => $columns === 2,
+                ])
+            />
+            @if ($hasShowAll)
+                <div data-fx="rise" class="mt-10 text-center">
+                    <x-site.button :link="$showAll" icon="arrow-right" />
+                </div>
+            @endif
         @endif
     </x-site.section>
 @endif

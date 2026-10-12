@@ -89,15 +89,16 @@
         ])>
             <div @class([
                 'lg:col-span-7' => $images->isNotEmpty(),
-                'lg:col-span-12 lg:max-w-4xl' => $images->isEmpty(),
+                // No images: the heading and the introduction side by side, like an editorial spread.
+                'lg:col-span-12 lg:grid lg:grid-cols-12 lg:items-start lg:gap-16' => $images->isEmpty(),
             ])>
-                <x-site.heading data-fx="rise" :title="$heading" align="left" />
+                <x-site.heading data-fx="rise" :title="$heading" align="left" :accent="true" @class(['lg:col-span-5' => $images->isEmpty()]) />
 
                 @if ($useTabs)
                     <div
                         data-fx="rise"
                         data-fx-delay="1"
-                        class="mt-8"
+                        @class(['mt-8', 'lg:col-span-7 lg:mt-2' => $images->isEmpty()])
                         x-data="{
                             tab: 0,
                             count: {{ $intros->count() }},
@@ -151,7 +152,7 @@
                         @endforeach
                     </div>
                 @elseif ($intros->isNotEmpty())
-                    <div data-fx="rise" data-fx-delay="1" class="mt-8 space-y-8">
+                    <div data-fx="rise" data-fx-delay="1" @class(['mt-8 space-y-8', 'lg:col-span-7 lg:mt-2 lg:border-l-2 lg:border-brand-500/30 lg:pl-8' => $images->isEmpty()])>
                         @foreach ($intros as $intro)
                             <div>
                                 @if ($intros->count() > 1)
@@ -214,7 +215,8 @@
     @if ($reasons->isNotEmpty())
         <div class="mt-20 lg:mt-28">
             @if ($whyHeading !== '')
-                <h3 data-fx="rise" class="max-w-2xl text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl dark:text-white">{{ $whyHeading }}</h3>
+                <span data-fx="rise" class="mb-5 block h-1 w-12 rounded-full bg-gradient-to-r from-brand-600 to-brand-300 dark:from-brand-400 dark:to-brand-200" aria-hidden="true"></span>
+                <h3 data-fx="rise" class="max-w-2xl text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl lg:text-4xl dark:text-white">{{ $whyHeading }}</h3>
             @endif
 
             <ul role="list" @class([
@@ -222,13 +224,16 @@
                 'mt-10' => $whyHeading !== '',
             ])>
                 @foreach ($reasons as $reason)
-                    <li data-fx="tilt" data-fx-delay="{{ ($loop->index % 4) + 1 }}" class="group rounded-2xl border border-slate-200 bg-white p-6 shadow-card transition duration-200 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-card-hover dark:border-white/10 dark:bg-slate-900/60 dark:hover:border-brand-500/40">
-                        <span class="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600 ring-1 ring-inset ring-brand-100 dark:bg-brand-500/10 dark:text-brand-300 dark:ring-brand-500/20">
-                            <x-ui.icon :name="data_get($reason, 'content.icon') ?: 'check-badge'" class="h-5 w-5" />
+                    <li data-fx="tilt" data-fx-delay="{{ ($loop->index % 4) + 1 }}" class="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-7 shadow-card transition duration-300 hover:-translate-y-1 hover:border-brand-300 hover:shadow-card-hover dark:border-white/10 dark:bg-slate-900/60 dark:hover:border-brand-400/40">
+                        {{-- Decoration only: a hairline that lights on hover, and the card's number set large and faint. --}}
+                        <span class="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand-500/70 to-transparent opacity-0 transition duration-300 group-hover:opacity-100" aria-hidden="true"></span>
+                        <span class="pointer-events-none absolute -right-1 -top-4 select-none text-7xl font-black tabular-nums text-slate-900/[0.04] transition duration-300 group-hover:text-brand-500/10 dark:text-white/[0.05] dark:group-hover:text-brand-400/10" aria-hidden="true">{{ sprintf('%02d', $loop->iteration) }}</span>
+                        <span class="relative inline-flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-lg shadow-brand-600/25 ring-1 ring-inset ring-white/10">
+                            <x-ui.icon :name="data_get($reason, 'content.icon') ?: 'check-badge'" class="h-6 w-6" />
                         </span>
-                        <h4 class="mt-5 text-base font-semibold text-slate-900 dark:text-white">{{ data_get($reason, 'content.title') }}</h4>
+                        <h4 class="relative mt-6 text-lg font-semibold leading-snug text-slate-900 dark:text-white">{{ data_get($reason, 'content.title') }}</h4>
                         @if (filled(data_get($reason, 'content.text')))
-                            <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">{{ data_get($reason, 'content.text') }}</p>
+                            <p class="relative mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">{{ data_get($reason, 'content.text') }}</p>
                         @endif
                     </li>
                 @endforeach

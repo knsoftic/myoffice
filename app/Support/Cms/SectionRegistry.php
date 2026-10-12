@@ -1039,6 +1039,44 @@ class SectionRegistry
                     'max_chars' => 600,
                     'sort' => 30,
                 ],
+                // The pill above the heading and the rating line under the buttons. Both empty by
+                // default, so a hero published before they existed renders exactly as it did.
+                'badge_text' => [
+                    'label' => 'Badge above the heading',
+                    'type' => self::TYPE_TEXT,
+                    'default' => null,
+                    'max_chars' => 60,
+                    'span' => 8,
+                    'help' => 'A short pill, e.g. Next-gen management platform. Leave empty for none.',
+                    'sort' => 32,
+                ],
+                'badge_tag' => [
+                    'label' => 'Badge highlight',
+                    'type' => self::TYPE_TEXT,
+                    'default' => null,
+                    'max_chars' => 24,
+                    'span' => 4,
+                    'help' => 'Shown in the brand colour after the badge, e.g. v2.0 live.',
+                    'sort' => 34,
+                ],
+                'rating_value' => [
+                    'label' => 'Rating',
+                    'type' => self::TYPE_TEXT,
+                    'default' => null,
+                    'max_chars' => 8,
+                    'span' => 4,
+                    'help' => 'Out of 5, e.g. 4.9. Shown with stars under the buttons; leave empty to hide. Publish only a rating you can back up.',
+                    'sort' => 36,
+                ],
+                'rating_text' => [
+                    'label' => 'Rating caption',
+                    'type' => self::TYPE_TEXT,
+                    'default' => null,
+                    'max_chars' => 80,
+                    'span' => 8,
+                    'help' => 'e.g. from 120 client reviews.',
+                    'sort' => 38,
+                ],
                 'primary_button' => self::linkField('Primary button', 40, [
                     'tab' => self::TAB_BUTTONS,
                     // No URL until the owning phase serves a target (integration K-5).

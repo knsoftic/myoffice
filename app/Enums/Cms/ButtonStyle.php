@@ -65,7 +65,7 @@ enum ButtonStyle: string
     public function classes(): string
     {
         return trim(self::BASE.' '.match ($this) {
-            self::Primary => self::SIZE.' border border-transparent bg-brand-600 text-white shadow-sm hover:bg-brand-700 hover:shadow active:bg-brand-800 dark:bg-brand-500 dark:hover:bg-brand-400',
+            self::Primary => self::SIZE.' border border-transparent bg-brand-600 text-white shadow-lg shadow-brand-600/25 hover:-translate-y-px hover:bg-brand-700 hover:shadow-brand-600/40 active:translate-y-0 active:bg-brand-800 dark:bg-brand-500 dark:shadow-brand-500/20 dark:hover:bg-brand-400 dark:hover:shadow-brand-400/30',
             self::Secondary => self::SIZE.' border border-transparent bg-slate-900 text-white shadow-sm hover:bg-slate-800 active:bg-slate-950 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100',
             self::Outline => self::SIZE.' border border-brand-600 bg-transparent text-brand-700 hover:bg-brand-50 active:bg-brand-100 dark:border-brand-400 dark:text-brand-300 dark:hover:bg-brand-500/10',
             self::Ghost => self::SIZE.' border border-transparent bg-transparent text-slate-700 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white',

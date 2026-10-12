@@ -7,6 +7,8 @@
     'icon' => null,
     'tone' => 'light',
     'align' => 'center',
+    'gradient' => false,
+    'size' => 'default',
 ])
 
 {{--
@@ -52,9 +54,16 @@
     $caption = (string) ($label ?? data_get($content, 'label') ?? '');
     $statPrefix = (string) ($prefix ?? data_get($content, 'prefix') ?? '');
     $statSuffix = (string) ($suffix ?? data_get($content, 'suffix') ?? '');
-    $statIcon = $icon ?? data_get($content, 'icon');
+    // `:icon="false"` suppresses the item's own icon when the parent draws one (the hero's chips).
+    $statIcon = $icon === false ? null : ($icon ?? data_get($content, 'icon'));
+    $small = $size === 'sm';
 
-    $valueTone = $tone === 'dark' ? 'text-white' : 'text-slate-900 dark:text-white';
+    $valueTone = match (true) {
+        $tone === 'dark' => 'text-white',
+        // Clipped gradient text; the colour stops keep the contrast of the plain figure in both themes.
+        (bool) $gradient => 'bg-gradient-to-br from-slate-900 via-slate-800 to-brand-600 bg-clip-text text-transparent dark:from-white dark:via-white dark:to-brand-300',
+        default => 'text-slate-900 dark:text-white',
+    };
     $labelTone = $tone === 'dark' ? 'text-slate-300' : 'text-slate-500 dark:text-slate-400';
     $iconTone = $tone === 'dark' ? 'text-brand-300' : 'text-brand-600 dark:text-brand-400';
 
@@ -62,17 +71,17 @@
 @endphp
 
 @if ($hasValue)
-    <div {{ $attributes->class(['flex flex-col gap-1', $alignment]) }}>
+    <div {{ $attributes->class(['flex flex-col', 'gap-0.5' => $small, 'gap-1' => ! $small, $alignment]) }}>
         @if (filled($statIcon))
             <x-ui.icon :name="$statIcon" class="mb-1 h-6 w-6 {{ $iconTone }}" />
         @endif
 
-        <p class="text-3xl font-bold tracking-tight tabular-nums sm:text-4xl {{ $valueTone }}">
-            @if ($statPrefix !== '')<span class="text-xl font-semibold sm:text-2xl">{{ $statPrefix }}</span>@endif{{ $formatted }}@if ($statSuffix !== '')<span class="text-xl font-semibold sm:text-2xl">{{ $statSuffix }}</span>@endif
+        <p @class(['font-bold tracking-tight tabular-nums', 'text-lg leading-tight sm:text-xl' => $small, 'text-3xl sm:text-4xl' => ! $small, $valueTone])>
+            @if ($statPrefix !== '')<span @class(['font-semibold', 'text-sm' => $small, 'text-xl sm:text-2xl' => ! $small])>{{ $statPrefix }}</span>@endif{{ $formatted }}@if ($statSuffix !== '')<span @class(['font-semibold', 'text-sm' => $small, 'text-xl sm:text-2xl' => ! $small])>{{ $statSuffix }}</span>@endif
         </p>
 
         @if ($caption !== '')
-            <p class="text-xs font-medium uppercase tracking-wider {{ $labelTone }}">{{ $caption }}</p>
+            <p @class(['text-xs font-medium', 'uppercase tracking-wider' => ! $small, $labelTone])>{{ $caption }}</p>
         @endif
     </div>
 @endif

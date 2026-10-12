@@ -25,7 +25,8 @@
 
     Variants: `panel` is a card of cells separated by hairlines (each cell draws its own top and left
     rule and the card clips the outer ones, so a short last row leaves no grey hole); `plain` is the grid
-    without the card, for use on a busy background.
+    without the card, for use on a busy background. `cards` gives every statistic its own glass card with a
+    gradient figure — the hero's strip, where the numbers carry the page.
 --}}
 
 @php
@@ -82,21 +83,51 @@
         default => 'grid-cols-2 sm:grid-cols-4',
     };
 
-    $panel = $variant !== 'plain';
+    // `cards`: each statistic its own glass card — the hero's strip, where the numbers are the point.
+    $cards = $variant === 'cards';
+    // `chips`: up to three small glass chips, laid out by the parent (the hero's dashboard preview floats them on
+    // its frame from lg up; below that they sit in a row under it).
+    $chips = $variant === 'chips';
+    $panel = ! $cards && ! $chips && $variant !== 'plain';
 @endphp
 
-@if ($count > 0)
+@if ($count > 0 && $chips)
+    @php
+        // Full class names, so Tailwind sees them: where each chip sits on the frame from lg up.
+        $spots = [
+            'lg:absolute lg:-left-6 lg:top-20 xl:-left-14',
+            'lg:absolute lg:-right-6 lg:top-1/3 xl:-right-14',
+            'lg:absolute lg:-bottom-6 lg:left-1/3',
+        ];
+        $floats = ['fx-float', 'fx-float fx-float-late', 'fx-float fx-float-later'];
+    @endphp
+    <ul role="list" {{ $attributes->class(['mt-6 grid gap-3 sm:grid-cols-3 lg:mt-0 lg:contents']) }}>
+        @foreach ($resolved->take(3)->values() as $i => $stat)
+            <li class="{{ $spots[$i] }} {{ $floats[$i] }} z-10 flex items-center gap-3 rounded-2xl border border-slate-200/80 bg-white/85 px-4 py-3 shadow-xl shadow-brand-900/10 backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/80 dark:shadow-black/40">
+                <span class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-violet-600 text-white shadow-md shadow-brand-600/30" aria-hidden="true">
+                    <x-ui.icon :name="data_get($stat, 'content.icon') ?: ['chart-bar', 'users', 'academic-cap'][$i]" class="h-4 w-4" />
+                </span>
+                <x-site.stat :item="$stat" size="sm" align="left" :icon="false" />
+            </li>
+        @endforeach
+    </ul>
+@elseif ($count > 0)
     <div {{ $attributes->class([
         'overflow-hidden rounded-2xl' => $panel,
         'bg-white/90 shadow-sm ring-1 ring-slate-200/80 backdrop-blur dark:bg-slate-950/70 dark:ring-white/10' => $panel,
     ]) }}>
-        <ul role="list" @class(['grid', $columns, '-ml-px -mt-px' => $panel, 'gap-8' => ! $panel])>
+        <ul role="list" @class(['grid', $columns, '-ml-px -mt-px' => $panel, 'gap-4 sm:gap-5' => $cards, 'gap-8' => ! $panel && ! $cards])>
             @foreach ($resolved as $stat)
                 <li @class([
                     'flex',
                     'border-l border-t border-slate-200/80 px-4 py-7 sm:px-6 dark:border-white/10' => $panel,
+                    'group relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white/70 px-5 py-7 shadow-sm backdrop-blur transition duration-300 hover:-translate-y-0.5 hover:border-brand-300/70 hover:shadow-card-hover sm:px-6 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-brand-400/40' => $cards,
                 ])>
-                    <x-site.stat :item="$stat" :tone="$tone" class="w-full" />
+                    @if ($cards)
+                        <span class="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-brand-500/70 to-transparent opacity-60 transition duration-300 group-hover:opacity-100" aria-hidden="true"></span>
+                        <span class="pointer-events-none absolute -bottom-12 left-1/2 h-24 w-40 -translate-x-1/2 rounded-full bg-brand-500/10 opacity-0 blur-2xl transition duration-300 group-hover:opacity-100" aria-hidden="true"></span>
+                    @endif
+                    <x-site.stat :item="$stat" :tone="$tone" :gradient="$cards" class="relative w-full" />
                 </li>
             @endforeach
         </ul>

@@ -232,6 +232,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\View;
 use App\Support\Cms\SectionRegistry;
+use App\Support\Cms\Sections\LandingSectionTypes;
 use App\Support\Cms\Sections\MarketingSectionTypes;
 use App\Support\Cms\Sitemap\BlogCategorySitemapProvider;
 use App\Support\Cms\Sitemap\BlogPostSitemapProvider;
@@ -477,6 +478,13 @@ class AppServiceProvider extends ServiceProvider
         $knownSectionTypes = SectionRegistry::keys();
 
         foreach (MarketingSectionTypes::definitions() as $key => $definition) {
+            if (! in_array($key, $knownSectionTypes, true)) {
+                SectionRegistry::register($key, $definition);
+            }
+        }
+
+        // The landing-page types (solutions by audience, pricing plans, sign-up banner), guarded the same way.
+        foreach (LandingSectionTypes::definitions() as $key => $definition) {
             if (! in_array($key, $knownSectionTypes, true)) {
                 SectionRegistry::register($key, $definition);
             }

@@ -6,6 +6,7 @@
     'align' => 'center',
     'size' => 'default',
     'id' => null,
+    'accent' => false,
 ])
 
 {{--
@@ -48,6 +49,10 @@
 
 @if ($hasTitle || $hasSubtitle || filled($eyebrow))
     <div {{ $attributes->class(['max-w-3xl', $alignment]) }}>
+        @if ($accent)
+            {{-- A short brand rule above the heading: decoration only, so it says nothing to a screen reader. --}}
+            <span @class(['mb-5 block h-1 w-12 rounded-full bg-gradient-to-r from-brand-600 to-brand-300 dark:from-brand-400 dark:to-brand-200', 'mx-auto' => $align === 'center', 'ml-auto' => $align === 'right']) aria-hidden="true"></span>
+        @endif
         @if (filled($eyebrow))
             <p class="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-brand-600 dark:text-brand-400">
                 {{ $eyebrow }}

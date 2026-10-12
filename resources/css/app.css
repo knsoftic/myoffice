@@ -518,3 +518,18 @@
         }
     }
 }
+
+/*
+| The hero's statistic chips drift a few pixels while they float on the dashboard preview (lg and up, where
+| they are positioned on the frame). Off entirely for anyone who asks for reduced motion.
+*/
+@keyframes fx-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-6px); }
+}
+
+@media (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
+    .fx-float { animation: fx-float 6s ease-in-out infinite; }
+    .fx-float-late { animation-delay: -2s; }
+    .fx-float-later { animation-delay: -4s; }
+}

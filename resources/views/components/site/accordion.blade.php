@@ -52,7 +52,12 @@
                 $buttonId = $idPrefix.'-button-'.($row['id'] ?? $index);
             @endphp
 
-            <div class="h-fit overflow-hidden rounded-xl border border-slate-200 bg-white transition duration-150 hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700">
+            <div
+                class="h-fit overflow-hidden rounded-2xl border bg-white transition duration-200 dark:bg-slate-900"
+                x-bind:class="open === {{ $index }}
+                    ? 'border-brand-300 shadow-card-hover ring-1 ring-brand-500/10 dark:border-brand-500/40 dark:ring-brand-400/10'
+                    : 'border-slate-200 hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700'"
+            >
                 <h3>
                     <button
                         type="button"
@@ -60,15 +65,20 @@
                         aria-controls="{{ $panelId }}"
                         x-bind:aria-expanded="open === {{ $index }} ? 'true' : 'false'"
                         x-on:click="open = (open === {{ $index }} ? null : {{ $index }})"
-                        class="flex w-full items-center justify-between gap-4 px-5 py-4 text-left text-[0.9375rem] font-semibold text-slate-900 transition hover:text-brand-700 dark:text-white dark:hover:text-brand-300"
+                        class="flex w-full items-center justify-between gap-4 px-5 py-4 text-left text-[0.9375rem] font-semibold text-slate-900 transition hover:text-brand-700 sm:px-6 sm:py-5 sm:text-base dark:text-white dark:hover:text-brand-300"
                     >
                         <span>{{ $row['question'] }}</span>
 
-                        <x-ui.icon
-                            name="chevron-down"
-                            class="h-5 w-5 shrink-0 text-slate-400 transition-transform duration-150"
-                            x-bind:class="open === {{ $index }} ? 'rotate-180' : ''"
-                        />
+                        <span
+                            class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition duration-200"
+                            x-bind:class="open === {{ $index }}
+                                ? 'bg-gradient-to-br from-brand-500 to-violet-600 text-white shadow-md shadow-brand-600/30'
+                                : 'bg-slate-100 text-slate-500 dark:bg-white/5 dark:text-slate-400'"
+                            aria-hidden="true"
+                        >
+                            <x-ui.icon name="plus" class="h-4 w-4" x-show="open !== {{ $index }}" />
+                            <x-ui.icon name="minus" class="h-4 w-4" x-show="open === {{ $index }}" x-cloak />
+                        </span>
                     </button>
                 </h3>
 
@@ -82,7 +92,7 @@
                     x-transition:enter-end="opacity-100 translate-y-0"
                     x-cloak
                 >
-                    <div class="border-t border-slate-100 px-5 py-4 dark:border-slate-800">
+                    <div class="border-t border-slate-100 px-5 py-4 sm:px-6 sm:pb-6 dark:border-slate-800">
                         <x-site.prose :html="$row['answer']" size="sm" />
                     </div>
                 </div>

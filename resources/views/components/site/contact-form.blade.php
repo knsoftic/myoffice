@@ -232,7 +232,7 @@
                     </div>
                     <div>
                         <label for="{{ $p }}-email" class="{{ $label }}">Email <span class="text-rose-500">*</span></label>
-                        <input id="{{ $p }}-email" type="email" name="email" value="{{ old('email') }}" required maxlength="150" autocomplete="email" class="{{ $field }}" @error('email') aria-invalid="true" @enderror>
+                        <input id="{{ $p }}-email" type="email" name="email" value="{{ old('email') }}" x-init="if (! $el.value) { try { const carried = sessionStorage.getItem('site.signup.email'); if (carried) { $el.value = carried; sessionStorage.removeItem('site.signup.email'); } } catch (e) {} }" required maxlength="150" autocomplete="email" class="{{ $field }}" @error('email') aria-invalid="true" @enderror>
                         @error('email')<p class="{{ $error }}">{{ $message }}</p>@enderror
                     </div>
                     <div>

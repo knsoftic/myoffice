@@ -790,6 +790,30 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-10-12 — Home page as a product landing page (CMS-driven)
+
+The public home page was redesigned from a brief (glass / aurora dark look, persona solutions, pricing, FAQ, sign-up
+banner) **without hard-coding website text**: three section types were added the way phase-04 adds its own
+(`App\Support\Cms\Sections\LandingSectionTypes`, registered from `AppServiceProvider` beside `MarketingSectionTypes`),
+each with one partial under `site/sections/`, so the admin editor, validation, snapshots and publishing come from
+the registry unchanged:
+- `solutions` — two tabs of feature cards (software house / training institute), an accessible tablist;
+- `pricing` — plans with a monthly / yearly switch, a highlighted plan, a checklist per plan; prices are text fields
+  ("$29", "Custom"), and `period_label` follows only a price with a digit;
+- `signup_cta` — an aurora banner whose email box hands the address to the contact form through sessionStorage
+  (the input has no `name`, so the address never reaches a query string or a log; `x-site.contact-form` picks it up).
+
+The hero gained four optional fields (`badge_text`, `badge_tag`, `rating_value`, `rating_text`, all empty by
+default so an existing hero renders as before), an aurora background, and — when no hero image or background is
+uploaded — a drawn dashboard preview (`site/sections/partials/hero-mockup.blade.php`, shapes only, no invented
+figures) with the hero's own statistics floating on it as chips (`x-site.stats variant="chips"`, `x-site.stat
+size="sm"`). Also restyled: the stats `cards` variant, the FAQ accordion (plus / minus), the sticky header glass,
+the primary button glow. `php artisan cms:landing-page` lays the page out through the CMS services (idempotent;
+`--hero`, `--menu`, `--tidy` opt in to rewriting the hero, adding anchor links and a header button, and switching
+the old CTA banner off). **The demo's prices, "Save 20%" and the 4.9 rating are placeholders** — replace them in
+/admin/website before going live. Run on `my_office_demo` with all three options; assets rebuilt with `npm run build`.
+`tests/Feature/Cms/LandingPageTest.php` added.
+
 ### 2026-10-12 — "My Salary & Deductions" (employee self-service)
 
 Asked for a full salary-deduction feature. The admin half already existed and was left untouched: deduction rules in

@@ -59,6 +59,19 @@
 
     $split = $alignLeft && $heroImage !== null;
     $anchor = data_get($section ?? null, 'anchor');
+
+    // The pill above the heading and the rating under the buttons (both optional content fields).
+    $badgeText = trim((string) data_get($fields, 'badge_text', ''));
+    $badgeTag = trim((string) data_get($fields, 'badge_tag', ''));
+    $ratingRaw = trim((string) data_get($fields, 'rating_value', ''));
+    $rating = is_numeric($ratingRaw) && (float) $ratingRaw > 0 && (float) $ratingRaw <= 5 ? $ratingRaw : null;
+    $ratingText = trim((string) data_get($fields, 'rating_text', ''));
+    // Whole stars filled up to the rating, rounded to the nearest half for the last one.
+    $ratingHalves = $rating === null ? 0 : (int) round(((float) $rating) * 2);
+
+    // With no image of their own and no photo behind it, the hero shows a drawn dashboard preview with the
+    // statistics floating on it as chips — the same figures, so nothing on it is invented.
+    $mockup = $heroImage === null && ! $hasBackground;
 @endphp
 
 <x-site.section
@@ -103,6 +116,11 @@
             ></div>
             <div class="absolute -top-40 left-1/2 h-[36rem] w-[36rem] -translate-x-1/2 rounded-full bg-brand-400/20 blur-3xl dark:bg-brand-500/15" data-fx-parallax style="--fx-far: 70px"></div>
             <div class="absolute -right-32 top-1/3 h-80 w-80 rounded-full bg-brand-300/20 blur-3xl dark:bg-brand-700/20" data-fx-parallax style="--fx-far: -110px"></div>
+            <div class="absolute -left-40 bottom-0 h-72 w-72 rounded-full bg-sky-300/10 blur-3xl dark:bg-sky-500/10" data-fx-parallax style="--fx-far: 60px"></div>
+            {{-- Aurora: a violet and a cyan glow under the brand one. --}}
+            <div class="absolute left-[12%] top-24 h-72 w-[28rem] -rotate-12 rounded-full bg-violet-400/20 blur-3xl dark:bg-violet-600/20" data-fx-parallax style="--fx-far: 40px"></div>
+            <div class="absolute right-[8%] top-44 h-64 w-96 rotate-12 rounded-full bg-cyan-300/20 blur-3xl dark:bg-cyan-500/10" data-fx-parallax style="--fx-far: -50px"></div>
+            <div class="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-brand-500/30 to-transparent dark:via-brand-400/30"></div>
         @endif
     </div>
 
@@ -122,10 +140,26 @@
                     'max-w-3xl' => $alignLeft && ! $split,
                     'mx-auto max-w-4xl text-center' => ! $alignLeft,
                 ])>
+                    @if ($badgeText !== '')
+                        <p data-fx="rise" data-fx-lcp @class([
+                            'mb-7 inline-flex max-w-full items-center gap-2.5 rounded-full border border-brand-200/70 bg-white/70 py-1.5 pl-2 pr-3 text-xs font-medium text-slate-700 shadow-sm backdrop-blur sm:text-sm dark:border-white/10 dark:bg-white/5 dark:text-slate-200',
+                        ])>
+                            <span class="relative flex h-2.5 w-2.5 shrink-0" aria-hidden="true">
+                                <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-60 motion-reduce:animate-none"></span>
+                                <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-brand-500"></span>
+                            </span>
+                            <span class="truncate">{{ $badgeText }}</span>
+                            @if ($badgeTag !== '')
+                                <span class="hidden h-3.5 w-px bg-slate-300 sm:block dark:bg-white/15" aria-hidden="true"></span>
+                                <span class="shrink-0 bg-gradient-to-r from-brand-600 to-violet-600 bg-clip-text font-semibold text-transparent dark:from-brand-300 dark:to-cyan-300">{{ $badgeTag }}</span>
+                            @endif
+                        </p>
+                    @endif
+
                     @if ($heading !== '')
                         {{-- `data-fx-lcp`: the hero heading is the page's Largest Contentful Paint on
                              almost every public page, so it rises but never fades — see app.css. --}}
-                        <h1 data-fx="rise" data-fx-lcp class="text-balance text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl lg:leading-[1.05] dark:text-white">
+                        <h1 data-fx="rise" data-fx-lcp class="text-balance bg-gradient-to-br from-slate-900 via-slate-800 to-brand-700 bg-clip-text pb-1 text-4xl font-extrabold tracking-tight text-transparent sm:text-5xl lg:text-7xl lg:leading-[1.02] dark:from-white dark:via-white dark:to-brand-300">
                             {{ $heading }}
                         </h1>
                     @endif
@@ -163,6 +197,27 @@
                             @endforeach
                         </div>
                     @endif
+
+                    @if ($rating !== null)
+                        <div data-fx="rise" data-fx-delay="3" @class([
+                            'mt-8 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-600 dark:text-slate-300',
+                            'justify-center' => ! $alignLeft,
+                        ])>
+                            <span class="flex items-center gap-0.5" aria-hidden="true">
+                                @for ($star = 1; $star <= 5; $star++)
+                                    <x-ui.icon name="star" @class([
+                                        'h-4 w-4',
+                                        'fill-amber-400 text-amber-400' => $ratingHalves >= $star * 2 - 1,
+                                        'text-slate-300 dark:text-slate-600' => $ratingHalves < $star * 2 - 1,
+                                    ]) />
+                                @endfor
+                            </span>
+                            <span><strong class="font-semibold text-slate-900 dark:text-white">{{ $rating }}</strong>/5<span class="sr-only"> stars</span></span>
+                            @if ($ratingText !== '')
+                                <span class="text-slate-500 dark:text-slate-400">{{ $ratingText }}</span>
+                            @endif
+                        </div>
+                    @endif
                 </div>
 
                 @if ($heroImage !== null)
@@ -184,8 +239,10 @@
                 @endif
             </div>
 
-            @if ($statistics !== [])
-                <x-site.stats data-fx="rise" data-fx-delay="4" :items="$statistics" class="mt-16 sm:mt-20" />
+            @if ($mockup)
+                @include('site.sections.partials.hero-mockup', ['statistics' => $statistics])
+            @elseif ($statistics !== [])
+                <x-site.stats data-fx="rise" data-fx-delay="4" :items="$statistics" variant="cards" class="mx-auto mt-16 max-w-5xl sm:mt-20" />
             @endif
         </div>
     </div>

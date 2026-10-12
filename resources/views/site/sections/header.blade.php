@@ -99,7 +99,7 @@
             class="border-b border-transparent bg-transparent transition-colors duration-200"
         @else
             x-bind:class="scrolled ? 'shadow-sm' : ''"
-            class="border-b border-slate-200/80 bg-white/90 backdrop-blur-md transition-shadow duration-200 dark:border-white/10 dark:bg-slate-950/85"
+            class="border-b border-slate-200/70 bg-white/75 backdrop-blur-xl transition-shadow duration-200 dark:border-white/[0.07] dark:bg-slate-950/70"
         @endif
     >
         <div @if ($overlay) x-bind:class="{ 'dark': ! scrolled }" class="dark" @endif>
