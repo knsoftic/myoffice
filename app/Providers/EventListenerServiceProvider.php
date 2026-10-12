@@ -25,6 +25,7 @@ use App\Events\Finance\PaymentReversalRecorded;
 use App\Events\Finance\PaymentReversalRejected;
 use App\Events\Finance\ProjectPaymentRecorded;
 use App\Events\Finance\StudentFeePaymentRecorded;
+use App\Events\SettingsChanged;
 use App\Events\Support\MeetingCancelled;
 use App\Events\Support\MeetingReminderDue;
 use App\Events\Support\MeetingRescheduled;
@@ -57,6 +58,7 @@ use App\Listeners\Crm\NotifyStaffOfWebsiteLead;
 use App\Listeners\Crm\RecordCapturedReferral;
 use App\Listeners\Crm\TouchLeadActivityCaches;
 use App\Listeners\Finance\RecomputeInvoiceOnPaymentChange;
+use App\Listeners\Hr\SyncAttendanceDeductionsOnSettingsChange;
 use App\Listeners\RecordFailedLogin;
 use App\Listeners\RecordLogout;
 use App\Listeners\RecordSuccessfulLogin;
@@ -68,13 +70,16 @@ use App\Listeners\Support\NotifyOfSlaBreach;
 use App\Listeners\Support\NotifyOfTicketAssignment;
 use App\Listeners\Support\NotifyOfTicketReply;
 use App\Listeners\Support\NotifyOfTicketStatusChange;
+use App\Models\Hr\Attendance;
 use App\Models\User;
+use App\Observers\Hr\AttendanceDeductionObserver;
 use App\Services\Auth\LoginHistoryRecorder;
 use App\Services\Auth\LoginRedirector;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Logout;
 use Illuminate\Auth\Middleware\RedirectIfAuthenticated;
+use Illuminate\Database\Events\TransactionRolledBack;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as FoundationEventServiceProvider;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
@@ -171,6 +176,9 @@ final class EventListenerServiceProvider extends ServiceProvider
         // the row — so neither listener has to guard against a second send.
         TicketSlaBreached::class => [NotifyOfSlaBreach::class],
         MeetingReminderDue::class => [NotifyOfMeetingReminder::class],
+
+        // Attendance-based salary deductions: a rule switched on or off re-syncs the open months.
+        SettingsChanged::class => [SyncAttendanceDeductionsOnSettingsChange::class],
     ];
 
     public function register(): void
@@ -196,6 +204,13 @@ final class EventListenerServiceProvider extends ServiceProvider
                 Event::listen($event, $listener);
             }
         }
+
+        // Attendance-based salary deductions follow every attendance write (after commit, once per month).
+        Attendance::observe(AttendanceDeductionObserver::class);
+        // A rolled-back write drops its after-commit sync; forget it was queued so the next write re-queues.
+        Event::listen(TransactionRolledBack::class, static function (): void {
+            AttendanceDeductionObserver::forgetQueued();
+        });
 
         $this->registerGuestRedirect();
     }

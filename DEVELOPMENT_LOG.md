@@ -790,6 +790,101 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-10-12 — "My Salary & Deductions" (employee self-service)
+
+Asked for a full salary-deduction feature. The admin half already existed and was left untouched: deduction rules in
+Settings → HR (unpaid leave, the count-based late rule, the late-arrival and excess-absence rules, day and LOP basis),
+payroll generate / preview / lock with every line on the slip, reversal of pending attendance deductions before lock,
+and correction slips after it. Added only the employee half, read only: `admin/my/salary`
+(`SelfService\SalaryController`, `MySalaryService`, `employee_self_service.view_financial`, sidebar "My Salary &
+Deductions" under My HR). Monthly view: basic, gross, total deductions, net, status (Pending / Generated · awaiting
+finalization / Finalized / Paid), slip link, attendance summary, totals by reason and a dated history (Date, Reason,
+Details, Amount) whose rows open to their calculation; daily view: that day's attendance and deductions; yearly view:
+every month with finalized figures and the year's totals. **Figures appear only for locked (or paid) runs**; a draft
+or generated run shows its status alone. Nothing is recalculated: the history is the finalized slip's own lines — the
+attendance-deduction rows that slip took, the unpaid-leave line spread over its days at the slip's per-day amount (a
+rounding row keeps the total exact; if the days do not account for the line it is shown whole), every other deduction
+line month-level, and finalized correction slips (refunds as negative amounts). No migration.
+
+Found and fixed while testing: the HR manual entry and the new employee register stored a typed clock time as UTC
+(D61 stores UTC and reads `localization.timezone`), so 09:05 showed as 14:05 in Asia/Karachi; both now parse in the
+business timezone, and the register compares existing times in it. The two QA rows on `my_office_demo` were re-saved.
+Also: my new empty states passed `description` where `x-ui.empty-state` reads `message` (147 older call sites do the
+same — logged as a separate task).
+
+Not changed, noted: "My Salary Slips" lists draft slips too (its own existing behaviour).
+
+### 2026-10-10 — Student attendance: JSON endpoints over the existing register
+
+Asked for a "Student Attendance Module" in the Institute section. It already existed (phase 17: `student_attendances`,
+marking screen with P / A / L / Lt and all-present, reports, teacher and student portals), so **no second table or
+screen was built** — two registers would disagree on every percentage. Added only what was missing: three JSON
+endpoints in `Admin\Institute\AttendanceApiController`, inside the existing `module:student_attendance` group —
+`GET admin/student-attendance/api/register?batch_id=&date=` (`view_any`), `POST admin/student-attendance/api/register`
+(`create`, by `session_id` or by `batch_id` + `date` when the batch has exactly one class that day), and
+`GET admin/student-attendance/api/students/{student}/summary` (`view_reports`). Reads are the existing rows and enrolment
+counters; writes go through `AttendanceService::mark()`; batch, class and student are branch-scoped (404 outside).
+Session-authenticated with CSRF, like every admin route — there is no token API. Three rows added to the route-guard
+manifest.
+
+Verified in-process on `my_office_demo` (read, mark, re-mark without a duplicate, off-roster 422, bad status 422,
+unknown batch 404, 403 without the permission). `tests/Feature/Institute/AttendanceApiTest.php` (8 tests) written,
+lint- and Pint-clean, **not yet run**.
+
+Also added the same day: **Attendance under Institute → Students** in the sidebar (same route as Batches → Attendance;
+the pinned Super Admin list in `SidebarVisibilityTest` now also carries the already-present "Register a Student"), and
+**manual entry** on the attendance screen — a "Record attendance" button (`student_attendance.create`) with batch,
+date and optional times. `POST admin/student-attendance/record` (`AttendanceRecordController`) opens the day's register
+when the batch has one class, lists the day when it has several, and otherwise adds a one-off class through
+`ClassSessionService::createOneOff()` (clash checks included; needs `timetable.create`) and opens its register. Future
+dates and dates before the batch starts are refused. Verified in-process on `my_office_demo`;
+`tests/Feature/Institute/AttendanceRecordTest.php` (6 tests) written, **not yet run**.
+
+And on the HR register (`admin/attendance`): **manual entry** — a "Record attendance" button in the header and a
+"Record" action per row (`attendance.create`) open one form: employee, date, status, payable share, optional check-in
+and check-out, reason, remarks. `POST admin/attendance/record` (`Admin\Hr\AttendanceManualEntryController`, new) writes
+it as an HR-direct correction through `AttendanceCorrectionService::applyDirect()`, the same act as the existing
+`attendance.mark` route, which is left untouched. The new endpoint adds the guards that route lacks: the employee must
+be one the user may see, no future day or day outside the employment, and a payroll-locked month is refused on the form
+(by the month's summary lock, so a day first entered after the lock is caught too) instead of surfacing
+`LockedAttendanceException` as a 500. Verified in-process on `my_office_demo`; `tests/Feature/Hr/AttendanceManualEntryTest.php`
+(5 tests) written, **not yet run**.
+
+And the **employee register** ("Mark attendance", `admin/attendance/register`, `attendance.create`): the HR
+counterpart of the student register — every employee for a day on one screen, one-click P / Lt / HD / A / L (or "—"
+to leave alone), All present / All absent / Unmarked → present / Reset, optional check-in, check-out and note per row,
+one reason for the save. `AttendanceRegisterService` writes each *changed* day as an HR-direct correction (a second save
+of the same register writes nothing) and refuses any employee the user may not see or whose month payroll has locked;
+locked rows are shown read-only with the run that locked them, and the attendance page now names a locked month up
+front and offers "Mark attendance" beside "Record one". The demo's October is locked because payroll run PR-00001 was
+locked there during the deduction QA of 9 October — a real database's current month is not locked until its payroll is.
+
+Testing on 10 October also moved validation of the three new write actions into Form Requests
+(`Admin\Hr\StoreAttendanceManualEntryRequest`, `Admin\Institute\RecordStudentAttendanceRequest`,
+`Admin\Institute\StoreStudentAttendanceMarksRequest`; the register's is `Admin\Hr\StoreAttendanceRegisterRequest`) —
+`CsrfAndInjectionTest` SEC-14 caught them validating inline — dropped the `policy` key from the four phase-17
+route-guard rows (`RegisterManifestTest`), added screen-manifest rows for the two JSON reads and the two deduction
+screens, and taught `RegisterManifestTest` that a JSON answer, like a CSV, is data rather than a page.
+
+### 2026-10-09 — Attendance-based salary deductions (late arrival, excess absence)
+
+Two admin-only rules in Settings → HR, both **off by default**: a late arrival costs `hr.late_arrival_deduction_percent`
+(default 25%) of payroll's own daily salary; each chargeable absence beyond `hr.monthly_absence_allowance_days`
+(default 1) costs a full day. New append-only table `attendance_deductions` (no `deleted_at`, `uq_attd_day` on
+employee + type + date); `AttendanceDeductionService::syncMonth()` is the single idempotent decision, driven by an
+`Attendance` observer, a `SettingsChanged` listener and payroll generation. Payroll takes pending rows as `ATT_LATE` /
+`ATT_ABSENCE` lines (replacing the count-based `LATE` line and taking absences off `UNPAID_LEAVE` while on); lock marks
+exactly those rows applied and refuses if any were reversed or re-priced since generation; reversing an applied row
+issues an `ATT_REFUND` correction slip. Employees see their own rows at `admin.my.deductions.index` and on the
+`my_salary_deductions` dashboard widget, and are notified (4 mandatory payroll events). HR review at
+`admin.attendance-deductions.index` (`payroll.view_financial`; reverse needs `payroll.change_status`).
+
+Also fixed in passing: cancelling a generated payroll run 500'd outside production (lazy load of `PayrollRunItem::run`
+in its `deleting` guard; `clearDraftItems()` now hands the run over).
+
+Verified by hand on `my_office_demo` (HTTP + DB). `tests/Feature/Hr/AttendanceDeductionTest.php` (15 tests) written,
+lint- and Pint-clean, **not yet run**.
+
 ### 2026-10-06 — Expense Sheet & Analytics: the expense register by day, week and month
 
 Requested: a Sheet & Analytics view beside the expense table — Day-wise / Week-wise / Month-wise, the

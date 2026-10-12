@@ -199,6 +199,7 @@ final class SidebarVisibilityTest extends TestCase
                 'Leaves',
                 'Leave Balances',
                 'Payroll',
+                'Attendance Deductions',
                 'Salary Slips',
                 'Salary Structures',
                 'Advances',
@@ -249,12 +250,15 @@ final class SidebarVisibilityTest extends TestCase
                 // (§4.1) — a receptionist triages it without holding `students.create`.
                 'Students',
                 'All Students',
+                'Register a Student',
                 'Admissions',
                 'Course Inquiries',
                 'Applications',
                 'Demo Classes',
                 // phase-19-23 §7.5: the card register, beside the students it belongs to.
                 'ID Cards',
+                // The student register again, under Students (the same route as Batches → Attendance).
+                'Attendance',
                 // phase-14-17 §7.5-§7.6: scheduling. `Teachers` and `Classrooms` are their own
                 // entries — a room is its own module (§4.1), so a branch administrator can be given
                 // the rooms without the batches that fill them. `Batches` is a parent carrying the

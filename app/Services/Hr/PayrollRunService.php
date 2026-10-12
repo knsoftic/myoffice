@@ -12,6 +12,7 @@ use App\Enums\PayrollRunStatus;
 use App\Enums\PayrollRunType;
 use App\Enums\SalaryComponentGroup;
 use App\Models\Hr\Attendance;
+use App\Models\Hr\AttendanceDeduction;
 use App\Models\Hr\AttendanceMonthlySummary;
 use App\Models\Hr\Employee;
 use App\Models\Hr\EmployeeAdvance;
@@ -68,6 +69,7 @@ class PayrollRunService
         private readonly SalaryStructureService $structures,
         private readonly AdvanceService $advances,
         private readonly AttendanceSummaryService $summaries,
+        private readonly AttendanceDeductionService $deductions,
     ) {}
 
     /**
@@ -179,8 +181,18 @@ class PayrollRunService
             ->orderBy('id')
             ->get();
 
+        $snapshot = $this->deductionSnapshot($run);
+        $attendanceRulesOn = (bool) ($snapshot['late_arrival_deduction_enabled'] ?? false)
+            || (bool) ($snapshot['excess_absence_deduction_enabled'] ?? false);
+
         foreach ($employees as $employee) {
             $id = (int) $employee->getKey();
+
+            // Bring the attendance deductions up to date with this run's snapshot first, so the slip line
+            // and the employee's deduction list are worked out from the same per-day figure.
+            if ($attendanceRulesOn) {
+                $this->deductions->syncMonth($employee, $period->year, $period->month, $snapshot);
+            }
 
             $draft = $this->draftFor(
                 $run,
@@ -279,7 +291,10 @@ class PayrollRunService
             ));
         }
 
-        return DB::transaction(function () use ($run, $actor): PayrollRun {
+        return DB::transaction(function () use ($run, $actor, $items): PayrollRun {
+            // Under row locks, so nothing can move between this check and marking the rows applied below.
+            $this->assertAttendanceDeductionsCurrent($items);
+
             $run->forceFill([
                 'status' => PayrollRunStatus::Locked,
                 'locked_at' => now(),
@@ -302,6 +317,11 @@ class PayrollRunService
 
             // HR-18, R5 — the arithmetic behind a paid slip is frozen with it.
             $this->lockAttendance($run);
+
+            // The attendance deductions each slip took are now applied — exactly those, by id.
+            foreach ($items as $item) {
+                $this->deductions->markApplied($this->attendanceDeductionIds($item), $item);
+            }
 
             return $run;
         });
@@ -512,6 +532,10 @@ class PayrollRunService
             ->where('period_month', $period->month)
             ->first();
 
+        $snapshot = $this->deductionSnapshot($run);
+        $lateOn = (bool) ($snapshot['late_arrival_deduction_enabled'] ?? false);
+        $absenceOn = (bool) ($snapshot['excess_absence_deduction_enabled'] ?? false);
+
         $inputs = PayrollInputs::fromRun(
             run: (array) ($run->settings_snapshot ?? []) + [
                 'day_basis' => (string) $run->day_basis,
@@ -521,6 +545,10 @@ class PayrollRunService
             manualLines: $inputLines,
             advancesDue: $this->advances->dueFor($employee, $period->year, $period->month)->all(),
             manualTaxAmount: $manualTax,
+            // Read only when a rule is on in this run — a run snapshotted with both off builds exactly
+            // the slip it always built.
+            attendanceDeductions: $lateOn || $absenceOn ? $this->deductions->pendingFor($employee, $period) : [],
+            absenceLopDays: $absenceOn ? $this->deductions->absenceLopDays($employee, $period) : '0.0000',
         );
 
         return $this->calculator->build($employee, $period, $summary, $structure, $inputs);
@@ -641,6 +669,83 @@ class PayrollRunService
         }
 
         $item->forceFill($handles)->save();
+    }
+
+    /**
+     * The settings a run's attendance deductions are worked out from: its snapshot, plus the two bases the
+     * run also keeps in their own columns.
+     *
+     * @return array<string, mixed>
+     */
+    private function deductionSnapshot(PayrollRun $run): array
+    {
+        return (array) ($run->settings_snapshot ?? []) + [
+            'day_basis' => (string) $run->day_basis,
+            'lop_basis' => (string) $run->lop_basis,
+        ];
+    }
+
+    /**
+     * The attendance deductions a slip took, as its calculation snapshot recorded them.
+     *
+     * @return list<int>
+     */
+    private function attendanceDeductionIds(PayrollRunItem $item): array
+    {
+        $ids = (array) (($item->calculation_snapshot ?? [])['attendance_deduction_ids'] ?? []);
+
+        return array_values(array_map('intval', $ids));
+    }
+
+    /**
+     * A slip that took attendance deductions which have since been reversed, or re-priced (a percentage or
+     * a day basis changed after generation), would lock a figure nobody owes any more — and mark applied an
+     * amount the slip never took. Same remedy as a slip that does not add up: regenerate first.
+     *
+     * @param  Collection<int, PayrollRunItem>  $items  with their components loaded
+     */
+    private function assertAttendanceDeductionsCurrent(Collection $items): void
+    {
+        $stale = [];
+
+        foreach ($items as $item) {
+            $ids = $this->attendanceDeductionIds($item);
+
+            if ($ids === []) {
+                continue;
+            }
+
+            $rows = AttendanceDeduction::query()
+                ->whereIn('id', $ids)
+                ->where('employee_id', $item->employee_id)
+                ->pending()
+                ->lockForUpdate()
+                ->get();
+
+            $taken = Money::round(Money::sum($item->components
+                ->filter(static fn (PayrollRunItemComponent $line): bool => $line->source_type === 'attendance_deductions'
+                    && $line->side->value === 'deduction')
+                ->map(static fn (PayrollRunItemComponent $line): string => Money::round((string) $line->amount))
+                ->values()
+                ->all()));
+
+            $owed = Money::round(Money::sum($rows
+                ->map(static fn (AttendanceDeduction $row): string => Money::round((string) $row->amount))
+                ->values()
+                ->all()));
+
+            if ($rows->count() !== count($ids) || Money::compare($taken, $owed) !== 0) {
+                $stale[] = $item->slip_number;
+            }
+        }
+
+        if ($stale !== []) {
+            throw HrRuleException::refuse('status', sprintf(
+                'Attendance deductions on these slips changed after the run was generated: %s. Regenerate '
+                .'the run, then lock it.',
+                implode(', ', $stale)
+            ));
+        }
     }
 
     /**
@@ -848,6 +953,8 @@ class PayrollRunService
                 continue;
             }
 
+            // The item's `deleting` guard reads its run's status; hand it the run rather than lazy-load it.
+            $item->setRelation('run', $run);
             $item->components()->delete();
             $item->forceDelete();
         }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support\Hr;
 
+use App\Models\Hr\AttendanceDeduction;
 use App\Models\Hr\EmployeeAdvance;
 
 /**
@@ -29,6 +30,7 @@ final readonly class PayrollInputs
      * @param  'none'|'nearest_1'|'nearest_10'  $netRounding
      * @param  list<PayslipLine>  $manualLines
      * @param  list<EmployeeAdvance>  $advancesDue
+     * @param  list<AttendanceDeduction>  $attendanceDeductions  pending rows for this employee, up to the period end
      */
     public function __construct(
         public string $dayBasis = 'calendar_days',
@@ -42,6 +44,14 @@ final readonly class PayrollInputs
         public array $manualLines = [],
         public array $advancesDue = [],
         public ?string $manualTaxAmount = null,
+        // Attendance-based deductions. All off by default, so a run snapshotted before they existed
+        // builds exactly the slip it always built.
+        public bool $lateArrivalDeductionEnabled = false,
+        public bool $excessAbsenceDeductionEnabled = false,
+        public array $attendanceDeductions = [],
+        // Loss-of-pay days that are absences, which the excess-absence rule charges instead of the
+        // unpaid-leave line — taken off `lop_days` so no absence is charged twice.
+        public string $absenceLopDays = '0.0000',
     ) {}
 
     /**
@@ -50,12 +60,15 @@ final readonly class PayrollInputs
      * @param  array<string, mixed>  $run
      * @param  list<PayslipLine>  $manualLines
      * @param  list<EmployeeAdvance>  $advancesDue
+     * @param  list<AttendanceDeduction>  $attendanceDeductions
      */
     public static function fromRun(
         array $run,
         array $manualLines = [],
         array $advancesDue = [],
         ?string $manualTaxAmount = null,
+        array $attendanceDeductions = [],
+        string $absenceLopDays = '0.0000',
     ): self {
         return new self(
             dayBasis: (string) ($run['day_basis'] ?? 'calendar_days'),
@@ -69,6 +82,10 @@ final readonly class PayrollInputs
             manualLines: $manualLines,
             advancesDue: $advancesDue,
             manualTaxAmount: $manualTaxAmount,
+            lateArrivalDeductionEnabled: (bool) ($run['late_arrival_deduction_enabled'] ?? false),
+            excessAbsenceDeductionEnabled: (bool) ($run['excess_absence_deduction_enabled'] ?? false),
+            attendanceDeductions: $attendanceDeductions,
+            absenceLopDays: $absenceLopDays,
         );
     }
 
@@ -88,6 +105,10 @@ final readonly class PayrollInputs
             'late_deduction_lates_per_day' => (int) setting('hr.late_deduction_lates_per_day', 0),
             'advance_recovery_cap_percent' => (string) setting('hr.advance_recovery_cap_percent', '50.0000'),
             'net_rounding' => (string) setting('hr.payroll_net_rounding', 'none'),
+            'late_arrival_deduction_enabled' => (bool) setting('hr.late_arrival_deduction_enabled', false),
+            'late_arrival_deduction_percent' => (string) setting('hr.late_arrival_deduction_percent', '25.0000'),
+            'excess_absence_deduction_enabled' => (bool) setting('hr.excess_absence_deduction_enabled', false),
+            'monthly_absence_allowance_days' => (int) setting('hr.monthly_absence_allowance_days', 1),
         ];
     }
 }

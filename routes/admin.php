@@ -64,6 +64,9 @@ use App\Http\Controllers\Admin\Finance\PaymentRegisterController;
 use App\Http\Controllers\Admin\Finance\ProjectPaymentController;
 use App\Http\Controllers\Admin\Hr\AttendanceController;
 use App\Http\Controllers\Admin\Hr\AttendanceCorrectionController;
+use App\Http\Controllers\Admin\Hr\AttendanceDeductionController;
+use App\Http\Controllers\Admin\Hr\AttendanceManualEntryController;
+use App\Http\Controllers\Admin\Hr\AttendanceRegisterController;
 use App\Http\Controllers\Admin\Hr\AttendanceSummaryController;
 use App\Http\Controllers\Admin\Hr\DepartmentController;
 use App\Http\Controllers\Admin\Hr\DesignationController;
@@ -80,13 +83,17 @@ use App\Http\Controllers\Admin\Hr\SalaryComponentController;
 use App\Http\Controllers\Admin\Hr\SalaryStructureController;
 use App\Http\Controllers\Admin\Hr\SelfService\AttendanceController as MyAttendanceController;
 use App\Http\Controllers\Admin\Hr\SelfService\LeaveController as MyLeaveController;
+use App\Http\Controllers\Admin\Hr\SelfService\DeductionController as MyDeductionController;
 use App\Http\Controllers\Admin\Hr\SelfService\PayslipController as MyPayslipController;
 use App\Http\Controllers\Admin\Hr\SelfService\ProfileController as MyProfileController;
+use App\Http\Controllers\Admin\Hr\SelfService\SalaryController as MySalaryController;
 use App\Http\Controllers\Admin\Hr\WorkShiftController;
 use App\Http\Controllers\Admin\Institute\AdmissionController;
 use App\Http\Controllers\Admin\Institute\AssignmentController;
 use App\Http\Controllers\Admin\Institute\AssignmentSubmissionController;
+use App\Http\Controllers\Admin\Institute\AttendanceApiController as StudentAttendanceApiController;
 use App\Http\Controllers\Admin\Institute\AttendanceController as StudentAttendanceController;
+use App\Http\Controllers\Admin\Institute\AttendanceRecordController as StudentAttendanceRecordController;
 use App\Http\Controllers\Admin\Institute\AttendanceReportController as StudentAttendanceReportController;
 use App\Http\Controllers\Admin\Institute\BatchController;
 use App\Http\Controllers\Admin\Institute\CertificateController;
@@ -1226,6 +1233,12 @@ Route::prefix('admin')
             Route::get('payslips/{item}', [MyPayslipController::class, 'show'])->whereNumber('item')->middleware('can:employee_self_service.view_financial')->name('payslips.show');
             Route::get('payslips/{item}/print', [MyPayslipController::class, 'print'])->whereNumber('item')->middleware('can:employee_self_service.print')->name('payslips.print');
 
+            // Attendance-based salary deductions: the employee's own, read only.
+            Route::get('deductions', [MyDeductionController::class, 'index'])->middleware('can:employee_self_service.view_financial')->name('deductions.index');
+
+            // My Salary & Deductions: finalized payroll by day, month and year, read only.
+            Route::get('salary', [MySalaryController::class, 'index'])->middleware('can:employee_self_service.view_financial')->name('salary.index');
+
             Route::get('approvals', [MyLeaveController::class, 'approvals'])->middleware('can:leaves.approve')->name('approvals.index');
         });
 
@@ -1245,6 +1258,11 @@ Route::prefix('admin')
             Route::get('attendance/export/{format}', [AttendanceController::class, 'export'])->middleware('can:attendance.export')->name('attendance.export');
             Route::post('attendance/punch', [AttendanceController::class, 'punch'])->middleware(['can:attendance.create', 'throttle:60,1'])->name('attendance.punch');
             Route::post('attendance/mark', [AttendanceController::class, 'mark'])->middleware('can:attendance.create')->name('attendance.mark');
+            // Manual entry from the register: the same HR-direct correction as `mark`, with a form and its guards.
+            Route::post('attendance/record', [AttendanceManualEntryController::class, 'store'])->middleware(['can:attendance.create', 'throttle:30,1'])->name('attendance.record');
+            // The employee register: every employee for a day, marked from one screen (like the student register).
+            Route::get('attendance/register', [AttendanceRegisterController::class, 'create'])->middleware('can:attendance.create')->name('attendance.register');
+            Route::post('attendance/register', [AttendanceRegisterController::class, 'store'])->middleware(['can:attendance.create', 'throttle:30,1'])->name('attendance.register.store');
             Route::post('attendance/close', [AttendanceController::class, 'close'])->middleware('can:attendance.create')->name('attendance.close');
             Route::get('attendance/{attendance}', [AttendanceController::class, 'show'])->whereNumber('attendance')->middleware('can:view,attendance')->name('attendance.show');
             Route::post('attendance/{attendance}/recompute', [AttendanceController::class, 'recompute'])->whereNumber('attendance')->middleware('can:update,attendance')->name('attendance.recompute');
@@ -1332,6 +1350,10 @@ Route::prefix('admin')
             Route::post('payroll/{run}/cancel', [PayrollRunController::class, 'cancel'])->whereNumber('run')->middleware('can:cancel,run')->name('payroll-runs.cancel');
             Route::get('payroll/{run}/export/{format}', [PayrollRunController::class, 'export'])->whereNumber('run')->middleware('can:payroll.export')->name('payroll-runs.export');
             Route::get('payroll/{run}/register/print', [PayrollRunController::class, 'register'])->whereNumber('run')->middleware('can:payroll.print')->name('payroll-runs.register.print');
+
+            // Attendance-based salary deductions: review (amounts, so view_financial) and reverse.
+            Route::get('payroll/attendance-deductions', [AttendanceDeductionController::class, 'index'])->middleware('can:payroll.view_financial')->name('attendance-deductions.index');
+            Route::post('payroll/attendance-deductions/{deduction}/reverse', [AttendanceDeductionController::class, 'reverse'])->whereNumber('deduction')->middleware(['can:payroll.change_status', 'throttle:30,1'])->name('attendance-deductions.reverse');
         });
 
         Route::middleware('module:salary_slips')->group(static function (): void {
@@ -2265,6 +2287,14 @@ Route::prefix('admin')
             Route::get('student-attendance/sessions/{session}', [StudentAttendanceController::class, 'mark'])->whereNumber('session')->middleware('can:student_attendance.create')->name('student-attendance.mark');
             Route::post('student-attendance/sessions/{session}', [StudentAttendanceController::class, 'store'])->whereNumber('session')->middleware(['can:student_attendance.create', 'throttle:30,1'])->name('student-attendance.store');
             Route::post('student-attendance/sessions/{session}/bulk', [StudentAttendanceController::class, 'bulk'])->whereNumber('session')->middleware('can:student_attendance.create')->name('student-attendance.bulk');
+
+            // JSON over the same register — no second table. Session-authenticated like every admin route.
+            Route::get('student-attendance/api/register', [StudentAttendanceApiController::class, 'register'])->middleware('can:student_attendance.view_any')->name('student-attendance.api.register');
+            Route::post('student-attendance/api/register', [StudentAttendanceApiController::class, 'store'])->middleware(['can:student_attendance.create', 'throttle:30,1'])->name('student-attendance.api.store');
+            Route::get('student-attendance/api/students/{student}/summary', [StudentAttendanceApiController::class, 'summary'])->whereNumber('student')->middleware('can:student_attendance.view_reports')->name('student-attendance.api.summary');
+
+            // Manual entry: a batch and a date open that day's register, adding an extra class when there is none.
+            Route::post('student-attendance/record', [StudentAttendanceRecordController::class, 'store'])->middleware(['can:student_attendance.create', 'throttle:30,1'])->name('student-attendance.record');
 
             Route::put('student-attendance/{attendance}', [StudentAttendanceController::class, 'update'])->whereNumber('attendance')->middleware('can:update,attendance')->name('student-attendance.update');
         });

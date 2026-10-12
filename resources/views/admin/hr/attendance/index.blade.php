@@ -4,11 +4,17 @@
 
 @php
     $user = auth()->user();
+    // Which employees payroll has locked for this month — their days cannot change, so nothing offers to.
+    $monthLocks = $canMark ? app(\App\Services\Hr\AttendanceRegisterService::class)->monthLocks($employees->modelKeys(), $date) : [];
 @endphp
 
 @section('header')
     <x-ui.page-header title="Attendance" :subtitle="app_date($date, 'l, j F Y')" icon="calendar-days">
         <x-slot:actions>
+            @if ($canMark)
+                <x-ui.button icon="clipboard-document-check" :href="route('admin.attendance.register', array_filter(['date' => $date->isFuture() ? null : $date->toDateString(), 'department_id' => request('department_id')]))">Mark attendance</x-ui.button>
+                <x-ui.button variant="secondary" icon="plus" x-on:click="$dispatch('open-modal', 'record-employee-attendance')">Record one</x-ui.button>
+            @endif
             <x-ui.button variant="secondary" :href="route('admin.attendance.monthly', ['month' => app_date($date, 'Y-m')])" icon="table-cells">Monthly grid</x-ui.button>
             <x-ui.button variant="secondary" :href="route('admin.attendance-corrections.index')" icon="wrench-screwdriver">Corrections</x-ui.button>
         </x-slot:actions>
@@ -41,6 +47,19 @@
             @endif
         </div>
     </x-ui.card>
+
+    @if ($monthLocks !== [])
+        <x-ui.card class="mb-4 border-amber-200 dark:border-amber-500/30">
+            <div class="flex items-start gap-3">
+                <x-ui.icon name="exclamation-triangle" class="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+                <p class="text-sm text-slate-600 dark:text-slate-300">
+                    Payroll has already locked {{ app_date($date, 'F Y') }} for {{ count($monthLocks) }} of these employees
+                    ({{ implode(', ', array_unique($monthLocks)) }}), so their attendance for this month cannot change.
+                    A paid month is corrected with a payroll correction run.
+                </p>
+            </div>
+        </x-ui.card>
+    @endif
 
     <x-ui.card :title="$employees->count() . ' employee(s)'"
                subtitle="Everybody who could work this day, including the ones with no row yet.">
@@ -100,6 +119,7 @@
                         {{ $row ? app_number((float) $row->payable_factor, 2) : '—' }}
                     </td>
                     <td class="px-4 py-3 text-right">
+                        <div class="flex items-center justify-end gap-1">
                         @if ($row)
                             <x-ui.button variant="ghost" size="sm" :href="route('admin.attendance.show', $row)">Open</x-ui.button>
                         @elseif ($canMark)
@@ -111,6 +131,11 @@
                                 <x-ui.button type="submit" variant="ghost" size="sm">Check in</x-ui.button>
                             </form>
                         @endif
+                        @if ($canMark && ! $date->isFuture() && ! ($row?->isLocked() ?? false) && ! isset($monthLocks[$employee->id]))
+                            <x-ui.button variant="ghost" size="sm" icon="plus"
+                                x-on:click="$dispatch('record-attendance-for', { id: {{ $employee->id }} }); $dispatch('open-modal', 'record-employee-attendance')">Record</x-ui.button>
+                        @endif
+                        </div>
                     </td>
                 </tr>
             @endforeach
@@ -121,4 +146,68 @@
             </x-slot:empty>
         </x-ui.table>
     </x-ui.card>
+
+    {{--
+        Manual entry (AttendanceManualEntryController): HR records an employee's day by hand. It is an HR-direct
+        correction like `mark`, so the reason stays on the trail. Fields carry an `entry_` prefix so their old
+        input and errors never mix with the filter and punch forms above, which use `date` and `employee_id`.
+    --}}
+    @if ($canMark)
+        @php
+            $entryDate = $date->isFuture() ? today()->toDateString() : $date->toDateString();
+        @endphp
+
+        <x-ui.modal name="record-employee-attendance" title="Record attendance" icon="calendar-days" size="lg"
+                    subtitle="Enter an employee's day by hand. It is saved as a correction, with your reason."
+                    :show="$errors->hasAny(['entry_employee_id', 'entry_date', 'entry_status', 'entry_payable_factor', 'entry_check_in', 'entry_check_out', 'entry_reason', 'entry_remarks'])">
+            <form id="record-employee-attendance-form" method="POST" action="{{ route('admin.attendance.record') }}" class="space-y-4"
+                  x-data="{
+                      employee: @js((string) old('entry_employee_id', '')),
+                      payable: @js((string) old('entry_payable_factor', '1')),
+                  }"
+                  x-on:record-attendance-for.window="employee = String($event.detail.id)">
+                @csrf
+
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <x-ui.form.select name="entry_employee_id" label="Employee" placeholder="Choose an employee" required x-model="employee">
+                        @foreach ($employees as $employee)
+                            <option value="{{ $employee->id }}">{{ $employee->name }} · {{ $employee->employee_code }}</option>
+                        @endforeach
+                    </x-ui.form.select>
+
+                    <x-ui.form.input name="entry_date" label="Date" type="date" :value="$entryDate"
+                                     :max="today()->toDateString()" required />
+                </div>
+
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <x-ui.form.select name="entry_status" label="Status" required :selected="old('entry_status', 'present')"
+                                      x-on:change="payable = ({ absent: '0', half_day: '0.5' })[$event.target.value] ?? '1'">
+                        @foreach ($statuses as $value => $label)
+                            <option value="{{ $value }}" @selected(old('entry_status', 'present') === $value)>{{ $label }}</option>
+                        @endforeach
+                    </x-ui.form.select>
+
+                    <x-ui.form.input name="entry_payable_factor" label="Payable share of the day" type="number"
+                                     step="0.25" min="0" max="1" required x-model="payable"
+                                     help="1 is a full day's pay, 0.5 half, 0 none." />
+                </div>
+
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <x-ui.form.input name="entry_check_in" label="Check-in" type="time" optional />
+                    <x-ui.form.input name="entry_check_out" label="Check-out" type="time" optional />
+                </div>
+
+                <x-ui.form.textarea name="entry_reason" label="Reason" rows="2" required
+                                    placeholder="e.g. Biometric device was down; confirmed by the team lead."
+                                    help="At least 10 characters. Kept on the attendance trail." />
+
+                <x-ui.form.input name="entry_remarks" label="Remarks" optional />
+            </form>
+
+            <x-slot:footer>
+                <x-ui.button variant="secondary" x-on:click="hide(true)">Cancel</x-ui.button>
+                <x-ui.button type="submit" form="record-employee-attendance-form" icon="check">Save attendance</x-ui.button>
+            </x-slot:footer>
+        </x-ui.modal>
+    @endif
 @endsection

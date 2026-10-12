@@ -91,9 +91,10 @@ final class StudentFeeController extends Controller
             studentId: (int) $validated['student_id'],
             feeType: StudentFeeType::from((string) $validated['fee_type']),
             grossAmount: (string) $validated['gross_amount'],
-            studentAdmissionId: $validated['student_admission_id'] ?? null,
-            courseId: $validated['course_id'] ?? null,
-            batchId: $validated['batch_id'] ?? null,
+            // `integer` validates but does not cast: the form posts "120", and IssueFeeData is strictly typed.
+            studentAdmissionId: isset($validated['student_admission_id']) ? (int) $validated['student_admission_id'] : null,
+            courseId: isset($validated['course_id']) ? (int) $validated['course_id'] : null,
+            batchId: isset($validated['batch_id']) ? (int) $validated['batch_id'] : null,
             title: $validated['title'] ?? null,
             dueDate: isset($validated['due_date']) ? Carbon::parse((string) $validated['due_date']) : null,
             notes: $validated['notes'] ?? null,

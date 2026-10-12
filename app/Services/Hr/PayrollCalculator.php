@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Services\Hr;
 
+use App\Enums\AttendanceDeductionType;
 use App\Enums\SalaryComponentCalculation;
 use App\Enums\SalaryComponentGroup;
 use App\Enums\SalaryComponentType;
+use App\Models\Hr\AttendanceDeduction;
 use App\Models\Hr\AttendanceMonthlySummary;
 use App\Models\Hr\Employee;
 use App\Models\Hr\SalaryStructure;
@@ -148,8 +150,18 @@ class PayrollCalculator
         $prorateBase = $inputs->lopBasis === 'basic' ? $basic : $contractedGross;
         $perDay = Money::round(Money::div($prorateBase, $divisor));
 
-        if ($inputs->unpaidLeaveDeductionEnabled && Money::isPositive($lopDays)) {
-            $amount = Money::round(Money::mul($perDay, $lopDays));
+        // While the excess-absence rule is on, it charges the absent days (one per absence beyond the
+        // allowance), so they come off the unpaid-leave line here — never charged by both.
+        $unpaidLeaveDays = $lopDays;
+
+        if ($inputs->excessAbsenceDeductionEnabled && Money::isPositive($inputs->absenceLopDays)) {
+            $unpaidLeaveDays = Money::compare($inputs->absenceLopDays, $lopDays) >= 0
+                ? Money::round('0', 4)
+                : Money::round(Money::sub($lopDays, $inputs->absenceLopDays), 4);
+        }
+
+        if ($inputs->unpaidLeaveDeductionEnabled && Money::isPositive($unpaidLeaveDays)) {
+            $amount = Money::round(Money::mul($perDay, $unpaidLeaveDays));
 
             $lines[] = new PayslipLine(
                 componentCode: 'UNPAID_LEAVE',
@@ -159,15 +171,16 @@ class PayrollCalculator
                 calculation: SalaryComponentCalculation::PerDay,
                 amount: $amount,
                 baseAmount: $perDay,
-                quantity: $lopDays,
+                quantity: $unpaidLeaveDays,
                 isTaxable: false,
-                calculationNote: sprintf('%s / %s x %s days', $prorateBase, rtrim(rtrim($divisor, '0'), '.'), $lopDays),
+                calculationNote: sprintf('%s / %s x %s days', $prorateBase, rtrim(rtrim($divisor, '0'), '.'), $unpaidLeaveDays),
                 sortOrder: $sort++,
             );
         }
 
         // ---- step 5: late deduction, only when the business asked for one ----------------------------
-        if ($inputs->lateDeductionLatesPerDay > 0) {
+        // The per-late-arrival rule below replaces this count-based one while it is on.
+        if ($inputs->lateDeductionLatesPerDay > 0 && ! $inputs->lateArrivalDeductionEnabled) {
             $lateDays = intdiv((int) $summary->late_count, $inputs->lateDeductionLatesPerDay);
 
             if ($lateDays > 0) {
@@ -193,6 +206,14 @@ class PayrollCalculator
                     sortOrder: $sort++,
                 );
             }
+        }
+
+        // ---- step 5b: attendance deductions — one line per rule, summed from the recorded rows ----------
+        $attendanceDeductionIds = [];
+
+        foreach ($this->attendanceDeductionLines($inputs, $sort, $attendanceDeductionIds) as $line) {
+            $lines[] = $line;
+            $sort++;
         }
 
         // ---- step 7: structure deductions, then tax ---------------------------------------------------
@@ -312,6 +333,11 @@ class PayrollCalculator
             'net_rounding' => $inputs->netRounding,
             'unpaid_leave_deduction_enabled' => $inputs->unpaidLeaveDeductionEnabled,
             'late_deduction_lates_per_day' => $inputs->lateDeductionLatesPerDay,
+            'late_arrival_deduction_enabled' => $inputs->lateArrivalDeductionEnabled,
+            'excess_absence_deduction_enabled' => $inputs->excessAbsenceDeductionEnabled,
+            'absence_lop_days_moved_to_rule' => $inputs->excessAbsenceDeductionEnabled ? $inputs->absenceLopDays : '0.0000',
+            // The rows this slip took. Locking the run marks exactly these applied — not whatever is pending then.
+            'attendance_deduction_ids' => $attendanceDeductionIds,
         ];
 
         return new PayslipDraft(
@@ -333,6 +359,86 @@ class PayrollCalculator
     | The steps, each in one place
     |--------------------------------------------------------------------------
     */
+
+    /**
+     * Step 5b — the attendance-based deductions, one line per rule.
+     *
+     * The amounts are the recorded rows' own amounts, summed: `AttendanceDeductionService` worked each one
+     * out from this run's snapshot just before generation, so the slip and the employee's deduction list
+     * can never disagree. A rule that is off in this run's snapshot contributes nothing, whatever rows
+     * exist. `$ids` collects the rows taken, for the snapshot that locking reads.
+     *
+     * @param  list<int>  $ids
+     * @return list<PayslipLine>
+     */
+    private function attendanceDeductionLines(PayrollInputs $inputs, int $sort, array &$ids): array
+    {
+        $byType = [];
+
+        foreach ($inputs->attendanceDeductions as $deduction) {
+            $type = $deduction->deduction_type;
+
+            $enabled = match ($type) {
+                AttendanceDeductionType::LateArrival => $inputs->lateArrivalDeductionEnabled,
+                AttendanceDeductionType::ExcessAbsence => $inputs->excessAbsenceDeductionEnabled,
+            };
+
+            if (! $enabled || ! $deduction->isPending() || ! Money::isPositive((string) $deduction->amount)) {
+                continue;
+            }
+
+            $byType[$type->value][] = $deduction;
+        }
+
+        $lines = [];
+
+        foreach ([AttendanceDeductionType::LateArrival, AttendanceDeductionType::ExcessAbsence] as $type) {
+            $rows = $byType[$type->value] ?? [];
+
+            if ($rows === []) {
+                continue;
+            }
+
+            $amount = Money::round(Money::sum(array_map(
+                static fn (AttendanceDeduction $row): string => Money::round((string) $row->amount),
+                $rows,
+            )));
+
+            $dates = array_map(static fn (AttendanceDeduction $row): string => $row->deduction_date->format('j M'), $rows);
+
+            foreach ($rows as $row) {
+                $ids[] = (int) $row->getKey();
+            }
+
+            $first = $rows[0];
+
+            $lines[] = new PayslipLine(
+                componentCode: $type->componentCode(),
+                componentName: $type === AttendanceDeductionType::LateArrival
+                    ? 'Late arrival deduction'
+                    : 'Absence beyond the monthly allowance',
+                group: $type->componentGroup(),
+                side: SalaryComponentType::Deduction,
+                calculation: SalaryComponentCalculation::PerDay,
+                amount: $amount,
+                rate: Money::round((string) $first->rate_percentage, 4),
+                baseAmount: Money::round((string) $first->daily_salary),
+                quantity: Money::round((string) count($rows), 4),
+                isTaxable: false,
+                sourceType: 'attendance_deductions',
+                calculationNote: sprintf(
+                    '%d day(s) x %s%% of the daily salary %s (%s).',
+                    count($rows),
+                    rtrim(rtrim((string) $first->rate_percentage, '0'), '.'),
+                    Money::round((string) $first->daily_salary),
+                    implode(', ', $dates),
+                ),
+                sortOrder: $sort++,
+            );
+        }
+
+        return $lines;
+    }
 
     /**
      * §6.6 step 4's divisor. `working_days` of zero is caught by the caller as a skip rather than becoming

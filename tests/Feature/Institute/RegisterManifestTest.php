@@ -203,10 +203,10 @@ final class RegisterManifestTest extends TestCase
                 ? $this->assertNull($row['idor']['owner'], sprintf('%s: an admin screen has no ownership column.', $name))
                 : $this->assertNotNull($row['idor']['owner'], sprintf('%s: a panel screen is owned by whoever is signed in.', $name));
 
-            // A CSV is not a page, so it is in neither HTML sweep; a print view has one fixed width.
-            if ($row['response'] === 'csv') {
-                $this->assertFalse($row['responsive'], sprintf('%s answers a file.', $name));
-                $this->assertFalse($row['a11y'], sprintf('%s answers a file.', $name));
+            // A CSV or a JSON answer is not a page, so it is in neither HTML sweep; a print view has one fixed width.
+            if (in_array($row['response'], ['csv', 'json'], true)) {
+                $this->assertFalse($row['responsive'], sprintf('%s answers data, not a page.', $name));
+                $this->assertFalse($row['a11y'], sprintf('%s answers data, not a page.', $name));
             } elseif ($row['kind'] === 'print') {
                 $this->assertFalse($row['responsive'], sprintf('%s is laid out for paper.', $name));
                 $this->assertTrue($row['a11y'], sprintf('%s is still HTML somebody reads on screen first.', $name));

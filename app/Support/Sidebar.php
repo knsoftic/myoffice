@@ -400,6 +400,14 @@ final class Sidebar
                         'module' => 'payroll',
                         'permission' => 'payroll.view_any',
                     ],
+                    // Attendance-based salary deductions: amounts, so view_financial rather than view_any.
+                    [
+                        'label' => 'Attendance Deductions',
+                        'icon' => 'receipt-percent',
+                        'route' => 'admin.attendance-deductions.index',
+                        'module' => 'payroll',
+                        'permission' => 'payroll.view_financial',
+                    ],
                     // phase-07 §8: the screens this phase adds. Salary slips sit apart from payroll so an
                     // Accountant can read and print them without holding the right to lock a run.
                     [
@@ -454,9 +462,24 @@ final class Sidebar
                                 'permission' => 'employee_self_service.view',
                             ],
                             [
+                                // Finalized salary and every deduction, by day, month and year (MySalaryService).
+                                'label' => 'My Salary & Deductions',
+                                'icon' => 'banknotes',
+                                'route' => 'admin.my.salary.index',
+                                'module' => 'employee_self_service',
+                                'permission' => 'employee_self_service.view_financial',
+                            ],
+                            [
                                 'label' => 'My Salary Slips',
                                 'icon' => 'document-text',
                                 'route' => 'admin.my.payslips.index',
+                                'module' => 'employee_self_service',
+                                'permission' => 'employee_self_service.view_financial',
+                            ],
+                            [
+                                'label' => 'My Deductions',
+                                'icon' => 'receipt-percent',
+                                'route' => 'admin.my.deductions.index',
                                 'module' => 'employee_self_service',
                                 'permission' => 'employee_self_service.view_financial',
                             ],
@@ -773,6 +796,15 @@ final class Sidebar
                                 'route' => 'admin.student-id-cards.index',
                                 'module' => 'student_id_cards',
                                 'permission' => 'student_id_cards.view_any',
+                            ],
+                            [
+                                // The same register as Batches → Attendance, offered here too because
+                                // the front desk looks for a student's attendance under Students.
+                                'label' => 'Attendance',
+                                'icon' => 'clipboard-document-check',
+                                'route' => 'admin.student-attendance.index',
+                                'module' => 'student_attendance',
+                                'permission' => 'student_attendance.view_any',
                             ],
                         ],
                     ],
