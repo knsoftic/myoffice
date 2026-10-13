@@ -138,6 +138,17 @@
                                 <x-ui.icon-button icon="printer" label="Fee slip" :href="route('admin.student-fees.slip', $charge)" />
                             @endcan
                             <x-ui.icon-button icon="eye" label="Open" :href="route('admin.student-fees.show', $charge)" />
+                            {{-- The charge screen's "Collect payment", from the row. Same rule as there:
+                                 an open charge and `student_fee_payments.create`. A paid or cancelled row
+                                 keeps an empty slot so the icons above and below stay in line. --}}
+                            @can('student_fee_payments.create')
+                                @if ($charge->isOpen())
+                                    <x-ui.icon-button icon="banknotes" label="Collect payment" variant="primary"
+                                                      x-on:click="$dispatch('open-modal', { name: 'quick-collect', fee: {{ (int) $charge->getKey() }} })" />
+                                @else
+                                    <span class="inline-block h-9 w-9" aria-hidden="true"></span>
+                                @endif
+                            @endcan
                         </div>
                     </td>
                 </tr>
@@ -167,4 +178,6 @@
 
         <x-ui.pagination-summary :paginator="$charges" label="charges" />
     </x-ui.card>
+
+    @include('admin.student-fees._quick-collect-modal', ['charges' => $charges])
 @endsection

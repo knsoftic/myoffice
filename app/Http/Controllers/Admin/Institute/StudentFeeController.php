@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Admin\Institute;
 
 use App\DataObjects\Institute\FeeSlipOptions;
 use App\DataObjects\Institute\IssueFeeData;
+use App\Enums\InstallmentStatus;
 use App\Enums\StudentFeeStatus;
 use App\Enums\StudentFeeType;
 use App\Http\Controllers\Controller;
@@ -48,6 +49,15 @@ final class StudentFeeController extends Controller
     public function index(Request $request): View
     {
         $charges = $this->query($request)->paginate(per_page())->withQueryString();
+
+        // The row's "Collect payment" dialog offers the same installment picker as the charge screen,
+        // so the open charges on this page bring their unpaid lines with them — one query for the
+        // page, not one per row, and none at all for somebody who cannot take money.
+        if ($request->user()?->can('student_fee_payments.create') === true) {
+            $charges->getCollection()
+                ->filter(static fn (StudentFee $charge): bool => $charge->isOpen())
+                ->load(['installments' => static fn ($query) => $query->where('status', '!=', InstallmentStatus::Paid->value)]);
+        }
 
         return view('admin.student-fees.index', [
             'charges' => $charges,
