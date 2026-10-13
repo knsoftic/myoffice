@@ -790,6 +790,33 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-10-13 — Late-arrival deductions show the real minutes; "Collect payment" on the fee list
+
+**Late minutes.** `/admin/payroll/attendance-deductions` showed "(0 min after the shift start and grace)" because
+the deduction reason printed the attendance row's stored `late_minutes`, which is 0 for a day HR marks late
+without a check-in time (and was 0 for HR entries with a time before the correction path computed it).
+- `Attendance::minutesLate()` — the stored figure, or the check-in time against the row's own shift snapshot
+  (the punch path's arithmetic); 0 with no check-in time. `Attendance::LATE_COLUMNS` for slim eager loads.
+- `AttendanceDeduction::lateArrivalReason()` — one sentence: "N min after the shift start and grace", or "marked
+  late by HR, no check-in time recorded". The service builds new reasons with it (same rules as before).
+- `AttendanceDeduction::displayReason()` — rows already saved with the "(0 min after" sentence are **not rewritten**
+  (an applied deduction is history); the review list reads them back with the real minutes. Pending rows get the
+  new sentence on their next sync. My Salary's late line uses `minutesLate()` too.
+- Demo: the four October/November rows have no check-in time, so they now read "marked late by HR, no check-in
+  time recorded"; minutes appear wherever HR records an In time.
+- Tests: `AttendanceDeductionTest` +3 (minutes in the reason, a check-in without a stored figure, legacy text shown
+  with the real figure) — pass. **Open:** an uncommitted working-tree rule in `AttendanceDeductionService::desired()`
+  (not part of this change) skips an HR "late" mark when the punch was on time; it makes 4 `AttendanceDeductionTest`
+  and 5 `MySalaryTest` fixtures (punched 09:00, then marked late) fail. With it off, `MySalaryTest` is 6/6.
+
+**Collect from the fee list.** `/admin/student-fees` rows that are open get a "Collect payment" button after the eye
+icon (`student_fee_payments.create` — Admin, Accountant, Receptionist). One dialog for the page
+(`_quick-collect-modal.blade.php`) posts to the existing `admin.fee-payments.store` with the same fields as the
+charge screen's dialog; each charge carries its own idempotency key and its unpaid installment lines (one eager
+load for the page, only for users who can collect). A refusal returns to the list with the dialog reopened on that
+charge (`collect_fee_id` rides along; the request ignores it). The charge screen's button and the store/redirect
+flow are unchanged. Tests: `CollectFromListTest` 8/8.
+
 ### 2026-10-12 — Home page as a product landing page (CMS-driven)
 
 The public home page was redesigned from a brief (glass / aurora dark look, persona solutions, pricing, FAQ, sign-up

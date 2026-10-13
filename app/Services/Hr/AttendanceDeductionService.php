@@ -512,7 +512,19 @@ class AttendanceDeductionService
                     continue;
                 }
 
+                // The stored figure, or — when a row has a check-in time but no figure (manual entries or
+                // corrections that did not store late_minutes) — the lateness from its shift window.
+                $lateMinutes = $row->minutesLate();
+
+                // If check-in time is recorded and the employee was not late (within grace / 0 min late),
+                // they must never suffer a late arrival deduction.
+                if ($row->check_in_at !== null && $lateMinutes === 0) {
+                    continue;
+                }
+
                 $amount = Money::round(Money::percentage($daily['daily'], $settings['late_percent']));
+
+                $reason = AttendanceDeduction::lateArrivalReason($row->attendance_date, $lateMinutes);
 
                 $desired[$this->key(AttendanceDeductionType::LateArrival, $row->attendance_date)] = [
                     'type' => AttendanceDeductionType::LateArrival,
@@ -521,7 +533,8 @@ class AttendanceDeductionService
                     'amount' => $amount,
                     'sequence' => null,
                     'allowance' => null,
-                    'reason' => sprintf('Late arrival on %s (%d min after the shift start and grace).', $row->attendance_date->format('j M Y'), (int) $row->late_minutes),
+                    'reason' => $reason,
+                    'late_minutes' => $lateMinutes,
                     'daily' => $daily,
                 ];
             }
@@ -710,7 +723,7 @@ class AttendanceDeductionService
                 'amount' => $wanted['amount'],
                 'salary_structure_id' => $daily['structure_id'],
                 'attendance_status' => $wanted['attendance']->status->value,
-                'late_minutes' => (int) $wanted['attendance']->late_minutes,
+                'late_minutes' => (int) ($wanted['late_minutes'] ?? $wanted['attendance']->late_minutes),
             ],
         ]);
 

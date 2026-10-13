@@ -25,7 +25,7 @@ use Illuminate\Support\Facades\DB;
 final class AttendanceDeductionObserver
 {
     /** Attributes whose change can change a deduction. */
-    private const RELEVANT = ['status', 'day_type', 'payable_factor', 'attendance_date', 'late_minutes', 'leave_request_id'];
+    private const RELEVANT = ['status', 'day_type', 'payable_factor', 'attendance_date', 'late_minutes', 'leave_request_id', 'check_in_at'];
 
     /** @var array<string, true> employee|year|month already queued in this request */
     private static array $queued = [];

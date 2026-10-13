@@ -145,6 +145,73 @@ final class AttendanceDeductionTest extends TestCase
     }
 
     #[Test]
+    public function a_late_arrival_reason_names_the_minutes_past_the_shift_start_and_grace(): void
+    {
+        $this->signIn();
+        $employee = $this->employee('Minutes Counted');   // 09:00 shift, 15 grace minutes
+        $this->structure($employee, '40000');
+        $this->rules(late: true, absence: false);
+
+        $this->punch($employee, '2026-03-04', '09:40');
+        $this->mark($employee, '2026-03-05', 'late');      // HR marks the day, no check-in time
+
+        [$measured, $marked] = $this->deductions($employee)->all();
+
+        $this->assertSame('Late arrival on 4 Mar 2026 (25 min after the shift start and grace).', $measured->reason);
+        $this->assertSame('Late arrival on 5 Mar 2026 (marked late by HR, no check-in time recorded).', $marked->reason);
+    }
+
+    #[Test]
+    public function a_check_in_time_without_a_stored_figure_still_reads_its_minutes(): void
+    {
+        $this->signIn();
+        $employee = $this->employee('Old Entry');
+        $this->structure($employee, '40000');
+        $this->punch($employee, '2026-03-04', '09:40');
+
+        // An entry made before the correction path stored the figure: a check-in time, late_minutes 0.
+        $row = Attendance::query()->where('employee_id', $employee->getKey())->firstOrFail();
+        Attendance::query()->whereKey($row->getKey())->update(['late_minutes' => 0]);
+
+        $this->assertSame(25, $row->fresh()->minutesLate());
+
+        $row->forceFill(['check_in_at' => null])->saveQuietly();
+        $this->assertSame(0, $row->fresh()->minutesLate(), 'No check-in time, nothing to measure.');
+    }
+
+    /**
+     * An earlier build wrote "(0 min after the shift start and grace)" for every late arrival. Those rows
+     * are history and stay as written; the review screen reads them back with the real minutes.
+     */
+    #[Test]
+    public function a_reason_saved_as_zero_minutes_by_the_earlier_build_is_shown_with_the_real_figure(): void
+    {
+        $this->signIn();
+        $employee = $this->employee('Legacy Reason');
+        $this->structure($employee, '40000');
+        $this->rules(late: true, absence: false);
+
+        $this->punch($employee, '2026-03-04', '09:40');
+        $this->mark($employee, '2026-03-05', 'late');
+
+        foreach ($this->deductions($employee) as $row) {
+            AttendanceDeduction::query()->whereKey($row->getKey())->update([
+                'reason' => sprintf('Late arrival on %s (0 min after the shift start and grace).', $row->deduction_date->format('j M Y')),
+            ]);
+        }
+        // The punched day as an older manual entry left it: a check-in time and no stored figure.
+        Attendance::query()->where('employee_id', $employee->getKey())->whereDate('attendance_date', '2026-03-04')->update(['late_minutes' => 0]);
+
+        $this->get(route('admin.attendance-deductions.index'))
+            ->assertOk()
+            ->assertSee('Late arrival on 4 Mar 2026 (25 min after the shift start and grace).')
+            ->assertSee('Late arrival on 5 Mar 2026 (marked late by HR, no check-in time recorded).')
+            ->assertDontSee('0 min after');
+
+        $this->assertStringContainsString('(0 min after', (string) $this->deductions($employee)->first()->reason, 'The stored row is not rewritten.');
+    }
+
+    #[Test]
     public function the_first_absence_is_free_and_each_one_after_costs_a_full_day(): void
     {
         $this->signIn();

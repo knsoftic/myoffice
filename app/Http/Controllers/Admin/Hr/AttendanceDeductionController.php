@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Admin\Hr;
 use App\Enums\AttendanceDeductionStatus;
 use App\Enums\AttendanceDeductionType;
 use App\Http\Controllers\Controller;
+use App\Models\Hr\Attendance;
 use App\Models\Hr\AttendanceDeduction;
 use App\Models\Hr\Employee;
 use App\Services\Hr\AttendanceDeductionService;
@@ -41,7 +42,12 @@ final class AttendanceDeductionController extends Controller
             'status' => ['nullable', Rule::enum(AttendanceDeductionStatus::class)],
         ]);
 
-        $query = AttendanceDeduction::query()->with(['employee:id,name,employee_code', 'payrollRunItem:id,slip_number', 'correctionItem:id,slip_number', 'reverser:id,name']);
+        $query = AttendanceDeduction::query()->with([
+            'employee:id,name,employee_code', 'payrollRunItem:id,slip_number', 'correctionItem:id,slip_number', 'reverser:id,name',
+            // `displayReason()` reads the late minutes off the day itself: the figure, or the check-in
+            // time against the day's shift snapshot.
+            'attendance:'.implode(',', Attendance::LATE_COLUMNS),
+        ]);
         $this->scopes->apply($query, $request->user());
 
         if (! empty($filters['employee_id'])) {

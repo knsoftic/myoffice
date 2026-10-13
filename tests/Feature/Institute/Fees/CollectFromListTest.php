@@ -38,13 +38,35 @@ final class CollectFromListTest extends TestCase
 
         $response->assertOk();
         $response->assertSee("name: 'quick-collect', fee: ".$charge->getKey(), false);
-        // The action sits in the dialog's JSON, where @js wraps the payload in JSON.parse('...')
-        // and escapes slashes as `\\\/`.
-        $response->assertSee(str_replace('/', '\\\\\\/', route('admin.fee-payments.store', $charge)), false);
         $response->assertSee('name="idempotency_key"', false);
+
+        $dialog = $this->dialogCharges($response->getContent());
+        $this->assertSame(route('admin.fee-payments.store', $charge), $dialog[$charge->getKey()]['action']);
+        // Prefilled with what is outstanding, like the charge screen.
+        $this->assertSame(0, Money::compare((string) $charge->balance_amount, $dialog[$charge->getKey()]['fields']['amount']));
+
         // The charge screen's own button is untouched.
         $this->actingAs($actor)->get(route('admin.student-fees.show', $charge))
             ->assertSee("open-modal', 'collect-payment", false);
+    }
+
+    #[Test]
+    public function a_planned_charge_offers_its_unpaid_installments(): void
+    {
+        $actor = $this->createSuperAdmin();
+        $charge = $this->charge(gross: '30000.00', actor: $actor);
+        $lines = $this->plan($charge, count: 3, actor: $actor);
+        $this->receive($charge, (string) $lines->first()->amount, $lines->first());
+
+        $dialog = $this->dialogCharges(
+            $this->actingAs($actor)->get(route('admin.student-fees.index'))->assertOk()->getContent(),
+        );
+
+        // The paid first line is left out; the other two are offered, in order.
+        $this->assertSame(
+            $lines->slice(1)->map(static fn ($line): string => (string) $line->getKey())->values()->all(),
+            array_column($dialog[$charge->getKey()]['installments'], 'id'),
+        );
     }
 
     #[Test]
@@ -56,8 +78,9 @@ final class CollectFromListTest extends TestCase
 
         $this->actingAs($actor)->get(route('admin.student-fees.index'))
             ->assertOk()
-            ->assertDontSee("fee: ".$charge->getKey().' })', false)
-            ->assertDontSee('x-ui-modal-quick-collect', false);
+            ->assertSee($charge->fee_number)
+            ->assertDontSee("name: 'quick-collect'", false)
+            ->assertDontSee('charges: JSON.parse', false);
     }
 
     #[Test]
@@ -83,7 +106,7 @@ final class CollectFromListTest extends TestCase
             ->assertOk()
             ->assertSee($charge->fee_number)
             ->assertDontSee("name: 'quick-collect'", false)
-            ->assertDontSee(str_replace('/', '\\/', route('admin.fee-payments.store', $charge)), false);
+            ->assertDontSee('charges: JSON.parse', false);
     }
 
     #[Test]
@@ -94,11 +117,10 @@ final class CollectFromListTest extends TestCase
         $this->charge(actor: $actor);
 
         $html = $this->actingAs($actor)->get(route('admin.student-fees.index'))->assertOk()->getContent();
+        $keys = array_map(static fn (array $charge): string => $charge['fields']['idempotency_key'], $this->dialogCharges($html));
 
-        preg_match_all('/idempotency_key\\\\u0022:\\\\u0022([0-9A-Z]{26})/', $html, $keys);
-
-        $this->assertCount(2, $keys[1], 'Each open charge should carry one key.');
-        $this->assertCount(2, array_unique($keys[1]), 'Two charges must never share a key.');
+        $this->assertCount(2, $keys, 'Each open charge should carry one key.');
+        $this->assertCount(2, array_unique($keys), 'Two charges must never share a key.');
     }
 
     #[Test]
@@ -145,11 +167,31 @@ final class CollectFromListTest extends TestCase
 
         $this->assertSame(0, StudentFeePayment::query()->count());
 
-        // Reopened on the refused charge, with the same key and the request's own message.
-        $this->assertStringContainsString('retryId: '.$charge->getKey(), $html);
-        $this->assertStringContainsString($key, $html);
+        // Reopened on the refused charge, with the request's message and the duplicate override.
+        $this->assertStringContainsString('retryId: '.$charge->getKey().',', $html);
         $this->assertStringContainsString('A receipt records money that arrived', $html);
         $this->assertStringContainsString('name="confirm_duplicate"', $html);
-        $this->assertStringNotContainsString('retryId: '.$other->getKey().',', $html);
+
+        // The same key and what was typed come back on that charge only.
+        $dialog = $this->dialogCharges($html);
+        $this->assertTrue($dialog[$charge->getKey()]['retry']);
+        $this->assertSame($key, $dialog[$charge->getKey()]['fields']['idempotency_key']);
+        $this->assertSame('0', $dialog[$charge->getKey()]['fields']['amount']);
+
+        $this->assertFalse($dialog[$other->getKey()]['retry']);
+        $this->assertNotSame($key, $dialog[$other->getKey()]['fields']['idempotency_key']);
+    }
+
+    /**
+     * The dialog's per-charge data, decoded from the `@js(...)` in its `x-data`. `@js` encodes the
+     * JSON a second time inside `JSON.parse('...')`, so it is decoded twice.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function dialogCharges(string $html): array
+    {
+        $this->assertSame(1, preg_match("/charges: JSON\\.parse\\('([^']*)'\\)/", $html, $match), 'The dialog data is missing.');
+
+        return json_decode((string) json_decode('"'.$match[1].'"'), true, flags: JSON_THROW_ON_ERROR);
     }
 }

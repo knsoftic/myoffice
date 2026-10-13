@@ -10,6 +10,7 @@ use App\Enums\DayType;
 use App\Models\Branch;
 use App\Models\Concerns\Blameable;
 use App\Models\Concerns\LogsActivityWithContext;
+use App\Support\Hr\ShiftWindow;
 use App\Support\Money;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -89,6 +90,44 @@ class Attendance extends Model
     public function isLocked(): bool
     {
         return $this->locked_at !== null;
+    }
+
+    /**
+     * The columns `minutesLate()` reads — for an eager load that selects only what it needs (strict
+     * models throw on a column that was not selected).
+     */
+    public const LATE_COLUMNS = [
+        'id', 'late_minutes', 'check_in_at', 'work_shift_id', 'expected_in_at', 'expected_out_at',
+        'expected_minutes', 'grace_in_minutes', 'grace_out_minutes', 'break_minutes',
+    ];
+
+    /**
+     * How many minutes past the shift start plus grace the employee arrived.
+     *
+     * The stored `late_minutes` when it has a figure. A row that was given a check-in time without one
+     * (an HR entry made before the correction path started computing it) is worked out from the row's
+     * own shift snapshot, the same arithmetic the punch and correction paths use. With no check-in time
+     * there is nothing to measure, so 0.
+     */
+    public function minutesLate(): int
+    {
+        $stored = (int) $this->late_minutes;
+
+        if ($stored > 0 || $this->check_in_at === null) {
+            return $stored;
+        }
+
+        $lateAfter = ShiftWindow::fromSnapshot([
+            'work_shift_id' => $this->work_shift_id,
+            'expected_in_at' => $this->expected_in_at,
+            'expected_out_at' => $this->expected_out_at,
+            'expected_minutes' => $this->expected_minutes,
+            'grace_in_minutes' => $this->grace_in_minutes,
+            'grace_out_minutes' => $this->grace_out_minutes,
+            'break_minutes' => $this->break_minutes,
+        ])->lateAfter();
+
+        return $lateAfter === null ? 0 : max(0, (int) $lateAfter->diffInMinutes($this->check_in_at, absolute: false));
     }
 
     /**

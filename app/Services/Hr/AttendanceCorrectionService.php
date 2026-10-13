@@ -14,6 +14,7 @@ use App\Models\Hr\Employee;
 use App\Models\User;
 use App\Services\Hr\Exceptions\HrRuleException;
 use App\Services\Hr\Exceptions\LockedAttendanceException;
+use App\Support\Hr\ShiftWindow;
 use App\Support\Money;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -336,6 +337,43 @@ class AttendanceCorrectionService
         $values = $this->sanitise((array) $correction->new_values);
 
         $row->forceFill($values + ['is_manual' => true, 'requires_correction' => false])->save();
+
+        if ($row->check_in_at !== null) {
+            $window = ShiftWindow::fromSnapshot([
+                'work_shift_id' => $row->work_shift_id,
+                'expected_in_at' => $row->expected_in_at,
+                'expected_out_at' => $row->expected_out_at,
+                'expected_minutes' => $row->expected_minutes,
+                'grace_in_minutes' => $row->grace_in_minutes,
+                'grace_out_minutes' => $row->grace_out_minutes,
+                'break_minutes' => $row->break_minutes,
+            ]);
+
+            $lateAfter = $window->lateAfter();
+            $lateMinutes = $lateAfter !== null
+                ? max(0, (int) $lateAfter->diffInMinutes($row->check_in_at, absolute: false))
+                : 0;
+
+            $earlyBefore = $window->earlyBefore();
+            $earlyMinutes = ($earlyBefore !== null && $row->check_out_at !== null)
+                ? max(0, (int) $row->check_out_at->diffInMinutes($earlyBefore, absolute: false))
+                : 0;
+
+            $workedMinutes = 0;
+            if ($row->check_out_at !== null) {
+                $gross = (int) $row->check_in_at->diffInMinutes($row->check_out_at);
+                $workedMinutes = max(0, $gross - $window->breakMinutes);
+            }
+
+            $row->forceFill([
+                'late_minutes' => $lateMinutes,
+                'early_leave_minutes' => $earlyMinutes,
+                'worked_minutes' => $workedMinutes,
+                'overtime_minutes' => max(0, $workedMinutes - $window->expectedMinutes),
+            ])->save();
+        } elseif ($row->status !== AttendanceStatus::Late) {
+            $row->forceFill(['late_minutes' => 0])->save();
+        }
 
         $correction->forceFill([
             'attendance_id' => $row->getKey(),

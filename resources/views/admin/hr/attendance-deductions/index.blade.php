@@ -74,7 +74,7 @@
                     <td class="px-4 py-3 align-top tabular-nums text-slate-600 dark:text-slate-300">{{ app_date($deduction->deduction_date) }}</td>
                     <td class="px-4 py-3 align-top">
                         <x-ui.badge :color="$deduction->deduction_type->color()" size="xs">{{ $deduction->deduction_type->label() }}</x-ui.badge>
-                        <span class="mt-1 block max-w-sm text-xs text-slate-500 dark:text-slate-400">{{ $deduction->reason }}</span>
+                        <span class="mt-1 block max-w-sm text-xs text-slate-500 dark:text-slate-400">{{ $deduction->displayReason() }}</span>
                     </td>
                     <td class="px-4 py-3 align-top text-right tabular-nums text-slate-600 dark:text-slate-300">{{ money((string) $deduction->daily_salary) }}</td>
                     <td class="px-4 py-3 align-top text-right tabular-nums text-slate-600 dark:text-slate-300">{{ rtrim(rtrim((string) $deduction->rate_percentage, '0'), '.') }}%</td>

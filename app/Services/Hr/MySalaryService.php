@@ -327,7 +327,7 @@ final class MySalaryService
 
         // 1. The attendance-deduction rule rows this very slip took — one per late arrival or excess absence.
         $taken = AttendanceDeduction::query()
-            ->with('attendance:id,late_minutes,status')
+            ->with('attendance:'.implode(',', [...Attendance::LATE_COLUMNS, 'status']))
             ->where('payroll_run_item_id', $slip->getKey())
             ->orderBy('deduction_date')
             ->orderBy('id')
@@ -404,14 +404,14 @@ final class MySalaryService
             : sprintf('daily salary %s', money($daily));
 
         if ($deduction->deduction_type === AttendanceDeductionType::LateArrival) {
-            $minutes = (int) ($deduction->attendance?->late_minutes ?? 0);
+            $minutes = $deduction->attendance?->minutesLate() ?? 0;
 
             return [
                 'date' => $deduction->deduction_date->copy()->startOfDay(),
                 'month_date' => null,
                 'kind' => 'late',
                 'reason' => 'Late arrival',
-                'details' => $minutes > 0 ? sprintf('Late by %d minutes (after the shift start and grace)', $minutes) : 'Marked late',
+                'details' => $minutes > 0 ? sprintf('Late by %d minutes (after the shift start and grace)', $minutes) : 'Marked late by HR (no check-in time recorded)',
                 'calculation' => sprintf('%s%% of the %s = %s', rtrim(rtrim((string) $deduction->rate_percentage, '0'), '.'), $dailyText, money((string) $deduction->amount)),
                 'amount' => Money::round((string) $deduction->amount),
                 'slip' => $slip->slip_number,

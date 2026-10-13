@@ -11,6 +11,7 @@ use App\Models\Concerns\Blameable;
 use App\Models\Concerns\LogsActivityWithContext;
 use App\Models\User;
 use App\Support\Money;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -212,6 +213,38 @@ class AttendanceDeduction extends Model
     public function isApplied(): bool
     {
         return $this->status === AttendanceDeductionStatus::Applied;
+    }
+
+    /**
+     * The stored `reason` of a late arrival: the minutes when the arrival was measured, otherwise that HR
+     * marked the day late with no check-in time to measure from.
+     */
+    public static function lateArrivalReason(CarbonInterface $date, int $minutes): string
+    {
+        return $minutes > 0
+            ? sprintf('Late arrival on %s (%d min after the shift start and grace).', $date->format('j M Y'), $minutes)
+            : sprintf('Late arrival on %s (marked late by HR, no check-in time recorded).', $date->format('j M Y'));
+    }
+
+    /**
+     * The reason as a list shows it.
+     *
+     * The stored text, except for one known-bad sentence: an earlier build wrote "(0 min after the shift
+     * start and grace)" for a day HR marked late without a check-in time. Those rows are kept as written
+     * — an applied deduction is history — and are read back through `lateArrivalReason()` with the
+     * minutes from the linked attendance, which is what the deduction would say if raised today.
+     */
+    public function displayReason(): string
+    {
+        $reason = (string) $this->reason;
+
+        if ($this->deduction_type !== AttendanceDeductionType::LateArrival || ! str_contains($reason, '(0 min after')) {
+            return $reason;
+        }
+
+        $attendance = $this->relationLoaded('attendance') ? $this->attendance : null;
+
+        return self::lateArrivalReason($this->deduction_date, $attendance?->minutesLate() ?? 0);
     }
 
     /**
