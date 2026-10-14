@@ -17,36 +17,40 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Lays out the home page as a product landing page: a solutions-by-audience block, pricing plans and a
- * sign-up banner, with starter copy an editor then rewrites in /admin/website.
+ * Lays out the home page for what KN Softic actually is — an IT training institute and a software house
+ * in one — with a "for students / for businesses" block and a closing sign-up banner, and starter copy an
+ * editor then rewrites in /admin/website.
  *
  * Everything goes through the CMS services (SectionService, ContentPublisher, MenuService), exactly as an
  * editor's clicks would, so validation, revisions, the audit trail and the public cache all behave the
  * same way. Safe to run again: a section that already exists is left alone, and nothing an editor wrote is
  * overwritten unless an option asks for it.
  *
- *   (no option)  add solutions, pricing and the sign-up banner where they are missing, and order the page;
- *   --hero       also rewrite the hero's copy, buttons, badge and rating;
- *   --menu       also add Solutions / Pricing / FAQs anchor links to the header menu, and a header button;
+ *   (no option)  add the solutions block and the sign-up banner where they are missing, and order the page;
+ *   --hero       also rewrite the hero's copy and buttons, and clear its rating;
+ *   --menu       also add an FAQs anchor link to the header menu, and an "Apply now" header button;
  *   --tidy       also switch off the old closing call-to-action banner (switched off, never deleted).
  *
- * **The prices and the rating are placeholders**, written here so the layout can be seen. Replace them
- * with real figures in /admin/website before the page goes live.
+ * **The copy states nothing the data does not.** Courses, fees and services are not written here: the
+ * `courses` and `services` sections read them live. No rating, no client count and no price is invented —
+ * the hero's figures are its own statistics, computed from the database. The `pricing` type stays
+ * registered for an editor who wants it; this command no longer places one, because course fees differ
+ * per course and already live on /fee-structure.
  */
 final class SetUpLandingPage extends Command
 {
     use ConfirmableTrait;
 
     protected $signature = 'cms:landing-page
-        {--hero : Rewrite the hero copy, buttons, badge and rating}
-        {--menu : Add Solutions / Pricing / FAQs links and a header button}
+        {--hero : Rewrite the hero copy and buttons, and clear its rating}
+        {--menu : Add an FAQs link and an Apply now header button}
         {--tidy : Switch off the old closing call-to-action banner}
         {--force : Run in production without asking}';
 
-    protected $description = 'Add the landing-page sections (solutions, pricing, sign-up banner) to the home page';
+    protected $description = 'Add the landing-page sections (students / businesses, sign-up banner) to the home page';
 
     /** Where each home section goes; anything not listed keeps its place after these. */
-    private const ORDER = ['hero', 'solutions', 'about', 'pricing', 'services', 'courses', 'faq', 'signup_cta'];
+    private const ORDER = ['hero', 'solutions', 'about', 'courses', 'services', 'pricing', 'faq', 'signup_cta'];
 
     public function handle(SectionService $sections, ContentPublisher $publisher, MenuService $menus): int
     {
@@ -57,7 +61,6 @@ final class SetUpLandingPage extends Command
         $this->line(sprintf('Database: <info>%s</info>', DB::connection()->getDatabaseName()));
 
         $this->placeOnce($sections, $publisher, 'solutions', 'solutions', $this->solutions(), ['feature' => $this->features()]);
-        $this->placeOnce($sections, $publisher, 'pricing', 'pricing', $this->pricing(), ['plan' => $this->plans()]);
         $this->placeOnce($sections, $publisher, 'signup_cta', 'get-started', $this->signup(), []);
 
         $this->anchor($sections, 'faq', 'faq');
@@ -68,8 +71,13 @@ final class SetUpLandingPage extends Command
         }
 
         if ($this->option('menu')) {
-            $this->addMenuLinks($menus);
-            $this->headerButton($sections, $publisher);
+            $linked = $this->addMenuLinks($menus);
+
+            // The header carries its menu as a snapshot taken when it was published, so a new link shows
+            // only once the header is published again — which adding the button already does.
+            if (! $this->headerButton($sections, $publisher) && $linked) {
+                $this->republishHeader($publisher);
+            }
         }
 
         if ($this->option('tidy')) {
@@ -83,7 +91,7 @@ final class SetUpLandingPage extends Command
 
         $this->order($sections);
 
-        $this->info('Landing page ready. Replace the placeholder prices and rating in /admin/website before going live.');
+        $this->info('Landing page ready. Read it through in /admin/website before going live.');
 
         return self::SUCCESS;
     }
@@ -142,15 +150,17 @@ final class SetUpLandingPage extends Command
         }
 
         $hero = $sections->saveDraft($hero, [
-            'badge_text' => 'Next-gen management platform',
-            'badge_tag' => 'v2.0 live',
-            'heading' => 'Scale your software house & IT academy in one unified system',
-            'subtitle' => 'Track client projects and student batches, bill both from one ledger, and give clients and students their own portals.',
-            'primary_button' => ['label' => 'Start free trial', 'url' => '#pricing', 'style' => 'primary', 'new_tab' => false],
-            'secondary_button' => ['label' => 'Book a live demo', 'url' => '/contact', 'style' => 'outline', 'new_tab' => false],
-            // Placeholder — replace with a rating the business can back up, or clear it to hide the line.
-            'rating_value' => '4.9',
-            'rating_text' => 'average rating from our clients',
+            'badge_text' => 'IT training & software house',
+            'badge_tag' => $this->city(),
+            'heading' => 'Learn practical IT skills, or get your website and app built',
+            // The hero allows 180 characters.
+            'subtitle' => 'On-campus courses in design, video editing, web and app development, digital marketing and '
+                .'freelancing — and websites, apps and custom software built for businesses.',
+            'primary_button' => ['label' => 'Explore courses', 'url' => '/courses', 'style' => 'primary', 'new_tab' => false],
+            'secondary_button' => ['label' => 'Get a quote', 'url' => '/request-a-quote', 'style' => 'outline', 'new_tab' => false],
+            // No rating: there is no verified one to show, and the line hides itself while these are empty.
+            'rating_value' => null,
+            'rating_text' => null,
             'alignment' => 'center',
             'show_statistics' => true,
         ]);
@@ -165,20 +175,25 @@ final class SetUpLandingPage extends Command
     |--------------------------------------------------------------------------
     */
 
-    private function addMenuLinks(MenuService $menus): void
+    /**
+     * @return bool whether a link was added
+     */
+    private function addMenuLinks(MenuService $menus): bool
     {
         $menu = Menu::query()->where('location', MenuLocation::Header->value)->first();
 
         if ($menu === null) {
             $this->warn('  · header: no header menu to add links to.');
 
-            return;
+            return false;
         }
+
+        $added = false;
 
         $existing = DB::table('menu_items')->where('menu_id', $menu->getKey())->whereNull('deleted_at')
             ->pluck('label')->map(static fn ($label): string => mb_strtolower((string) $label))->all();
 
-        foreach (['Solutions' => 'solutions', 'Pricing' => 'pricing', 'FAQs' => 'faq'] as $label => $anchor) {
+        foreach (['FAQs' => 'faq'] as $label => $anchor) {
             if (in_array(mb_strtolower($label), $existing, true)) {
                 continue;
             }
@@ -191,28 +206,63 @@ final class SetUpLandingPage extends Command
             ]);
 
             $this->line(sprintf('  · header: added the %s link (#%s).', $label, $anchor));
+            $added = true;
         }
+
+        return $added;
     }
 
-    private function headerButton(SectionService $sections, ContentPublisher $publisher): void
+    /**
+     * @return bool whether the header was published
+     */
+    private function headerButton(SectionService $sections, ContentPublisher $publisher): bool
     {
-        $header = WebsiteSection::query()
-            ->where('section_key', 'header')
-            ->where('placement', SectionPlacement::GlobalHeader->value)
-            ->whereNull('page_id')
-            ->first();
+        $header = $this->header();
 
         if ($header === null || filled(data_get($header->content, 'cta_button.url'))) {
-            return;
+            return false;
         }
 
         $header = $sections->saveDraft($header, [
             'cta_button_enabled' => true,
-            'cta_button' => ['label' => 'Get started', 'url' => '#pricing', 'style' => 'primary', 'new_tab' => false],
+            'cta_button' => ['label' => 'Apply now', 'url' => '/admission', 'style' => 'primary', 'new_tab' => false],
         ]);
 
         $publisher->publish($header->fresh());
-        $this->line('  · header: added a Get started button.');
+        $this->line('  · header: added an Apply now button.');
+
+        return true;
+    }
+
+    /**
+     * Publish the header again so its menu snapshot picks up the new link — unless an editor has unpublished
+     * changes on it, which this command must not push live on their behalf.
+     */
+    private function republishHeader(ContentPublisher $publisher): void
+    {
+        $header = $this->header();
+
+        if ($header === null) {
+            return;
+        }
+
+        if ($header->getAttribute(WebsiteSection::UNPUBLISHED_CHANGES_COLUMN)) {
+            $this->warn('  · header: it has unpublished edits, so it was left alone — publish it in /admin/website to show the new link.');
+
+            return;
+        }
+
+        $publisher->publish($header);
+        $this->line('  · header: published again so the new link shows.');
+    }
+
+    private function header(): ?WebsiteSection
+    {
+        return WebsiteSection::query()
+            ->where('section_key', 'header')
+            ->where('placement', SectionPlacement::GlobalHeader->value)
+            ->whereNull('page_id')
+            ->first();
     }
 
     /*
@@ -242,7 +292,7 @@ final class SetUpLandingPage extends Command
 
         if ($ordered !== $rows->pluck('id')->map(static fn ($id): int => (int) $id)->all()) {
             $sections->reorder(SectionPlacement::Home, null, $ordered);
-            $this->line('  · home: ordered the sections hero → solutions → about → pricing → FAQ → sign-up.');
+            $this->line('  · home: ordered the sections hero → solutions → about → courses → services → FAQ → sign-up.');
         }
     }
 
@@ -271,87 +321,34 @@ final class SetUpLandingPage extends Command
     private function solutions(): array
     {
         return [
-            'eyebrow' => 'Solutions',
-            'heading' => 'One platform for both sides of your business',
-            'description' => 'Everything a software house and a training institute run on, sharing one set of clients, staff and accounts.',
-            'software_house_label' => 'For software houses',
-            'institute_label' => 'For training institutes',
+            'eyebrow' => 'What we do',
+            'heading' => 'Courses for students, software for businesses',
+            'description' => 'Join a course to learn a skill you can earn from, or bring us a project and our team will build it.',
+            'software_house_label' => 'For businesses',
+            'institute_label' => 'For students',
         ];
     }
 
     /**
+     * The course areas are the institute's own categories, and the business cards its own services.
+     *
      * @return list<array<string, mixed>>
      */
     private function features(): array
     {
         return [
-            ['persona' => 'software_house', 'icon' => 'briefcase', 'title' => 'Project tracking', 'text' => 'Milestones, budgets and status for every client project in one view.'],
-            ['persona' => 'software_house', 'icon' => 'clock', 'title' => 'Time logging', 'text' => 'Log hours against tasks and see what each project really costs.'],
-            ['persona' => 'software_house', 'icon' => 'view-columns', 'title' => 'Sprint boards', 'text' => 'Plan sprints on a drag-and-drop board the whole team shares.'],
-            ['persona' => 'software_house', 'icon' => 'document-text', 'title' => 'Invoicing', 'text' => 'Raise invoices from milestones and follow every payment until it is paid.'],
-            ['persona' => 'software_house', 'icon' => 'user-circle', 'title' => 'Client portal', 'text' => 'Clients follow progress, approve work and download invoices themselves.'],
-            ['persona' => 'software_house', 'icon' => 'chart-bar', 'title' => 'Reports', 'text' => 'Profit by project, hours by person and cash by month, ready to export.'],
-            ['persona' => 'institute', 'icon' => 'users', 'title' => 'Batch management', 'text' => 'Schedule batches, assign teachers and rooms, and keep every timetable in step.'],
-            ['persona' => 'institute', 'icon' => 'user-plus', 'title' => 'Student enrollments', 'text' => 'Admissions, enrolments and transfers, with the full history of each student.'],
-            ['persona' => 'institute', 'icon' => 'book-open', 'title' => 'Course syllabus', 'text' => 'Modules, topics and materials, with progress tracked for every batch.'],
-            ['persona' => 'institute', 'icon' => 'receipt-percent', 'title' => 'Fee vouchers', 'text' => 'Issue vouchers and instalment plans, and record every payment received.'],
-            ['persona' => 'institute', 'icon' => 'clipboard-document-check', 'title' => 'Attendance', 'text' => 'Mark a whole register in seconds and see who is falling behind.'],
-            ['persona' => 'institute', 'icon' => 'academic-cap', 'title' => 'Certificates', 'text' => 'Results, certificates and ID cards issued from the same student record.'],
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function pricing(): array
-    {
-        return [
-            'eyebrow' => 'Pricing',
-            'heading' => 'Simple pricing that grows with you',
-            'description' => 'Start small and move up as your teams and batches grow. Every plan includes updates and support.',
-            'billing_toggle' => true,
-            'monthly_label' => 'Monthly',
-            'yearly_label' => 'Yearly',
-            'yearly_badge' => 'Save 20%',
-            'period_label' => '/mo',
-            'yearly_note' => 'billed yearly',
-            'footnote' => 'Prices are placeholders shown in US dollars. Need something in between? Talk to us.',
-        ];
-    }
-
-    /**
-     * @return list<array<string, mixed>>
-     */
-    private function plans(): array
-    {
-        return [
-            [
-                'name' => 'Starter',
-                'tagline' => 'For small bootcamps and boutique agencies getting organised.',
-                'monthly_price' => '$29',
-                'yearly_price' => '$23',
-                'highlighted' => false,
-                'features' => "Up to 50 students\nUp to 5 active projects\nBasic billing and fee vouchers\nAttendance and timetables\nEmail support",
-                'button' => ['label' => 'Start free trial', 'url' => '/contact', 'style' => 'outline', 'new_tab' => false],
-            ],
-            [
-                'name' => 'Professional',
-                'badge' => 'Most popular',
-                'tagline' => 'Full software house and institute management in one place.',
-                'monthly_price' => '$79',
-                'yearly_price' => '$63',
-                'highlighted' => true,
-                'features' => "Unlimited students and projects\nClient and student portals\nAutomated invoices and reminders\nSprint boards and time tracking\nCommissions and payroll\nPriority support",
-                'button' => ['label' => 'Start free trial', 'url' => '/contact', 'style' => 'primary', 'new_tab' => false],
-            ],
-            [
-                'name' => 'Enterprise',
-                'tagline' => 'For networks and large academies with their own requirements.',
-                'monthly_price' => 'Custom',
-                'highlighted' => false,
-                'features' => "Dedicated server\nCustom workflows\nSLA-backed support\nWhite-label domain\nOnboarding and data migration",
-                'button' => ['label' => 'Contact sales', 'url' => '/contact', 'style' => 'secondary', 'new_tab' => false],
-            ],
+            ['persona' => 'institute', 'icon' => 'photo', 'title' => 'Graphic designing', 'text' => 'Photoshop, Illustrator, InDesign and UI/UX — from a first logo to a complete brand.'],
+            ['persona' => 'institute', 'icon' => 'video-camera', 'title' => 'Video editing', 'text' => 'Premiere Pro, After Effects and CapCut for reels, ads and long-form video.'],
+            ['persona' => 'institute', 'icon' => 'computer-desktop', 'title' => 'Web development', 'text' => 'HTML & CSS, JavaScript, PHP & MySQL and WordPress, up to full-stack web development.'],
+            ['persona' => 'institute', 'icon' => 'puzzle-piece', 'title' => 'App & game development', 'text' => 'Android, Flutter and React Native apps, and games built with Unity.'],
+            ['persona' => 'institute', 'icon' => 'megaphone', 'title' => 'Digital marketing', 'text' => 'SEO, Google Ads, Facebook & Instagram ads and social media marketing.'],
+            ['persona' => 'institute', 'icon' => 'globe-alt', 'title' => 'Freelancing & e-commerce', 'text' => 'Fiverr & Upwork, Shopify, Amazon VA, dropshipping and building a portfolio that wins work.'],
+            ['persona' => 'software_house', 'icon' => 'computer-desktop', 'title' => 'Websites & web apps', 'text' => 'Fast, mobile-friendly business websites and the web systems your staff log into.'],
+            ['persona' => 'software_house', 'icon' => 'squares-2x2', 'title' => 'Mobile apps', 'text' => 'Android and iOS apps, built natively or with Flutter and React Native.'],
+            ['persona' => 'software_house', 'icon' => 'cog-6-tooth', 'title' => 'Custom software', 'text' => 'Software designed around the way your business already works.'],
+            ['persona' => 'software_house', 'icon' => 'credit-card', 'title' => 'E-commerce stores', 'text' => 'Shopify, WooCommerce or a custom store, with a catalogue, a cart and online payments.'],
+            ['persona' => 'software_house', 'icon' => 'chart-bar', 'title' => 'Digital marketing', 'text' => 'Search, social media and paid ads that reach people already looking for what you sell.'],
+            ['persona' => 'software_house', 'icon' => 'server-stack', 'title' => 'Branding, domain & hosting', 'text' => 'Logos and brand artwork, and the domain, hosting and SSL that keep your site online.'],
         ];
     }
 
@@ -361,12 +358,17 @@ final class SetUpLandingPage extends Command
     private function signup(): array
     {
         return [
-            'eyebrow' => 'Get started',
-            'heading' => 'Ready to streamline your tech business and training academy?',
-            'description' => 'Leave your email and we will set up a workspace and walk you through it.',
-            'email_placeholder' => 'you@company.com',
-            'button_label' => 'Get instant access',
-            'note' => 'No credit card needed. We reply within one working day.',
+            'eyebrow' => 'Get in touch',
+            'heading' => 'Ready to start a course or a project?',
+            'description' => 'Leave your email and continue to our contact form — tell us which course you want, or what you need built.',
+            'email_placeholder' => 'you@example.com',
+            'button_label' => 'Continue',
+            'note' => 'Prefer to talk? Our phone and WhatsApp numbers are at the bottom of every page.',
         ];
+    }
+
+    private function city(): ?string
+    {
+        return trim((string) setting('contact.city', '')) ?: null;
     }
 }

@@ -790,6 +790,36 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-10-14 — The home page is CMS-driven again, with KN Softic's own copy
+
+Commit `7a89200` added the landing section types, `cms:landing-page` and `LandingPageTest`, and in the same commit
+replaced `site/home.blade.php` with a 1,444-line hard-coded page that ignored every CMS section: a SaaS pitch for
+"MyOffice ERP" with invented figures ("250+ active tech teams", "4.9/5 on Capterra & G2", "$42M+ processed", a 99.9%
+SLA) and $29/$79 plans. Two `LandingPageTest` cases failed on it, and nothing on the page was editable (CLAUDE.md
+golden rule 8).
+- `site/home.blade.php` is the section-driven view from `6ea482e` again. The restyled hero, solutions, sign-up and
+  FAQ templates from `7a89200` are untouched and now render.
+- `cms:landing-page` copy describes what KN Softic is, taken from knsoftic.com (/courses, /services, the footer): an
+  IT training institute and software house in Sadhar City, Faisalabad. Hero: "IT training & software house" badge,
+  the city as its tag, "Explore courses" / "Get a quote", **no rating**. Solutions: "For students" (the course
+  areas) and "For businesses" (the seven services), 6 + 6 cards. Sign-up: "Ready to start a course or a project?".
+  **No pricing section is placed** (fees differ per course and live on /fee-structure; the type stays registered).
+  `--menu` adds only FAQs, and the header button is "Apply now" → /admission. Order: hero → solutions → about →
+  courses → services → FAQ → sign-up.
+- Bug fixed in the command: a header menu link was written to `menu_items` but never shown, because the header
+  renders its menu from a publish-time snapshot. The command now publishes the header again after adding a link,
+  unless the header has unpublished edits (then it says so and leaves it alone).
+- `site/sections/partials/teaser.blade.php` shows a course card's fee (`money()`) when it is above zero.
+  `CoursesSectionProvider` already passed `course_fee` and its comment said the card rendered it; the card did not,
+  while the seeded section text promised "the fee and the length on every one".
+- Local database only: company and contact settings set to KN Softic's (name, Faisalabad address, +92 345 2470250,
+  info@knsoftic.com, Mon–Sat 09:00–18:30) through `SettingsService::asSystem()`, and `cms:landing-page --hero --menu
+  --tidy` run, then the header republished once by hand so the FAQs link written before the fix shows.
+- **Live is not changed.** To apply there after a deploy: `php artisan cms:landing-page --hero --menu --tidy --force`.
+  If the old version of the command was ever run on live, a `pricing` section with the $29 plans exists — switch it
+  off in /admin/website.
+- Tests: `LandingPageTest` 5/5 (was 3/5).
+
 ### 2026-10-14 — `deploy/aapanel-deploy.sh`: one script for a release on knsoftic.com
 
 AAPANEL.md section 15 as a script, run as root in the aaPanel terminal (always fetched from `origin/master`,
@@ -808,6 +838,15 @@ It refuses hand-edited tracked files and a server branch that cannot fast-forwar
 - Tested on a stubbed server in Git Bash (git real; php, composer, npm, curl, sudo, php-fpm stubbed): full run,
   migration failure after `down` (stays down, no `up`), hand-edited file (refused before `down`), re-run at the
   same commit, interactive "no", failed smoke test with `--yes` (stays down). **Not yet run on the real server.**
+- **First real run (same day) stopped safely at the backup:** `backup.mysqldump_path` on the server still held the
+  registry default `C:/xampp/mysql/bin/mysqldump.exe`. Its `ops:health` also showed the queue worker and the
+  scheduler have never run there. And knsoftic.com was answering routes (`/admin/my/salary`) that the checkout at
+  `/www/wwwroot/knsoftic.com` (at `6ea482e`) does not have — the site is served from somewhere else.
+- So the script now: takes the folder from the nginx vhost `root` (refuses an `APP_DIR` that disagrees, and a
+  served folder that is not a git checkout); repairs the two backup binary settings through
+  `SettingsService::asSystem()` when they do not exist and `/www/server/mysql/bin` has them; and takes
+  `--landing` to run `cms:landing-page --hero --menu --tidy` after the seeders. Stub-tested: auto-detected folder
+  with `--landing`, a disagreeing `APP_DIR`, a served folder without `.git`, no vhost file.
 
 ### 2026-10-13 — Late-arrival deductions show the real minutes; "Collect payment" on the fee list
 

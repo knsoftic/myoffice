@@ -9,6 +9,16 @@
 #
 # Options:  --yes        do not ask before taking the site down (a failed smoke test still keeps it down)
 #           --full-npm   run `npm ci` even when package-lock.json did not change
+#           --landing    also run `cms:landing-page --hero --menu --tidy` (rewrites the live hero copy)
+#
+# The folder it deploys is the one nginx actually serves for the site — the `root` of aaPanel's vhost
+# file, minus `/public` — not an assumed path: on knsoftic.com the git checkout at the default path was
+# found at an older commit than the code the site was serving. Pass APP_DIR to choose explicitly; it is
+# refused when it disagrees with nginx.
+#
+# Before the backup it checks that `backup.mysqldump_path` exists. A database installed from the defaults
+# still holds the Windows XAMPP path; when it does not exist and aaPanel's binary does, the setting is
+# pointed at aaPanel's through SettingsService (audited), and the change is printed.
 #
 # This is docs/AAPANEL.md section 15 as one script, with the corrections docs/DEPLOY.md makes to it:
 # the four reference seeders by name (a bare `db:seed` runs every seeder, CMS content included), migrations on
@@ -21,7 +31,10 @@
 
 set -Eeuo pipefail
 
-APP_DIR="${APP_DIR:-/www/wwwroot/knsoftic.com}"
+SITE="${SITE:-knsoftic.com}"
+NGINX_VHOST="${NGINX_VHOST:-/www/server/panel/vhost/nginx/$SITE.conf}"
+MYSQL_BIN_DIR="${MYSQL_BIN_DIR:-/www/server/mysql/bin}"
+APP_DIR="${APP_DIR:-}"
 PHP_BIN="${PHP_BIN:-/www/server/php/82/bin/php}"
 FPM_SERVICE="${FPM_SERVICE:-/etc/init.d/php-fpm-82}"
 WEB_USER="${WEB_USER:-www}"
@@ -30,10 +43,12 @@ BACKUP_TYPE="${BACKUP_TYPE:-database}"
 
 ASSUME_YES=0
 FULL_NPM=0
+LANDING=0
 for arg in "$@"; do
     case "$arg" in
         --yes)      ASSUME_YES=1 ;;
         --full-npm) FULL_NPM=1 ;;
+        --landing)  LANDING=1 ;;
         *) echo "Unknown option: $arg" >&2; exit 64 ;;
     esac
 done
@@ -96,7 +111,23 @@ confirm() {
 # --- preflight -------------------------------------------------------------------------------------
 
 [[ "$(id -u)" == 0 ]] || fail "Run this as root (the aaPanel terminal is root)."
-[[ -d "$APP_DIR/.git" ]] || fail "$APP_DIR is not a git checkout."
+
+# Deploy the folder nginx serves, not the one we assume it serves.
+SERVED=""
+if [[ -f "$NGINX_VHOST" ]]; then
+    SERVED="$(sed -nE 's/^[[:space:]]*root[[:space:]]+([^;[:space:]]+)[[:space:]]*;.*/\1/p' "$NGINX_VHOST" | head -n1)"
+    SERVED="${SERVED%/}"
+    SERVED="${SERVED%/public}"
+fi
+if [[ -z "$APP_DIR" ]]; then
+    [[ -n "$SERVED" ]] || fail "Could not read the site folder from $NGINX_VHOST. Pass it: APP_DIR=/www/wwwroot/<folder> bash /root/myoffice-deploy.sh"
+    APP_DIR="$SERVED"
+elif [[ -n "$SERVED" && "$SERVED" != "${APP_DIR%/}" ]]; then
+    fail "nginx serves $SITE from $SERVED, not $APP_DIR. Deploying $APP_DIR would change nothing users see."
+fi
+echo "Site folder: $APP_DIR${SERVED:+  (the root nginx serves for $SITE)}"
+
+[[ -d "$APP_DIR/.git" ]] || fail "$APP_DIR is not a git checkout, so it was uploaded by hand and cannot be fast-forwarded. Clone the repository there first (docs/AAPANEL.md 5.1)."
 [[ -x "$PHP_BIN" ]] || fail "PHP not found at $PHP_BIN — check: ls /www/server/php/"
 [[ -f "$APP_DIR/.env" ]] || fail "$APP_DIR/.env is missing."
 COMPOSER_BIN="$(command -v composer || true)"
@@ -152,8 +183,46 @@ confirm "Deploy ${NEW:0:7} to $APP_URL? The site goes into maintenance for a few
 
 # --- 1. backup, while the site is still up ---------------------------------------------------------
 
-STEP="pre-deploy backup"
+STEP="backup tool path"
 bold "1/9  Backup ($BACKUP_TYPE)"
+helper="$(mktemp /tmp/myoffice-backup-paths.XXXXXX.php)"
+cat > "$helper" <<'PHP'
+<?php
+// Point backup.mysqldump_path / backup.mysql_path at aaPanel's binaries when the stored ones do not exist.
+[, $base, $binDir] = $argv;
+require $base.'/vendor/autoload.php';
+$app = require $base.'/bootstrap/app.php';
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+
+$wanted = [];
+foreach (['mysqldump_path' => 'mysqldump', 'mysql_path' => 'mysql'] as $key => $binary) {
+    $current = trim((string) setting('backup.'.$key, ''));
+    if ($current !== '' && is_file($current)) {
+        echo "  backup.$key: $current", PHP_EOL;
+        continue;
+    }
+    $candidate = rtrim($binDir, '/').'/'.$binary;
+    if (is_file($candidate)) {
+        $wanted[$key] = $candidate;
+    } elseif ($binary === 'mysqldump') {
+        fwrite(STDERR, "  backup.$key: '$current' does not exist, and neither does $candidate".PHP_EOL);
+        exit(1);
+    } else {
+        echo "  backup.$key: '$current' does not exist (only a restore needs it)", PHP_EOL;
+    }
+}
+if ($wanted !== []) {
+    $changes = app(App\Services\Core\SettingsService::class)->asSystem()->update('backup', $wanted);
+    foreach ($changes as $key => $change) {
+        echo "  $key: ", json_encode($change['old']), ' -> ', json_encode($change['new']), '  (fixed)', PHP_EOL;
+    }
+}
+PHP
+chmod 644 "$helper"
+sudo -u "$WEB_USER" "$PHP_BIN" "$helper" "$APP_DIR" "$MYSQL_BIN_DIR"
+rm -f "$helper"
+
+STEP="pre-deploy backup"
 artisan backup:run --type="$BACKUP_TYPE" --reason="pre-deploy ${NEW:0:7}"
 
 # --- 2. maintenance --------------------------------------------------------------------------------
@@ -221,6 +290,11 @@ STEP="reference seeders"
 for seeder in ModuleSeeder PermissionSeeder RoleSeeder SettingSeeder; do
     artisan db:seed --class="$seeder" --force
 done
+
+if [[ "$LANDING" == 1 ]]; then
+    STEP="landing page"
+    artisan cms:landing-page --hero --menu --tidy --force
+fi
 
 # --- 6. caches -------------------------------------------------------------------------------------
 

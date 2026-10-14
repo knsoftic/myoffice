@@ -1170,6 +1170,13 @@ terminal, always the copy on GitHub — the one in the tree is about to be repla
 cd /www/wwwroot/knsoftic.com && git -c safe.directory="$PWD" fetch origin master && git -c safe.directory="$PWD" show origin/master:deploy/aapanel-deploy.sh > /root/myoffice-deploy.sh && bash /root/myoffice-deploy.sh
 ```
 
+It deploys the folder nginx actually serves (the `root` in `/www/server/panel/vhost/nginx/knsoftic.com.conf`,
+minus `/public`) — on this server the checkout at `/www/wwwroot/knsoftic.com` was found at an older commit
+than the code the site was serving, so an assumed path is not good enough. Add `--landing` to also run
+`cms:landing-page --hero --menu --tidy` (it rewrites the live hero). Before the backup it repairs
+`backup.mysqldump_path` / `backup.mysql_path` when they still hold the Windows default and
+`/www/server/mysql/bin` has the binaries.
+
 It shows the commits and new migrations and asks before it touches anything; then backup →
 maintenance (it prints a bypass URL) → fast-forward → composer, npm build, permissions → migrate on
 `mysql_migration` → the four reference seeders → caches → php-fpm reload → `queue:restart` → a smoke

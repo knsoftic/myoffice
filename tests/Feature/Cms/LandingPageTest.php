@@ -54,7 +54,7 @@ final class LandingPageTest extends TestCase
     {
         $this->artisan('cms:landing-page', ['--hero' => true, '--menu' => true, '--tidy' => true])->assertSuccessful();
 
-        foreach (['solutions' => 'solutions', 'pricing' => 'pricing', 'signup_cta' => 'get-started'] as $key => $anchor) {
+        foreach (['solutions' => 'solutions', 'signup_cta' => 'get-started'] as $key => $anchor) {
             $section = $this->homeSection($key);
 
             $this->assertNotNull($section, sprintf('%s was not placed.', $key));
@@ -63,7 +63,9 @@ final class LandingPageTest extends TestCase
         }
 
         $this->assertSame(12, DB::table('website_section_items')->where('website_section_id', $this->homeSection('solutions')->getKey())->where('group', 'feature')->count());
-        $this->assertSame(3, DB::table('website_section_items')->where('website_section_id', $this->homeSection('pricing')->getKey())->where('group', 'plan')->count());
+
+        // Course fees differ per course and live on /fee-structure, so no price table is placed.
+        $this->assertNull($this->homeSection('pricing'), 'The command places no pricing section.');
 
         $old = $this->homeSection('cta');
         if ($old !== null) {
@@ -71,9 +73,8 @@ final class LandingPageTest extends TestCase
         }
 
         $labels = DB::table('menu_items')->whereNull('deleted_at')->pluck('label')->all();
-        foreach (['Solutions', 'Pricing', 'FAQs'] as $label) {
-            $this->assertContains($label, $labels);
-        }
+        $this->assertContains('FAQs', $labels);
+        $this->assertNotContains('Pricing', $labels, 'There is no pricing section to link to.');
 
         $sections = DB::table('website_sections')->whereNull('deleted_at')->count();
         $items = DB::table('menu_items')->whereNull('deleted_at')->count();
@@ -91,29 +92,29 @@ final class LandingPageTest extends TestCase
 
         $html = $this->get(route('site.home'))->assertOk()->getContent();
 
-        // Hero: badge, rating, and — with no hero image — the drawn preview with the statistics as chips.
-        $this->assertStringContainsString('Next-gen management platform', $html);
-        $this->assertStringContainsString('v2.0 live', $html);
-        $this->assertStringContainsString('4.9</strong>/5', $html);
+        // Hero: the institute-and-software-house copy, the drawn preview with the statistics as chips, and
+        // no rating — there is no verified one, so none is written.
+        $this->assertStringContainsString('IT training &amp; software house', $html);
+        $this->assertStringContainsString('Learn practical IT skills', $html);
         $this->assertStringContainsString('data-hero-preview', $html);
+        $this->assertStringNotContainsString('/5<span class="sr-only"> stars', $html, 'No rating is invented.');
 
         // Solutions: a real tablist with both audiences.
         $this->assertStringContainsString('id="solutions"', $html);
         $this->assertStringContainsString('role="tablist"', $html);
-        $this->assertStringContainsString('For software houses', $html);
-        $this->assertStringContainsString('For training institutes', $html);
+        $this->assertStringContainsString('For students', $html);
+        $this->assertStringContainsString('For businesses', $html);
 
-        // Pricing: the switch, the highlighted plan, and no "/mo" after "Custom".
-        $this->assertStringContainsString('id="pricing"', $html);
-        $this->assertStringContainsString('Save 20%', $html);
-        $this->assertStringContainsString('Most popular', $html);
-        $this->assertMatchesRegularExpression('/>\s*\$29\s*<\/span>/', $html);
-        $this->assertMatchesRegularExpression('/>\s*\$63\s*<\/span>/', $html);
-        $this->assertDoesNotMatchRegularExpression('/Custom<\/span>\s*<span[^>]*>\s*\/mo/', $html);
+        // No price table: course fees are per course.
+        $this->assertStringNotContainsString('id="pricing"', $html);
+
+        // The header carries its menu as a publish-time snapshot; the new link shows because the command
+        // published the header again rather than only writing the menu row.
+        $this->assertStringContainsString('<span>FAQs</span>', $html);
 
         // Sign-up banner: the email box never has a name, so no address reaches a query string.
         $this->assertStringContainsString('id="get-started"', $html);
-        $this->assertStringContainsString('Get instant access', $html);
+        $this->assertStringContainsString('Ready to start a course or a project?', $html);
         $this->assertMatchesRegularExpression('/<input\s[^>]*id="signup-email-\d+"(?![^>]*\sname=)[^>]*>/s', $html);
     }
 

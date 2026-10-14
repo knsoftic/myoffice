@@ -90,6 +90,12 @@
                         @if (filled(data_get($card, 'excerpt')))
                             <p class="mt-2 line-clamp-3 text-sm leading-relaxed text-slate-600 dark:text-slate-400">{{ data_get($card, 'excerpt') }}</p>
                         @endif
+
+                        {{-- A course card's fee, styled as a price (CoursesSectionProvider hands it over as a string). --}}
+                        @php $fee = data_get($card, 'course_fee'); @endphp
+                        @if (is_string($fee) && is_numeric($fee) && bccomp($fee, '0.00', 2) === 1)
+                            <p class="mt-auto pt-4 text-base font-semibold text-slate-900 dark:text-white">{{ money($fee) }}</p>
+                        @endif
                     </div>
                 </li>
             @endforeach
