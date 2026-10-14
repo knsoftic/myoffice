@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support\Ops;
 
+use App\Support\Realtime;
 use Illuminate\Support\Str;
 
 /**
@@ -103,7 +104,8 @@ final class CspBuilder
             // side image preview before an upload is posted.
             "img-src 'self' data: blob:",
             "font-src 'self' data:",
-            "connect-src 'self'",
+            // Plus the live bell's socket when a broadcaster is configured — and nothing when it is not.
+            trim("connect-src 'self' ".implode(' ', Realtime::cspSources())),
             sprintf('frame-ancestors %s', $this->frameAncestors()),
             // A form that posts somewhere else is the shape of a credential-harvesting injection,
             // and nothing in this application ever needs to.

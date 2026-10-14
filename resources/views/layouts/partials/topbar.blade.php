@@ -138,17 +138,13 @@
                 off has to take the bell with it. Leaving it behind would advertise a feature
                 whose routes Gate::before already denies to everyone, Super Admin included.
 
-                The panel it opens ships with the notifications module itself (phase-22); until
-                then this is the trigger with no panel behind it, which is why it has no href.
+                The dropdown behind it (badge, newest rows, mark-as-read, live pop-ups) is
+                layouts/partials/notification-bell.blade.php; where the viewer cannot reach this
+                panel's bell routes it falls back to the plain trigger.
                 See the directive notes at the top of layouts/admin.blade.php.
             --}}
             @module('notifications')
-                <x-ui.icon-button
-                    icon="bell"
-                    label="Notifications"
-                    variant="ghost"
-                    :badge="true"
-                />
+                @include('layouts.partials.notification-bell')
             @endmodule
 
             <span class="mx-0.5 hidden h-6 w-px bg-slate-200 sm:block dark:bg-slate-700" aria-hidden="true"></span>

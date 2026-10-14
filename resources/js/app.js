@@ -6,6 +6,7 @@ import { registerToasts } from './toasts';
 import { registerFocusTrap } from './focus-trap';
 import { registerComponents } from './components';
 import { registerScrollFx } from './scroll-fx';
+import { registerNotificationBell } from './notifications';
 
 /*
 |--------------------------------------------------------------------------
@@ -21,6 +22,7 @@ registerSidebar(Alpine);
 registerToasts(Alpine);
 registerFocusTrap(Alpine);
 registerComponents(Alpine);
+registerNotificationBell(Alpine);
 
 window.Alpine = Alpine;
 

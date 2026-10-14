@@ -72,6 +72,13 @@ return Application::configure(basePath: dirname(__DIR__))
             }
         },
     )
+    /*
+    | The live bell (`App\Support\Realtime`). `/broadcasting/auth` answers the browser's "may I
+    | subscribe to this private channel?" — signed in and active, like every panel route; the channel
+    | rule itself is in routes/channels.php. Registered whether or not a broadcaster is configured: with
+    | `log` / `null` no page ever asks it.
+    */
+    ->withBroadcasting(__DIR__.'/../routes/channels.php', ['middleware' => ['web', 'auth', 'active']])
     ->withMiddleware(function (Middleware $middleware): void {
         /*
         | phase-01 §7: "Change password: … other sessions invalidated (Auth::logoutOtherDevices)".

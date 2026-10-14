@@ -40,4 +40,26 @@ final readonly class BellPayload
     {
         return $this->rows->isEmpty();
     }
+
+    /**
+     * One `notifications` row as the bell's JavaScript reads it — from the polling endpoint and from
+     * the live push alike, so the two can never describe the same row differently.
+     *
+     * @return array{id: string, event: string, level: string, title: string, body: string, url: ?string, read: bool, at: string}
+     */
+    public static function present(object $row): array
+    {
+        $data = json_decode((string) $row->data, true) ?: [];
+
+        return [
+            'id' => (string) $row->id,
+            'event' => (string) $row->event_key,
+            'level' => (string) $row->level,
+            'title' => (string) ($data['title'] ?? ''),
+            'body' => (string) ($data['body'] ?? ''),
+            'url' => $row->url,
+            'read' => $row->read_at !== null,
+            'at' => (string) $row->created_at,
+        ];
+    }
 }

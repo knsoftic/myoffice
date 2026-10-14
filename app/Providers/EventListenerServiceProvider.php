@@ -70,6 +70,7 @@ use App\Listeners\Support\NotifyOfSlaBreach;
 use App\Listeners\Support\NotifyOfTicketAssignment;
 use App\Listeners\Support\NotifyOfTicketReply;
 use App\Listeners\Support\NotifyOfTicketStatusChange;
+use App\Listeners\Support\PushNotificationToBrowser;
 use App\Models\Hr\Attendance;
 use App\Models\User;
 use App\Observers\Hr\AttendanceDeductionObserver;
@@ -82,6 +83,7 @@ use Illuminate\Auth\Middleware\RedirectIfAuthenticated;
 use Illuminate\Database\Events\TransactionRolledBack;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as FoundationEventServiceProvider;
 use Illuminate\Http\Request;
+use Illuminate\Notifications\Events\NotificationSent;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 
@@ -179,6 +181,10 @@ final class EventListenerServiceProvider extends ServiceProvider
 
         // Attendance-based salary deductions: a rule switched on or off re-syncs the open months.
         SettingsChanged::class => [SyncAttendanceDeductionsOnSettingsChange::class],
+
+        // The live bell: once the database channel has stored a row, push it to that user's open tabs.
+        // Laravel's own event, so no sender changed; the listener never throws (see the class).
+        NotificationSent::class => [PushNotificationToBrowser::class],
     ];
 
     public function register(): void

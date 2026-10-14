@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Support;
 
 use App\Enums\PanelType;
+use App\DataObjects\Support\BellPayload;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\Support\NotificationPreferenceService;
@@ -80,33 +81,32 @@ final class NotificationController extends Controller
             'unread' => $payload->unread,
             'badge' => $payload->badge(),
             'has_more' => $payload->hasMore,
-            'rows' => $payload->rows->map(static function (object $row): array {
-                $data = json_decode((string) $row->data, true) ?: [];
-
-                return [
-                    'id' => (string) $row->id,
-                    'event' => (string) $row->event_key,
-                    'level' => (string) $row->level,
-                    'title' => (string) ($data['title'] ?? ''),
-                    'body' => (string) ($data['body'] ?? ''),
-                    'url' => $row->url,
-                    'read' => $row->read_at !== null,
-                    'at' => (string) $row->created_at,
-                ];
-            })->values(),
+            'rows' => $payload->rows->map(static fn (object $row): array => BellPayload::present($row))->values(),
         ]);
     }
 
-    public function read(Request $request, string $notification): RedirectResponse
+    /**
+     * The bell dropdown asks for JSON (it stays open and updates its badge); the notifications page
+     * posts a form and goes back, as it always has.
+     */
+    public function read(Request $request, string $notification): RedirectResponse|JsonResponse
     {
-        $this->notifications->markRead($request->user(), $notification);
+        $marked = $this->notifications->markRead($request->user(), $notification);
+
+        if ($request->expectsJson()) {
+            return response()->json(['marked' => $marked, 'unread' => $this->notifications->unreadCountFor($request->user())]);
+        }
 
         return back();
     }
 
-    public function readAll(Request $request): RedirectResponse
+    public function readAll(Request $request): RedirectResponse|JsonResponse
     {
         $count = $this->notifications->markAllRead($request->user());
+
+        if ($request->expectsJson()) {
+            return response()->json(['marked' => $count, 'unread' => 0]);
+        }
 
         return back()->with('toast', [
             'type' => 'success',
@@ -155,13 +155,13 @@ final class NotificationController extends Controller
 
         $url = (string) ($row->url ?? '');
 
-        if ($url === '' || ! $this->isInternal($url)) {
+        if ($url === '' || ! $this->isInternal($request, $url)) {
             // A link to nowhere, or one that points off this installation. The list is the honest
             // fallback: the person still sees what they were told.
             return redirect()->route($this->panel($request).'.notifications.index');
         }
 
-        return redirect()->to($url);
+        return redirect()->to($this->targetUrl($request, $url));
     }
 
     /** The §97 preference screen. */
@@ -227,9 +227,9 @@ final class NotificationController extends Controller
      *
      * A stored `url` is written by a listener, not by a person — but it is stored data, and
      * redirecting to whatever a row contains is an open redirect one bad row away. Relative paths
-     * pass; an absolute one must match this installation's host.
+     * pass; an absolute one must match this installation's host or the current request host.
      */
-    private function isInternal(string $url): bool
+    private function isInternal(Request $request, string $url): bool
     {
         if (str_starts_with($url, '/') && ! str_starts_with($url, '//')) {
             return true;
@@ -237,11 +237,64 @@ final class NotificationController extends Controller
 
         try {
             $host = parse_url($url, PHP_URL_HOST);
-            $appHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+            if ($host === null) {
+                return false;
+            }
 
-            return $host !== null && $appHost !== null && strcasecmp((string) $host, (string) $appHost) === 0;
+            $appHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+            $reqHost = $request->getHost();
+
+            if ($appHost !== null && strcasecmp((string) $host, (string) $appHost) === 0) {
+                return true;
+            }
+
+            if ($reqHost !== '' && strcasecmp((string) $host, (string) $reqHost) === 0) {
+                return true;
+            }
+
+            return in_array(strtolower($host), ['localhost', '127.0.0.1'], true)
+                && in_array(strtolower($reqHost), ['localhost', '127.0.0.1'], true);
         } catch (Throwable) {
             return false;
         }
+    }
+
+    /**
+     * Normalise an internal stored URL to the current request's scheme, host, port, and base path.
+     *
+     * Prevents cross-port or cross-host redirect failures when notifications were saved with an absolute
+     * APP_URL (e.g., CLI job generated http://localhost:8000/admin/... while the user is browsing on
+     * Apache port 80 http://localhost/projects/myoffice/public or vice versa).
+     */
+    private function targetUrl(Request $request, string $url): string
+    {
+        $parsed = parse_url($url);
+        if ($parsed === false) {
+            return $url;
+        }
+
+        $path = $parsed['path'] ?? '/';
+
+        // Strip configured APP_URL path prefix if present (e.g. /projects/myoffice/public)
+        $appPath = parse_url((string) config('app.url'), PHP_URL_PATH);
+        if ($appPath !== null && $appPath !== '' && $appPath !== '/') {
+            $appPath = rtrim($appPath, '/');
+            if (str_starts_with($path, $appPath)) {
+                $path = substr($path, strlen($appPath)) ?: '/';
+            }
+        }
+
+        // Strip current request base path if already at the start of $path
+        $basePath = $request->getBasePath();
+        if ($basePath !== '' && str_starts_with($path, $basePath)) {
+            $path = substr($path, strlen($basePath)) ?: '/';
+        }
+
+        $query = isset($parsed['query']) ? '?'.$parsed['query'] : '';
+        $fragment = isset($parsed['fragment']) ? '#'.$parsed['fragment'] : '';
+
+        $root = rtrim($request->root(), '/');
+
+        return $root.'/'.ltrim($path, '/').$query.$fragment;
     }
 }
