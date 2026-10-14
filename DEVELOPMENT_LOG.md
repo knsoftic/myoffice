@@ -790,6 +790,25 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-10-14 — `deploy/aapanel-deploy.sh`: one script for a release on knsoftic.com
+
+AAPANEL.md section 15 as a script, run as root in the aaPanel terminal (always fetched from `origin/master`,
+one-liner in section 15). It prints the commits and new migrations and asks first, then: `backup:run
+--type=database --reason="pre-deploy <sha>"` while the site is still up → `down` with a random secret (bypass URL
+printed) → `merge --ff-only` → composer under PHP 8.2 explicitly, `npm ci` only when `package-lock.json` changed,
+`npm run build`, ownership back to `www` (the immutable `.user.ini` skipped) → `optimize:clear` → `migrate
+--database=mysql_migration --step` → Module/Permission/Role/Setting seeders by name → `permission:cache-reset`,
+`optimize`, `event:cache`, `media:warm-settings-images` → php-fpm reload → `queue:restart` → curl smoke test of `/`,
+`/login` and the built stylesheet through the bypass cookie → `up`, and a line in `storage/logs/deploys.log`.
+A failure after `down` leaves the site down and prints the bypass URL, the `up` command and the previous commit.
+It refuses hand-edited tracked files and a server branch that cannot fast-forward; it runs `git` with
+`safe.directory` and `core.fileMode=false` (root in a `www`-owned tree; `chmod +x artisan`).
+- AAPANEL.md section 15's hand-typed form ran a bare `db:seed --force`, which runs every seeder against live data;
+  it now names the four reference seeders as DEPLOY.md step 9 does, and clears the old caches before migrating.
+- Tested on a stubbed server in Git Bash (git real; php, composer, npm, curl, sudo, php-fpm stubbed): full run,
+  migration failure after `down` (stays down, no `up`), hand-edited file (refused before `down`), re-run at the
+  same commit, interactive "no", failed smoke test with `--yes` (stays down). **Not yet run on the real server.**
+
 ### 2026-10-13 — Late-arrival deductions show the real minutes; "Collect payment" on the fee list
 
 **Late minutes.** `/admin/payroll/attendance-deductions` showed "(0 min after the shift start and grace)" because

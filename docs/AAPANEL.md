@@ -1162,21 +1162,44 @@ is wrong — stop and fix it before the site is announced.
 
 ## 15. Deploying a release
 
-[`DEPLOY.md`](DEPLOY.md) is the full seventeen-step runbook. On this server the short form is:
+[`DEPLOY.md`](DEPLOY.md) is the full seventeen-step runbook. On this server the short form is one
+script, [`deploy/aapanel-deploy.sh`](../deploy/aapanel-deploy.sh). Run it as root in the aaPanel
+terminal, always the copy on GitHub — the one in the tree is about to be replaced:
+
+```bash
+cd /www/wwwroot/knsoftic.com && git -c safe.directory="$PWD" fetch origin master && git -c safe.directory="$PWD" show origin/master:deploy/aapanel-deploy.sh > /root/myoffice-deploy.sh && bash /root/myoffice-deploy.sh
+```
+
+It shows the commits and new migrations and asks before it touches anything; then backup →
+maintenance (it prints a bypass URL) → fast-forward → composer, npm build, permissions → migrate on
+`mysql_migration` → the four reference seeders → caches → php-fpm reload → `queue:restart` → a smoke
+test of `/`, `/login` and the stylesheet through the bypass → up. Any failure after the site went down
+**leaves it down** and prints how to look at it and how to bring it up. It refuses a live tree with
+hand-edited files and a server branch that cannot fast-forward. A worker needs no stopping: Laravel's
+`queue:work` takes no jobs while the application is down.
+
+The same steps by hand, for when the script cannot be used:
 
 ```bash
 cd /www/wwwroot/knsoftic.com
 
-sudo -u www /www/server/php/82/bin/php artisan backup:run --type=database   # 1. backup first
-sudo -u www /www/server/php/82/bin/php artisan down --secret="<random>"     # 2. maintenance
-# 3. stop the queue worker in Supervisor Manager
+sudo -u www /www/server/php/82/bin/php artisan backup:run --type=database --reason="pre-deploy"  # 1. backup first
+sudo -u www /www/server/php/82/bin/php artisan down --secret="<random>" --render=errors::503     # 2. maintenance
 
 git pull
 composer install --no-dev --optimize-autoloader --no-interaction
 npm ci && npm run build
+chown -R www:www storage bootstrap/cache        # git, composer and npm ran as root
 
-sudo -u www /www/server/php/82/bin/php artisan migrate --database=mysql_migration --force
-sudo -u www /www/server/php/82/bin/php artisan db:seed --force
+sudo -u www /www/server/php/82/bin/php artisan optimize:clear
+sudo -u www /www/server/php/82/bin/php artisan migrate --database=mysql_migration --force --step
+# The reference seeders by name. Not a bare `db:seed`: DatabaseSeeder runs every seeder, the website
+# CMS content and demo seeders included, against live data (DEPLOY.md step 9).
+sudo -u www /www/server/php/82/bin/php artisan db:seed --class=ModuleSeeder --force
+sudo -u www /www/server/php/82/bin/php artisan db:seed --class=PermissionSeeder --force
+sudo -u www /www/server/php/82/bin/php artisan db:seed --class=RoleSeeder --force
+sudo -u www /www/server/php/82/bin/php artisan db:seed --class=SettingSeeder --force
+sudo -u www /www/server/php/82/bin/php artisan permission:cache-reset
 
 sudo -u www /www/server/php/82/bin/php artisan config:cache
 sudo -u www /www/server/php/82/bin/php artisan route:cache
@@ -1184,7 +1207,6 @@ sudo -u www /www/server/php/82/bin/php artisan view:cache
 sudo -u www /www/server/php/82/bin/php artisan event:cache
 
 /etc/init.d/php-fpm-82 reload            # see 15.2 — not optional
-# start the queue worker again in Supervisor Manager
 sudo -u www /www/server/php/82/bin/php artisan cache:clear        # see 15.3 - not optional
 sudo -u www /www/server/php/82/bin/php artisan queue:restart
 sudo -u www /www/server/php/82/bin/php artisan up
@@ -1250,7 +1272,7 @@ Stated plainly, because finding it out during an incident is worse.
 
 | Gap | Consequence on this server |
 |---|---|
-| **`deploy/` does not exist.** PRODUCTION.md says the vhost, supervisor config, `schedule.bat` and `php-production.ini` "ship in the repository" at `deploy/`. They do not — the directory is absent | every config in this file is typed by hand. That is why they are reproduced here in full rather than referenced |
+| **`deploy/` holds only `aapanel-deploy.sh`.** PRODUCTION.md says the vhost, supervisor config, `schedule.bat` and `php-production.ini` "ship in the repository" at `deploy/`. They do not; the release script of section 15 is the one file there | every config in this file is typed by hand. That is why they are reproduced here in full rather than referenced |
 | **Every documented queue worker command omits the `financial` queue** | `--queue=high,default` is specified by PRODUCTION.md §5, the phase contract, and (as `high,default,low`) by `SystemHealthService`'s own remediation hint. All five commission-engine jobs dispatch to `financial`, and report exports to `exports`. Following any of those commands means **no commission is ever generated**, while `ops:health` still reports the queue as ok because the heartbeat rides on `high`. [Section 10](#10-queue-worker) has the command that works |
 | **`integrity:verify --suite=all` exits 2 — "Unknown suite"** | three real consequences here: the **nightly 02:15 integrity run fails every night**, so the daily proof of the money never runs; `composer harden` cannot pass, because that is its third step; and `golive:check` asserts the schedule *contains* `--suite=all`, so the gate currently requires the broken form to be scheduled. Until `composer.json` and `routes/console.php` are corrected to omit `--suite`, **run `php artisan integrity:verify` by hand** on the cadence you need, and do not read a green scheduler as evidence the suites ran |
 | **`settings:set` was never written** | DEPLOY.md step 13 stamps `ops.app_version` with it. You cannot. Record the deployed version elsewhere until it ships |
