@@ -184,6 +184,31 @@ final class Format
         return self::moment($value)?->format('Y-m-d\TH:i') ?? '';
     }
 
+    /**
+     * The way back from {@see inputDateTime()}: a `datetime-local` value typed in the display timezone,
+     * as the UTC instant it names — what every timestamp column stores (D61).
+     *
+     * A form value carries no offset. Handed to `Carbon::parse()` or an Eloquent cast it is read as UTC,
+     * which put a meeting typed for 11:00 in Karachi at 16:00 and refused a time entry for the last five
+     * hours as "in the future". Blank is null; an unreadable value is null for the validator to refuse.
+     */
+    public static function fromInputDateTime(mixed $value): ?CarbonImmutable
+    {
+        if ($value instanceof DateTimeInterface) {
+            return CarbonImmutable::instance($value)->utc();
+        }
+
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        try {
+            return CarbonImmutable::parse(trim($value), self::displayTimezone())->utc();
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
     public static function forHumans(mixed $value): string
     {
         $date = self::moment($value);

@@ -75,7 +75,7 @@ final class ClientController extends Controller
         $showFinancial = $actor->can('clients.view_financial');
 
         $clients = $this->filteredQuery($request, $actor)
-            ->with(['accountManager:id,name', 'portalUser:id,name,email,last_login_at'])
+            ->with(['accountManager:id,name,email,avatar_path', 'portalUser:id,name,email,last_login_at'])
             ->orderBy($sort, $direction)
             ->orderByDesc('id')
             ->paginate($this->perPage())
@@ -160,7 +160,7 @@ final class ClientController extends Controller
         $canSeeDocuments = Modules::enabled('client_documents') && $actor->can('client_documents.view_any');
 
         $client->load([
-            'accountManager:id,name,email',
+            'accountManager:id,name,email,avatar_path',
             'portalUser:id,name,email,status,last_login_at',
             'originLead:id,lead_no,name,status',
             'creator:id,name',
@@ -253,7 +253,7 @@ final class ClientController extends Controller
         $actor = $this->actor($request);
 
         $data = [
-            'client' => $client->load(['accountManager:id,name', 'contacts']),
+            'client' => $client->load(['accountManager:id,name,email,avatar_path', 'contacts']),
             'printedBy' => $actor,
             'canViewFinancial' => $actor->can('viewFinancial', $client),
         ];

@@ -19,6 +19,7 @@ use App\Models\Support\Meeting;
 use App\Models\Support\MeetingParticipant;
 use App\Models\User;
 use App\Services\Support\MeetingService;
+use App\Support\Format;
 use App\Support\RichText;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\View\View;
@@ -154,15 +155,16 @@ final class MeetingController extends Controller
     {
         Gate::authorize('reschedule', $meeting);
 
-        $to = $request->string('scheduled_at')->toString();
+        // Typed in the display timezone; stored in UTC.
+        $to = Format::fromInputDateTime($request->string('scheduled_at')->toString());
 
-        if ($to === '') {
+        if ($to === null) {
             throw ValidationException::withMessages(['scheduled_at' => 'Say when it is moving to.']);
         }
 
         $replacement = $this->meetings->reschedule(
             $meeting,
-            CarbonImmutable::parse($to),
+            $to,
             $request->string('reason')->toString(),
             $request->user(),
         );

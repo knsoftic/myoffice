@@ -14,6 +14,7 @@ use App\Services\Hr\AttendanceCorrectionService;
 use App\Services\Hr\AttendanceSummaryService;
 use App\Services\Hr\EmployeeScopeResolver;
 use App\Services\Hr\Exceptions\LockedAttendanceException;
+use App\Support\Format;
 use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\RedirectResponse;
@@ -76,8 +77,9 @@ final class AttendanceCorrectionController extends Controller
 
         $values = array_filter(
             [
-                'check_in_at' => $data['check_in_at'] ?? null,
-                'check_out_at' => $data['check_out_at'] ?? null,
+                // Typed in the display timezone; the correction service stores UTC.
+                'check_in_at' => Format::fromInputDateTime($data['check_in_at'] ?? null)?->toDateTimeString(),
+                'check_out_at' => Format::fromInputDateTime($data['check_out_at'] ?? null)?->toDateTimeString(),
                 'status' => $data['status'] ?? null,
                 'payable_factor' => $data['payable_factor'] ?? null,
                 'remarks' => $data['remarks'] ?? null,

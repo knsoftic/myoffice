@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\DataObjects\Support;
 
 use App\Enums\DeliveryMode;
+use App\Support\Format;
 use App\Support\RichText;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -56,7 +57,8 @@ final readonly class MeetingData
 
         return new self(
             title: trim((string) ($input['title'] ?? '')),
-            scheduledAt: CarbonImmutable::parse((string) ($input['scheduled_at'] ?? 'now'))->startOfMinute(),
+            // Typed in the display timezone; stored in UTC.
+            scheduledAt: (Format::fromInputDateTime($input['scheduled_at'] ?? null) ?? CarbonImmutable::now())->startOfMinute(),
             durationMinutes: (int) ($input['duration_minutes'] ?? 30),
             deliveryMode: $mode,
             location: self::text($input['location'] ?? null),

@@ -22,6 +22,7 @@ use App\Models\User;
 use App\Services\Project\Exceptions\ProjectRuleException;
 use App\Services\Project\Exceptions\TimerAlreadyRunningException;
 use App\Support\Device;
+use App\Support\Format;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -84,7 +85,8 @@ final readonly class TimerService
                     'source' => TimeEntrySource::Timer->value,
                     'status' => TimeEntryStatus::Running->value,
                     'started_at' => $startedAt,
-                    'work_date' => $startedAt->toDateString(),
+                    // The business date in the worker's timezone, not the UTC date of the instant.
+                    'work_date' => $startedAt->copy()->setTimezone(Format::displayTimezone())->toDateString(),
                     'description' => $description,
                 ])->save();
 

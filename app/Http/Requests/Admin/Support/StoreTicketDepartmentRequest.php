@@ -108,9 +108,12 @@ class StoreTicketDepartmentRequest extends FormRequest
     /**
      * The columns, with the slug derived when the form left it blank.
      *
+     * Not `attributes()`: FormRequest calls that while it is still building the validator (it names the
+     * fields in error messages), so a method by that name reading `validated()` failed every save.
+     *
      * @return array<string, mixed>
      */
-    public function attributes(): array
+    public function departmentAttributes(): array
     {
         $validated = $this->validated();
 

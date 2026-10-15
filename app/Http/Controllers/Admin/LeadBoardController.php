@@ -155,7 +155,7 @@ final class LeadBoardController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $moved = $result->lead->loadMissing('assignee:id,name,email');
+        $moved = $result->lead->loadMissing('assignee:id,name,email,avatar_path');
 
         return new JsonResponse(array_merge($result->toArray(), [
             'message' => sprintf('%s moved to %s.', $moved->name, $to->label()),

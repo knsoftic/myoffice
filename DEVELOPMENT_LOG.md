@@ -790,6 +790,59 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-10-15 — Three faults the full browser test found: support desks, form times, avatar columns
+
+The panel-by-panel browser test (report: claude.ai artifact "KN Softic ERP — Panel-wise Test Report") found three
+faults that stop real work. All three fixed here.
+
+**1. A support desk could never be saved (500), so no ticket could be raised from any panel.**
+`StoreTicketDepartmentRequest` built its columns in a method named `attributes()`. FormRequest calls `attributes()`
+while it is still building the validator (for field names in messages), so the method's `validated()` ran against a
+null validator on every save. Renamed `departmentAttributes()`; `TicketDepartmentController` store/update call it.
+No test had ever posted the form. `tests/Feature/Support/TicketDepartmentSaveTest.php` (5): create with a derived
+slug, edit, invalid input comes back as errors not a 500, refused without the permission, a ticket can be raised.
+
+**2. Times typed into `datetime-local` boxes were stored as if they were UTC (D61 says storage is UTC, display is
+`localization.timezone`).** A meeting typed for 11:00 showed at 16:00 and reminded at the wrong time; a manual time
+entry for the last five hours was refused as "in the future"; assignment deadlines, material windows and HR check-in
+corrections shifted the same way. The CMS and CRM requests already converted (`CarbonImmutable::parse($v,
+Format::displayTimezone())->utc()`); these paths did not.
+- `Format::fromInputDateTime()` — the reverse of `inputDateTime()`: a form value in the display timezone → the UTC
+  instant (an instant passes through; blank or unreadable → null).
+- Used by `MeetingData::fromArray()` and `MeetingController::reschedule()`; `TimeEntryService` (create and update);
+  `AssignmentService` (deadline, late cut-off, per-batch deadlines when duplicating — and the "Due …" notification
+  now prints local time); `CourseMaterialService` (available from/until); `AttendanceCorrectionController::store()`
+  and the self-service correction request (`AttendanceCorrectionService` expects UTC, as the register and manual
+  entry already sent it).
+- `work_date` (time entries, manual and timer) is now the start's date in the worker's timezone, as the model
+  documents — an entry at 00:30 Karachi was dated the previous (UTC) day.
+- Migration `2026_10_15_100000_meeting_clash_columns_in_local_time`: `meeting_date`, `meeting_start_time` and
+  `meeting_end_time` were `DATE/TIME(scheduled_at)`, which only matched class sessions (local wall clock) while the
+  form stored local time. They are now built from `CONVERT_TZ(scheduled_at, '+00:00', <offset>)`, the offset taken
+  from `localization.timezone` when the migration runs (+05:00; Pakistan has no DST). Rolls back to the old expressions.
+- **Existing rows are not converted.** Meetings, manual time entries, assignment deadlines, material windows and HR
+  corrections saved before this still hold the typed local time and keep showing 5 hours late. Decide per table
+  before converting anything on live — timer entries were always right, manual ones were not.
+- `tests/Feature/Support/FormTimeZoneTest.php`: the helper's round trip; a meeting typed for 11:00 stored at 06:00 UTC,
+  its clash columns 11:00–11:45 and its page showing 11:00 AM; reschedule; a 00:30 entry dated the local day; an
+  entry for earlier this morning accepted; a genuinely future one still refused. **4 of 5 pass.**
+  **Open:** `a_meeting_typed_for_eleven_is_stored_in_utc_and_shown_at_eleven` fails on one string comparison, not yet
+  diagnosed (the stored UTC value, a clash column or the page text). The reschedule test, which checks the stored UTC
+  value the same way, passes.
+- Not a bug, corrected in the report: the lead follow-up default is now + 24 h in the display timezone
+  (`crm.follow_up_default_offset_hours`); tested at 4 AM it suggested 4 AM.
+
+**3. Screens that print a user's avatar loaded the user without `avatar_path`.** The clients list and client page
+(`accountManager:id,name[,email]`) and the lead card re-rendered after a board move (`assignee:id,name,email`).
+Outside production the model is strict, so the page answered 500 as soon as a client had an account manager and a
+board drag failed; in production the avatar fell back to nothing. All now load `id,name,email,avatar_path`, the
+columns `User::avatar_url` reads (as `LeadController` already did). `tests/Feature/Crm/AccountManagerAvatarTest.php`.
+
+**Also, found by the related test run:** `CourseMaterialService` named a student who is not on the course with
+`full_name`, a column `students` does not have (it is `name`). In strict mode the refusal itself threw
+`MissingAttributeException`; `MaterialAccessTest::a_student_who_is_not_on_the_course_cannot_be_targeted` was failing
+before this change.
+
 ### 2026-10-14 — The home page is CMS-driven again, with KN Softic's own copy
 
 Commit `7a89200` added the landing section types, `cms:landing-page` and `LandingPageTest`, and in the same commit

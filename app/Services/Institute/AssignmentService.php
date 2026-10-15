@@ -24,6 +24,7 @@ use App\Services\Files\SecureFileService;
 use App\Services\Institute\Exceptions\CourseRuleException;
 use App\Services\Support\NotificationService;
 use App\Support\DateRange;
+use App\Support\Format;
 use App\Support\Money;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
@@ -106,7 +107,7 @@ final class AssignmentService
                 'deadline_at' => $deadline,
                 'late_submission_allowed' => (bool) ($attributes['late_submission_allowed']
                     ?? settings_repo()->get('institute.assignment_late_submission_default') ?? true),
-                'late_cutoff_at' => $attributes['late_cutoff_at'] ?? null,
+                'late_cutoff_at' => $this->inputMoment($attributes['late_cutoff_at'] ?? null),
                 'late_penalty_percentage' => (string) ($attributes['late_penalty_percentage']
                     ?? settings_repo()->get('institute.assignment_late_penalty_default_percentage') ?? '0.0000'),
                 'allow_resubmission' => (bool) ($attributes['allow_resubmission'] ?? true),
@@ -202,7 +203,9 @@ final class AssignmentService
                 'max_file_size_mb' => $keep('max_file_size_mb', $locked->getAttribute('max_file_size_mb')),
                 'max_files' => $this->bounded($keep('max_files', $locked->getAttribute('max_files'))),
                 'late_submission_allowed' => (bool) $keep('late_submission_allowed', $locked->getAttribute('late_submission_allowed')),
-                'late_cutoff_at' => $keep('late_cutoff_at', $locked->getAttribute('late_cutoff_at')),
+                'late_cutoff_at' => array_key_exists('late_cutoff_at', $attributes)
+                    ? $this->inputMoment($attributes['late_cutoff_at'])
+                    : $locked->getAttribute('late_cutoff_at'),
                 'late_penalty_percentage' => (string) $keep('late_penalty_percentage', $locked->getAttribute('late_penalty_percentage')),
                 'allow_resubmission' => (bool) $keep('allow_resubmission', $locked->getAttribute('allow_resubmission')),
                 'max_attempts' => $this->bounded($keep('max_attempts', $locked->getAttribute('max_attempts'))),
@@ -366,7 +369,7 @@ final class AssignmentService
                 'title' => 'New assignment: '.$published->getAttribute('title'),
                 'body' => $published->getAttribute('deadline_at') === null
                     ? 'No deadline set.'
-                    : 'Due '.Carbon::parse($published->getAttribute('deadline_at'))->format('j M Y, H:i'),
+                    : 'Due '.Format::dateTime($published->getAttribute('deadline_at')),
                 'url' => '/student/assignments/'.$published->getKey(),
                 'assignment_id' => (int) $published->getKey(),
             ], $actor);
@@ -536,7 +539,7 @@ final class AssignmentService
                     'branch_id' => $batch->getAttribute('branch_id'),
                     'teacher_id' => $batch->getAttribute('teacher_id') ?? $source->getAttribute('teacher_id'),
                     'status' => AssignmentStatus::Draft->value,
-                    'deadline_at' => $deadlines[$batchId] ?? $source->getAttribute('deadline_at'),
+                    'deadline_at' => $this->inputMoment($deadlines[$batchId] ?? null) ?? $source->getAttribute('deadline_at'),
                     'published_at' => null,
                     'closed_at' => null,
                     'expected_count' => 0,
@@ -842,11 +845,24 @@ final class AssignmentService
     {
         $raw = $attributes['deadline_at'] ?? null;
 
-        if ($raw === null || $raw === '') {
+        $deadline = $this->inputMoment($raw);
+
+        if ($deadline === null) {
             throw CourseRuleException::refuse('deadline_at', 'An assignment needs a deadline.');
         }
 
-        return Carbon::parse($raw);
+        return $deadline;
+    }
+
+    /**
+     * A deadline from the form, typed in the display timezone, as the UTC instant the column stores.
+     * A Carbon handed in by another service is already an instant and passes through unchanged.
+     */
+    private function inputMoment(mixed $value): ?Carbon
+    {
+        $instant = Format::fromInputDateTime($value);
+
+        return $instant === null ? null : Carbon::instance($instant);
     }
 
     /** @param array<string, mixed> $attributes */

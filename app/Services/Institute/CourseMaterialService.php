@@ -24,6 +24,7 @@ use App\Services\Files\SecureFileService;
 use App\Services\Institute\Exceptions\CourseRuleException;
 use App\Services\Support\NotificationService;
 use App\Support\DateRange;
+use App\Support\Format;
 use App\Support\Money;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
@@ -99,8 +100,9 @@ final class CourseMaterialService
                 'external_url' => $type->isFile() ? null : $this->assertSafeUrl($attributes['external_url'] ?? null),
                 // A link is always openable: there is nothing to withhold.
                 'is_downloadable' => $type->isFile() ? (bool) ($attributes['is_downloadable'] ?? true) : true,
-                'available_from' => $attributes['available_from'] ?? null,
-                'available_until' => $attributes['available_until'] ?? null,
+                // Typed in the display timezone; stored in UTC.
+                'available_from' => Format::fromInputDateTime($attributes['available_from'] ?? null),
+                'available_until' => Format::fromInputDateTime($attributes['available_until'] ?? null),
                 'status' => MaterialStatus::Draft->value,
                 'sort_order' => (int) ($attributes['sort_order'] ?? 0),
                 'notes' => $attributes['notes'] ?? null,
@@ -158,8 +160,12 @@ final class CourseMaterialService
                 'is_downloadable' => $type instanceof CourseResourceType && ! $type->isFile()
                     ? true
                     : (bool) $keep('is_downloadable', $locked->getAttribute('is_downloadable')),
-                'available_from' => $keep('available_from', $locked->getAttribute('available_from')),
-                'available_until' => $keep('available_until', $locked->getAttribute('available_until')),
+                'available_from' => array_key_exists('available_from', $attributes)
+                    ? Format::fromInputDateTime($attributes['available_from'])
+                    : $locked->getAttribute('available_from'),
+                'available_until' => array_key_exists('available_until', $attributes)
+                    ? Format::fromInputDateTime($attributes['available_until'])
+                    : $locked->getAttribute('available_until'),
                 'sort_order' => (int) $keep('sort_order', $locked->getAttribute('sort_order')),
                 'notes' => $keep('notes', $locked->getAttribute('notes')),
             ]);
@@ -625,7 +631,7 @@ final class CourseMaterialService
         if (! $enrolled) {
             throw CourseRuleException::refuse('targets', sprintf(
                 '%s is not enrolled on this course, so they cannot receive its material.',
-                (string) ($student->getAttribute('full_name') ?? 'Student #'.$id),
+                (string) ($student->getAttribute('name') ?? 'Student #'.$id),
             ));
         }
     }

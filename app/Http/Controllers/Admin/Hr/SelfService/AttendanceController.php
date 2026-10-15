@@ -13,6 +13,7 @@ use App\Services\Hr\AttendanceCorrectionService;
 use App\Services\Hr\AttendanceService;
 use App\Services\Hr\EmployeeScopeResolver;
 use App\Services\Hr\Exceptions\HrRuleException;
+use App\Support\Format;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -104,8 +105,9 @@ final class AttendanceController extends SelfServiceController
         ]);
 
         $values = array_filter([
-            'check_in_at' => $data['check_in_at'] ?? null,
-            'check_out_at' => $data['check_out_at'] ?? null,
+            // Typed in the display timezone; the correction service stores UTC.
+            'check_in_at' => Format::fromInputDateTime($data['check_in_at'] ?? null)?->toDateTimeString(),
+            'check_out_at' => Format::fromInputDateTime($data['check_out_at'] ?? null)?->toDateTimeString(),
         ], static fn ($value): bool => $value !== null && $value !== '');
 
         $this->corrections->request(

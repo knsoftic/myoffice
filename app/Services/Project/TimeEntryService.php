@@ -16,6 +16,7 @@ use App\Models\Project\TimeEntry;
 use App\Models\Project\TimeEntrySegment;
 use App\Models\User;
 use App\Services\Project\Exceptions\ProjectRuleException;
+use App\Support\Format;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -68,8 +69,8 @@ final readonly class TimeEntryService
             throw ProjectRuleException::timeNeedsATask();
         }
 
-        $start = Carbon::parse($startedAt);
-        $end = Carbon::parse($endedAt);
+        $start = $this->fromInput($startedAt);
+        $end = $this->fromInput($endedAt);
 
         $this->assertWindow($start, $end);
         $this->assertBackdating($start, $manualReason);
@@ -79,7 +80,7 @@ final readonly class TimeEntryService
         ): TimeEntry {
             $seconds = (int) $end->diffInSeconds($start, absolute: true);
 
-            $this->assertDayCap($user, $collaboratorId, $start->toDateString(), $seconds);
+            $this->assertDayCap($user, $collaboratorId, $this->workDate($start), $seconds);
 
             $entry = new TimeEntry;
             $entry->forceFill([
@@ -92,7 +93,7 @@ final readonly class TimeEntryService
                 'status' => TimeEntryStatus::Stopped->value,
                 'started_at' => $start,
                 'ended_at' => $end,
-                'work_date' => $start->toDateString(),
+                'work_date' => $this->workDate($start),
                 'description' => $description,
                 'manual_reason' => $manualReason,
             ])->save();
@@ -132,8 +133,8 @@ final readonly class TimeEntryService
             throw ProjectRuleException::timerEntryNotEditable();
         }
 
-        $start = Carbon::parse($startedAt);
-        $end = Carbon::parse($endedAt);
+        $start = $this->fromInput($startedAt);
+        $end = $this->fromInput($endedAt);
 
         $this->assertWindow($start, $end);
         $this->assertBackdating($start, $manualReason);
@@ -147,7 +148,7 @@ final readonly class TimeEntryService
             $this->assertDayCap(
                 $entry->worker,
                 $entry->collaborator_id,
-                $start->toDateString(),
+                $this->workDate($start),
                 $seconds,
                 ignoreEntryId: (int) $entry->getKey(),
             );
@@ -155,7 +156,7 @@ final readonly class TimeEntryService
             $entry->forceFill([
                 'started_at' => $start,
                 'ended_at' => $end,
-                'work_date' => $start->toDateString(),
+                'work_date' => $this->workDate($start),
                 'description' => $description,
                 'manual_reason' => $manualReason,
             ])->save();
@@ -211,6 +212,26 @@ final readonly class TimeEntryService
 
             TimeEntryDiscarded::dispatch($entry, $reason, $actor?->getKey());
         });
+    }
+
+    /**
+     * A `datetime-local` value from the form, typed in the display timezone, as the UTC instant stored.
+     */
+    private function fromInput(string $value): Carbon
+    {
+        $instant = Format::fromInputDateTime($value);
+
+        if ($instant === null) {
+            throw ProjectRuleException::timeWindowInvalid();
+        }
+
+        return Carbon::instance($instant);
+    }
+
+    /** The business date the work belongs to: the start, in the worker's own timezone. */
+    private function workDate(Carbon $start): string
+    {
+        return $start->copy()->setTimezone(Format::displayTimezone())->toDateString();
     }
 
     private function assertWindow(Carbon $start, Carbon $end): void

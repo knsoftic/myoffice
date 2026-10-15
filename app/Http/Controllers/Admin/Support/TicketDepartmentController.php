@@ -68,7 +68,7 @@ final class TicketDepartmentController extends Controller
     public function store(StoreTicketDepartmentRequest $request): RedirectResponse
     {
         $department = new TicketDepartment;
-        $department->fill($request->attributes())->save();
+        $department->fill($request->departmentAttributes())->save();
 
         return redirect()
             ->route('admin.ticket-departments.index')
@@ -77,7 +77,7 @@ final class TicketDepartmentController extends Controller
 
     public function update(UpdateTicketDepartmentRequest $request, TicketDepartment $department): RedirectResponse
     {
-        $department->fill($request->attributes())->save();
+        $department->fill($request->departmentAttributes())->save();
 
         return redirect()
             ->route('admin.ticket-departments.index')
