@@ -829,6 +829,24 @@ Settings: all 21 groups open (200), nothing to fix. The integrity findings, caus
   to be run once.
 - Not done: `ops.app_version` is still unstamped (DEPLOY.md step 13 — the stamping command has not shipped);
   a warning only.
+- **After deploying `78d23fa` (same day):** Run check again → **0 blocking** (was 28): Financial constraints,
+  Wallet reconciliation, Route guards, Backup verification passed; the "Run check" redirect stays on the
+  screen and the session survives. System health → **0 critical** (was 1): scheduler stamped (cron as `www`),
+  financial proofs and backups OK; the queue heartbeat only waits for the scheduler's fifth minute (the ping
+  is a closure on `high`, which the worker serves — systemd unit `knsoftic-queue`). Remaining warnings:
+  query budgets unmeasured (327 screens, `perf:budget --write-baseline` is a development step), CSP still
+  report-only (deliberate until the report log is clean), and `.env` `640 root:www` → the deploy script now
+  makes it `600 www:www` (www must read it to cache the config; the audit wants owner-only).
+- **nginx replaces Laravel's 404** on live: `/no-such-page` answers nginx's bare "404 Not Found" page (no
+  menu, no security headers) because aaPanel's `nginx.conf` sets `fastcgi_intercept_errors on` and the
+  vhost's `error_page 404` then takes over every 404 PHP returns. Fix, server-side: `fastcgi_intercept_errors
+  off;` in the knsoftic.com server block (command handed over; it backs the vhost up and restores it if
+  `nginx -t` fails).
+- Live catalogue note: `cms:seo-copy` on live wrote 53 targets and showed courses with near-duplicate slugs
+  (`wordpress` / `wordpress-2`, `digital-marketing` / `digital-marketing-2`, `social-media-marketing` /
+  `-2`, `shopify-2`, `uiux-designing-2`, `dropshipping-2`, `android-development-2`), which now share titles
+  such as "WordPress Course in Faisalabad". Live content, so left to the owner: unpublish the duplicates, or
+  give each its own SEO title in /admin/website › SEO.
 - Locally after the fixes: `security:audit --suite=all` → 0 findings (17 warnings, all the local demo users'
   seeded passwords, which live does not have).
 

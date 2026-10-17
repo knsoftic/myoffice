@@ -274,8 +274,10 @@ find . \( -path ./node_modules -o -path ./.user.ini \) -prune -o -type d -exec c
 find . \( -path ./node_modules -o -path ./.user.ini \) -prune -o -type f -exec chmod 640 {} +
 chown -R "$WEB_USER:$WEB_USER" storage bootstrap/cache
 chmod -R ug+rwX storage bootstrap/cache
-# www reads .env to cache the config (every artisan step below runs as www); nobody else reads it.
-chmod 640 .env
+# www reads .env to cache the config (every artisan step below runs as www), so www owns it and nobody else
+# can read it: 600, which is what security:audit's env.permissions asks for (640 root:www warned).
+chown "$WEB_USER:$WEB_USER" .env
+chmod 600 .env
 chmod +x artisan
 
 # --- 5. schema and reference data ------------------------------------------------------------------

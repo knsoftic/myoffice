@@ -712,15 +712,17 @@ find . -type f -not -path './node_modules/*' -exec chmod 640 {} \;
 
 chown -R www:www storage bootstrap/cache
 chmod -R ug+rwX storage bootstrap/cache
-chmod 640 .env
+chown www:www .env
+chmod 600 .env
 chmod +x  artisan
 ```
 
 The tree is **root's**, and `www` reads it through the group; only `storage/` and `bootstrap/cache/` are
 `www`'s own. Until 2026-10-17 this section said `chown -R www:www .` — with `750` directories that made the
 owner, php-fpm, able to write `app/`, `config/` and `routes/`, the opposite of the sentence above, and
-`security:audit` failed `fs.writable` on every run. `.env` is `640 root:www` because every artisan command
-here runs as `www` and must read it to cache the config.
+`security:audit` failed `fs.writable` on every run. `.env` is `600 www:www`: every artisan command here runs
+as `www` and must read it to cache the config, and `security:audit` warns on anything readable beyond its
+owner.
 
 `public/` must stay readable by nginx — it runs as `www` too, so the group's `r-x` / `r--` is
 enough. If you ever change nginx's user, revisit this.
