@@ -121,17 +121,41 @@ final class SecurityAudit extends Command
             'Permissions-Policy' => null,
         ];
 
+        // The sample has to look like a real visit. `Request::create('/login')` is http://localhost, and in
+        // production `ForceHttps` — which sits outside `SecurityHeaders` — answers a plain-http request with
+        // a bare 301 before the headers are added: every live run reported all six headers and the CSP
+        // missing while knsoftic.com was sending every one of them. So the sample goes to the real host,
+        // over https whenever https is forced.
+        $previous = app()->bound('request') ? app('request') : null;
+        $base = $previous instanceof \Illuminate\Http\Request && ! app()->runningInConsole()
+            ? $previous->getSchemeAndHttpHost()
+            : rtrim((string) config('app.url'), '/');
+
+        if (! app()->environment(['local', 'testing']) && (bool) setting('security.force_https', true)) {
+            $base = (string) preg_replace('~^http://~i', 'https://', $base);
+        }
+
+        // `/up` rather than `/login`: ForceHttps and SecurityHeaders are global middleware, so the health
+        // route carries every header, and it has no `web` group. A page with one starts a session in the
+        // shared session store — run from the integrity screen, that replaced the signed-in admin's own.
         try {
             $kernel = app(\Illuminate\Contracts\Http\Kernel::class);
-            $response = $kernel->handle(\Illuminate\Http\Request::create('/login', 'GET'));
+            $response = $kernel->handle(\Illuminate\Http\Request::create($base.'/up', 'GET'));
         } catch (Throwable $exception) {
             return [$this->finding(
                 'headers.unreachable',
                 'warning',
-                '/login',
+                '/up',
                 'a response to sample',
                 get_class($exception).': '.mb_substr($exception->getMessage(), 0, 200),
             )];
+        } finally {
+            // `Kernel::handle()` makes the sample the application's current request. Run from the
+            // integrity screen, that left the URL generator building the screen's own redirect on the
+            // sample's host, and "Run check" sent the browser to an address that does not resolve.
+            if ($previous !== null) {
+                app()->instance('request', $previous);
+            }
         }
 
         $findings = [];

@@ -157,7 +157,8 @@ final class ManifestWriter
         foreach (Route::getRoutes() as $route) {
             $name = (string) $route->getName();
 
-            if ($name !== '' && isset($wanted[$name])) {
+            // A `generated::` name is route:cache's stand-in for no name (see ManifestAuditor::namedRoutes).
+            if ($name !== '' && ! str_starts_with($name, 'generated::') && isset($wanted[$name])) {
                 $found[$name] = $route;
             }
         }

@@ -706,16 +706,23 @@ being an inconvenience and an upload bug being remote code execution.
 ```bash
 cd /www/wwwroot/knsoftic.com
 
-chown -R www:www .
+chown -R root:www .
 find . -type d -not -path './node_modules/*' -exec chmod 750 {} \;
 find . -type f -not -path './node_modules/*' -exec chmod 640 {} \;
 
+chown -R www:www storage bootstrap/cache
 chmod -R ug+rwX storage bootstrap/cache
-chmod 600 .env
+chmod 640 .env
 chmod +x  artisan
 ```
 
-`public/` must stay readable by nginx — it runs as `www` too, so `750`/`640` under `www:www` is
+The tree is **root's**, and `www` reads it through the group; only `storage/` and `bootstrap/cache/` are
+`www`'s own. Until 2026-10-17 this section said `chown -R www:www .` — with `750` directories that made the
+owner, php-fpm, able to write `app/`, `config/` and `routes/`, the opposite of the sentence above, and
+`security:audit` failed `fs.writable` on every run. `.env` is `640 root:www` because every artisan command
+here runs as `www` and must read it to cache the config.
+
+`public/` must stay readable by nginx — it runs as `www` too, so the group's `r-x` / `r--` is
 enough. If you ever change nginx's user, revisit this.
 
 **Acceptance:** `php artisan security:audit` enumerates every directory under the base path and

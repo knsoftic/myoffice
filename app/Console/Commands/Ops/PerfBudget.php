@@ -44,6 +44,17 @@ final class PerfBudget extends Command
 
     public function handle(QueryBudget $budget): int
     {
+        // Measuring signs in and sends every screen through the HTTP kernel. Inside a web request — the
+        // integrity screen's "Run check" calls this in-process — each of those requests starts a session
+        // in the store the real request shares, and Auth::login()/logout() act on the admin who pressed the
+        // button. So it measures only from the console, where the scheduler runs it weekly.
+        if (! app()->runningInConsole()) {
+            $this->warn('perf:budget measures screens through the HTTP kernel and runs only from the console '
+                .'(the scheduler runs it weekly, or: php artisan perf:budget --all). Nothing was measured.');
+
+            return 1;
+        }
+
         $rows = $this->manifestRows();
 
         if ($rows === []) {

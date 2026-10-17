@@ -398,7 +398,10 @@ final class ManifestAuditor
         foreach (Route::getRoutes() as $route) {
             $name = (string) $route->getName();
 
-            if ($name !== '') {
+            // `route:cache` names every unnamed route `generated::<random>`, fresh on each cache, so on a
+            // production server POST /login, /up and three more looked like named routes no manifest could
+            // ever list. They are unnamed routes, exactly as they are where the routes are not cached.
+            if ($name !== '' && ! str_starts_with($name, 'generated::')) {
                 $routes[$name] = $route;
             }
         }

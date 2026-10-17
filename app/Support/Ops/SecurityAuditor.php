@@ -117,7 +117,9 @@ final class SecurityAuditor
         foreach (Route::getRoutes() as $route) {
             $name = (string) $route->getName();
 
-            if ($name === '' || isset($manifest[$name])) {
+            // A `generated::` name is route:cache's stand-in for no name, different on every cache, so it
+            // can never have a manifest row (see ManifestAuditor::namedRoutes).
+            if ($name === '' || str_starts_with($name, 'generated::') || isset($manifest[$name])) {
                 continue;
             }
 

@@ -51,13 +51,20 @@
     $pageData = $page ?? data_get($site, 'page');
     $previewTarget = data_get($pageData, 'title') ?? (isset($previewSection) ? 'Section #'.$previewSection : null);
 
-    // A route with no SEO row of its own gets the bare company name from the pipeline, so /courses and
-    // /admission both had a browser tab reading just "KN Softic". When that is all the payload has, the
-    // page's own title ("Courses", "Apply for admission") is used. A title the view sets, or one an
-    // editor stored for the route, still wins.
+    // Which title the tab shows, first that exists: the one an editor stored in the SEO manager (or the
+    // record's own name), then the one the view sets, then the page's own ("Courses", "Apply for
+    // admission"), then the company name. A route with no SEO row gets the bare company name from the
+    // pipeline, which is how /courses and /admission ended up reading just "KN Softic" — and the other
+    // way round, a view's @section('title') used to beat a title stored for its route, so the SEO
+    // manager's title for /services or /contact was never shown (D23: the SEO store decides).
+    // An error page (the ones that set @section('robots')) renders on the home page's borrowed payload,
+    // so its own "Page not found" always wins.
     $seoTitle = trim((string) data_get($seo, 'title', ''));
-    $fallbackTitle = $seoTitle === '' || $seoTitle === trim((string) site_setting('company.name', ''))
-        ? trim((string) data_get($pageData, 'title', ''))
+    $seoTitleIsDefault = $seoTitle === '' || $seoTitle === trim((string) site_setting('company.name', ''));
+    $isErrorPage = trim($__env->yieldContent('robots')) !== '';
+    $viewTitle = trim($__env->yieldContent('title'));
+    $headTitle = $seoTitleIsDefault || $isErrorPage
+        ? ($viewTitle !== '' ? $viewTitle : trim((string) data_get($pageData, 'title', '')))
         : '';
     $pageSlug = data_get($pageData, 'slug');
     $exitUrl = filled($pageSlug) && Route::has('site.page')
@@ -84,7 +91,7 @@
     <x-site.seo
         :seo="$seo"
         :preview="$isPreview"
-        :title="trim($__env->yieldContent('title')) ?: $fallbackTitle"
+        :title="$headTitle"
         :robots="trim($__env->yieldContent('robots')) ?: null"
     />
 

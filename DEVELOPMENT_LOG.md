@@ -790,6 +790,73 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-10-17 — Live System health and Integrity checks: five suites failing for reasons that were not the site's
+
+Clicked through https://knsoftic.com/admin/system-health, /admin/settings and /admin/integrity-checks signed in
+as the owner, and ran every suite again ("Run check", read-only by design — the newest runs were from 26 Sep).
+Settings: all 21 groups open (200), nothing to fix. The integrity findings, cause by cause:
+- **Wallet reconciliation crashed on every run** — `IntegrityCheckSuite::Wallet` passed `--dry-run` to
+  `collaborators:reconcile-wallets`, which has no such option (it is read-only unless given `--repair`). The
+  crash is what kept "Financial proofs" **critical** on System health. Now `--run-type=manual`.
+- **Security audit and Panel isolation: "all six headers and the CSP absent from a real response"** while
+  knsoftic.com sends every one (checked with curl). `SecurityAudit::auditHeaders()` sampled
+  `Request::create('/login')` = http://localhost, and in production `ForceHttps` — outside `SecurityHeaders` —
+  answers plain http with a bare 301. The sample now goes to the real host over https when https is forced,
+  and to `/up`, which has every header and no session.
+- **"Run check" sent the browser to an address that did not resolve** (ERR_NAME_NOT_RESOLVED, plus a CSP
+  `form-action` report). The suites run in-process, and `Kernel::handle()` of the sample made it the app's
+  current request, so the controller's redirect was built on the sample's host. The audit now restores the
+  original request. Worse, the `web` group of a nested request starts a session in the shared store, and
+  `perf:budget` called `Auth::login()` / `logout()` on the admin who pressed the button: `perf:budget` now
+  measures only from the console (it records a warning, "nothing was measured", when run from the screen;
+  the scheduler runs it weekly).
+- **22 routes without a manifest row** — the ten `admin.events.*` routes and eight public pages (events,
+  fees, quote, reviews, timetable, trainers) added after the manifests, plus four `generated::<random>`
+  names: `route:cache` names every unnamed route (POST /login, POST /confirm-password, /broadcasting/auth,
+  /up) afresh on each cache, so no manifest could ever list them, while uncached they are simply unnamed.
+  `ManifestAuditor`, `ManifestWriter` and `SecurityAuditor` now treat `generated::` as unnamed. 18 route-guard
+  rows and 11 screen rows added (with rationales for the public pages; `query_budget` left null for
+  `perf:budget --write-baseline`). `security:route-manifest`: matches; `audit:manifest --check`: no drift.
+- **Composer: 3 advisories in 2 packages** — `league/commonmark` 2.10.1 → 2.10.3 (DisallowedRawHtml bypass;
+  quadratic-time GFM tables) and `symfony/http-foundation` 7.4.18 → 7.4.21 (ReDoS in `HeaderUtils::split()`).
+  `composer audit`: clean. Only those two packages changed in `composer.lock`.
+- **`fs.writable` on app/, config/, routes/, database/migrations** — AAPANEL.md §7 and the deploy script both
+  ran `chown -R www:www .` with `750` directories, so php-fpm could write the code, the opposite of what §7
+  says. Now `root:www` for the tree (www reads through the group) and `www:www` only for `storage/` and
+  `bootstrap/cache/`; `.env` `640` (www must read it to cache the config). Takes effect on the next deploy.
+- Server, not code: **no queue worker and no scheduler** have ever run on live (no heartbeats), which is
+  also why nothing was re-proved since 26 Sep. AAPANEL.md §10–11 describe both; the commands were handed over
+  to be run once.
+- Not done: `ops.app_version` is still unstamped (DEPLOY.md step 13 — the stamping command has not shipped);
+  a warning only.
+- Locally after the fixes: `security:audit --suite=all` → 0 findings (17 warnings, all the local demo users'
+  seeded passwords, which live does not have).
+
+### 2026-10-17 — Search Console queries → titles, descriptions and keywords that name the city (`cms:seo-copy`)
+
+Search Console's top queries (pasted by the owner) were the brand ("kn softic" 83 clicks; "softic", "kn
+software", "kn soft" with impressions and no clicks) and local course searches ("web development course(s) in
+faisalabad", "seo course/training in faisalabad", "graphic designing courses in faisalabad", "digital marketing
+course faisalabad", "software house near me"). Live had **one description on every page**, none naming the
+city, and a home title of just "KN Softic".
+- **`cms:seo-copy`** (`WriteSearchCopy`) writes through `SeoService::save()` into `seo_meta` and the `seo.*`
+  defaults: home ("KN Softic – IT Courses & Software House in Faisalabad"), /courses, every active category
+  ("Web Development Courses in Faisalabad", the description listing its own published courses), every
+  published course ("SEO Course in Faisalabad", with its duration), /services (the published services),
+  /contact (phone and email from settings), /fee-structure, /admission. Keywords carry the queries — Google
+  ignores `meta keywords`; the title and description carry the phrases that matter. City, company, courses and
+  services come from the database, so the copy is true on any server. **Only empty fields are written**
+  (`--overwrite` to replace); a second run writes nothing; it refuses to run with no city. `seo.meta_title` is
+  deliberately not set (it would replace every route page's own title). A competitor's name in the queries
+  ("softic era") is not used.
+- **A title stored in the SEO manager now wins over a view's `@section('title')`** (`site/layouts/public`):
+  the stored title, then the view's, then the page's, then the company name. Before, /services, /contact,
+  /fee-structure and every other view that sets a title ignored the SEO manager. Error pages (the views that
+  set `@section('robots')`) keep their own title, because they render on the home page's borrowed payload.
+- Run locally: 49 targets written; checked every page's `<title>`, description and keywords over HTTP; the
+  404 still says "Page not found".
+- **On live:** `php artisan cms:seo-copy --force` after the deploy.
+
 ### 2026-10-17 — Site-verification meta tags from Settings (Search Console, Bing, Yandex, Pinterest, Meta, any other)
 
 Asked for: a way for an admin to add the ownership meta tags Google Search Console and other services ask for.

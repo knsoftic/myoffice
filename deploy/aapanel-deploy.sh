@@ -264,13 +264,18 @@ npm run build
 [[ -f public/build/manifest.json ]] || fail "public/build/manifest.json was not produced."
 
 STEP="file permissions"
-# composer, npm and git ran as root; hand the tree back to www (AAPANEL.md 7). The immutable .user.ini
-# cannot be chowned and is skipped.
-find . -path ./.user.ini -prune -o -exec chown -h "$WEB_USER:$WEB_USER" {} +
+# The code belongs to root and is only readable by www; www owns exactly the two directories it writes
+# (AAPANEL.md 7). Handing the whole tree to www — what this step did until 2026-10-17 — left app/, config/,
+# routes/ and database/migrations writable by php-fpm, so an upload that escaped its directory could
+# become code; `security:audit` failed fs.writable on every run. The immutable .user.ini cannot be
+# chowned and is skipped.
+find . -path ./.user.ini -prune -o -exec chown -h "root:$WEB_USER" {} +
 find . \( -path ./node_modules -o -path ./.user.ini \) -prune -o -type d -exec chmod 750 {} +
 find . \( -path ./node_modules -o -path ./.user.ini \) -prune -o -type f -exec chmod 640 {} +
+chown -R "$WEB_USER:$WEB_USER" storage bootstrap/cache
 chmod -R ug+rwX storage bootstrap/cache
-chmod 600 .env
+# www reads .env to cache the config (every artisan step below runs as www); nobody else reads it.
+chmod 640 .env
 chmod +x artisan
 
 # --- 5. schema and reference data ------------------------------------------------------------------

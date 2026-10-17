@@ -124,7 +124,10 @@ enum IntegrityCheckSuite: string
     public function commandArguments(): array
     {
         return match ($this) {
-            self::Wallet => ['--dry-run' => true],
+            // Read-only already: the command rewrites a cache only when given --repair. It never had a
+            // --dry-run option, so this suite crashed on every run ("The --dry-run option does not
+            // exist") and the money proof on System health stayed critical for want of a run.
+            self::Wallet => ['--run-type' => 'manual'],
             self::Schema, self::Uploads => ['--check' => true],
             self::Isolation => ['--suite' => 'isolation'],
             self::Security => ['--suite' => 'all'],
