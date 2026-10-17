@@ -6,6 +6,7 @@ namespace App\Services\Ops;
 
 use App\Enums\IntegrityCheckStatus;
 use App\Enums\IntegrityCheckSuite;
+use App\Jobs\Ops\RunIntegritySuite;
 use App\Models\Ops\IntegrityCheckRun;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
@@ -57,10 +58,38 @@ final class IntegrityCheckService
         $runs = [];
 
         foreach (IntegrityCheckSuite::all() as $suite) {
+            // From the screen, a suite that needs a console goes to the worker and records itself there.
+            if ($this->mustQueue($suite)) {
+                $this->queue($suite, $context + ['run_uuid' => $runUuid]);
+
+                continue;
+            }
+
             $runs[] = $this->run($suite, $context + ['run_uuid' => $runUuid]);
         }
 
         return $runs;
+    }
+
+    /**
+     * Would running this suite here have to wait for the queue worker? True only inside a web request,
+     * for a suite that cannot run in one (`IntegrityCheckSuite::requiresConsole()`).
+     */
+    public function mustQueue(IntegrityCheckSuite $suite): bool
+    {
+        return $suite->requiresConsole() && ! app()->runningInConsole();
+    }
+
+    /**
+     * Hand one suite to the queue worker, to run as the person signed in now; the worker records the run.
+     *
+     * @param  array{run_uuid?: string, scope?: string|null, trigger?: string, command?: string|null}  $context
+     */
+    public function queue(IntegrityCheckSuite $suite, array $context = []): void
+    {
+        $userId = Auth::id();
+
+        RunIntegritySuite::dispatch($suite->value, $context, $userId === null ? null : (int) $userId);
     }
 
     /**

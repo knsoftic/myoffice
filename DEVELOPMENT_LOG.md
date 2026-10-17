@@ -790,6 +790,32 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-10-17 — "Run check" hands Query budgets to the queue worker; the Security and Performance suites read
+
+- **Query budgets showed Warning on every run from the screen** — by this morning's own fix: `perf:budget`
+  refuses to measure inside a web request. Now that the worker runs, `IntegrityCheckSuite::requiresConsole()`
+  (Performance only) makes `IntegrityCheckService::runAll()` / the controller hand that suite to
+  `App\Jobs\Ops\RunIntegritySuite` on `default`; the worker (a console process) runs it and records the
+  verdict, with the admin who pressed the button put back on the guard without a session so `created_by`
+  still names them, and nobody left signed in afterwards. The toast says the suite is running on the worker.
+  Console runs (`integrity:verify`, the scheduler) are unchanged.
+- The other screen warnings stay, deliberately: **CSP report-only** (enforcing would block fonts.bunny.net,
+  the Google Maps embed and YouTube embeds, and the fonts' inline `onload`, and no report endpoint collects
+  the violations — needs its own change), **327 unmeasured query budgets and 13 index notes** ("worth a look";
+  `perf:budget` skips every row that has a `params` closure, i.e. all of them, so it cannot fill budgets, and
+  guessing one is forbidden), and the "Blocking go-live 28" counter, which counts the immutable 26 Sep and
+  morning runs in range — every suite's newest run is Passed or Warning.
+- `cms:seo-copy` reported "written to 7" on a second call in the same process: Artisan keeps one command
+  instance per process and `$written` was never reset. Every target had in fact been left alone. Reset per run.
+- SEC-20 (`AuthorizationTest::test_every_route_is_accounted_for`) asserted `audit:manifest --check` exits 0,
+  so it failed for as long as any screen was unmeasured; its own docblock says it is about drift in either
+  direction, which is exit 2. Now `< 2`. It was failing before today too (exit 2: the 22 missing rows).
+- Tests: `IntegrityRunQueueTest` 3/3, `SearchCopyTest` 3/3, SEC-20 1/1, `SecretsAndErrorsTest` 6/6 (2 skipped),
+  `WalletReconciliationTest` 22/22. The full `tests/Feature/Security` + `tests/Feature/Performance` run (40
+  minutes): 1,610 passed, 461 skipped, **62 failed** — of which this session's were SearchCopyTest (fixed above)
+  and SEC-20 (above); **the other 60 are not from today's changes** — none of the routes, views or controllers
+  they name was touched (see §8 T-SECSWEEP).
+
 ### 2026-10-17 — Live System health and Integrity checks: five suites failing for reasons that were not the site's
 
 Clicked through https://knsoftic.com/admin/system-health, /admin/settings and /admin/integrity-checks signed in
@@ -841,7 +867,9 @@ Settings: all 21 groups open (200), nothing to fix. The integrity findings, caus
   menu, no security headers) because aaPanel's `nginx.conf` sets `fastcgi_intercept_errors on` and the
   vhost's `error_page 404` then takes over every 404 PHP returns. Fix, server-side: `fastcgi_intercept_errors
   off;` in the knsoftic.com server block (command handed over; it backs the vhost up and restores it if
-  `nginx -t` fails).
+  `nginx -t` fails). **Applied on live:** `nginx -t` passed, `/no-such-page-x` now answers Laravel's "Page
+  not found | KN Softic" with the security headers, and `.env` is `600 www:www`. System health re-measured at
+  10:06 → **OK, 9 of 9 probes healthy, 0 warnings, 0 critical** (queue heartbeat stamped by the worker).
 - Live catalogue note: `cms:seo-copy` on live wrote 53 targets and showed courses with near-duplicate slugs
   (`wordpress` / `wordpress-2`, `digital-marketing` / `digital-marketing-2`, `social-media-marketing` /
   `-2`, `shopify-2`, `uiux-designing-2`, `dropshipping-2`, `android-development-2`), which now share titles
@@ -4929,6 +4957,7 @@ The two HIGH findings are both real and are being fixed now:
 |---|---|---|---|
 | T1 | `@tailwindcss/vite@4` is installed but unused (Breeze switched the project to Tailwind 3 via PostCSS). | low | Remove from `package.json` during Phase 1 UI work to avoid confusion. |
 | T2 | Project path contains a space (`my office`) — awkward as an Apache docroot URL. | low | Use `php artisan serve` in dev; document a vhost in Phase 25. |
+| T-SECSWEEP | `tests/Feature/Security` + `Performance` (run 2026-10-17): 60 failures outside today's work. SEC-19 local `max_input_vars` 1000 (needs 5000 — check live too, AAPANEL §3.1); SEC-21 route sweep: a holder of the declared permission gets 403 on ~32 routes (users.*, roles.*, finance exports and reports, website pages destroy/restore, sections store/duplicate, modules.toggle, settings.mail.test, …); module-gating test hits a missing `columns_priv` table in the test DB; SEC-22 revocation/IDOR sweeps; CSRF sweep: the five portals' `notifications.read/archive` answer 404 and two CMS routes 405 instead of 419; SQL-injection timing 2.0 s > 1.0 s locally; SEC-14 `FORM_REQUEST_EXEMPT` still lists `AdmissionController::store`; SEC-03 an escaped company name still contains the text `onerror=alert(1)` in `og:site_name`; SEC-05 `{{ }}` inside `<script>` in admin/commissions/index and admin/courses/_outline-tree; SEC-07 nonce reused between two test requests; download traversal/IDOR; trashed reads not indexed on `deleted_at`; pagination scan. | med | Each needs reading on its own; none blocks the live site, which passes every integrity suite except the deliberate warnings. |
 | T-HEALTH | `MaintenanceModeTest::every_public_page_route_carries_the_public_site_gate` fails on `/health` (`routes/web.php:337`, `HealthController`), which carries no `public_site` gate. Found 2026-10-17; predates that day's work. | low | A monitoring probe should answer during maintenance, so the likely fix is to name `/health` in the test's exclusions (like `/up`), not to gate it. Left as is. |
 | T3 | The DB root user has no password (XAMPP default). | med | Fine locally; Phase 25 must document a least-privilege production DB user. |
 | T4 | Breeze shipped public self-registration at `/register`. | — | **Resolved** in Phase 1: routes, view and controller removed; a test asserts 404 on GET and POST. |

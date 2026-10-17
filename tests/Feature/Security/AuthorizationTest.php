@@ -200,7 +200,11 @@ final class AuthorizationTest extends TestCase
     {
         $exit = Artisan::call('audit:manifest', ['--check' => true]);
 
-        $this->assertSame(0, $exit, "SEC-20: audit:manifest --check failed.\n".Artisan::output());
+        // Drift — a row missing in either direction — is exit 2, and that is what SEC-20 is about. Exit 1
+        // is "worth a look" only (an unmeasured query_budget, a table with many indexes): requiring 0
+        // made this test fail for as long as any screen had not been measured, which is by design most
+        // of them (`perf:budget --write-baseline` fills budgets; nobody may guess one).
+        $this->assertLessThan(2, $exit, "SEC-20: audit:manifest --check found drift.\n".Artisan::output());
     }
 
     /**

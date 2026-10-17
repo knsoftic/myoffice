@@ -138,6 +138,18 @@ enum IntegrityCheckSuite: string
     }
 
     /**
+     * Must this suite run in a console process?
+     *
+     * `perf:budget` sends every screen through the HTTP kernel and signs in to do it; inside a web request
+     * those nested requests share the real one's session store and auth guard. So when "Run check" is
+     * pressed on the screen, `IntegrityCheckService` hands this suite to the queue worker instead.
+     */
+    public function requiresConsole(): bool
+    {
+        return $this === self::Performance;
+    }
+
+    /**
      * Is this suite about money?
      *
      * A warning here blocks a go-live where a warning elsewhere does not — see the class note and

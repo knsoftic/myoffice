@@ -68,6 +68,9 @@ final class WriteSearchCopy extends Command
             return self::FAILURE;
         }
 
+        // Artisan keeps one instance of a command per process, so a second call would count on from the first.
+        $this->written = 0;
+
         $company = trim((string) setting('company.name', ''));
         $city = trim((string) setting('contact.city', ''));
 

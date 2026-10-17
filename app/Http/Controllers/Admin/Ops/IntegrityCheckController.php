@@ -170,10 +170,16 @@ final class IntegrityCheckController extends Controller
 
                 $this->record($user, $first, 'all', $scope, count($runs));
 
+                $queued = collect(IntegrityCheckSuite::all())
+                    ->filter(static fn (IntegrityCheckSuite $suite): bool => $service->mustQueue($suite))
+                    ->map(static fn (IntegrityCheckSuite $suite): string => $suite->label())
+                    ->implode(', ');
+
                 session()->flash('toast', [
                     'type' => $this->toastType($service->worst($runs)),
                     'title' => 'All checks ran',
-                    'message' => $service->worst($runs)->label().' — '.count($runs).' suites recorded.',
+                    'message' => $service->worst($runs)->label().' — '.count($runs).' suites recorded.'
+                        .($queued === '' ? '' : ' '.$queued.' is running on the queue worker and appears here in a minute.'),
                 ]);
 
                 return $first === null
@@ -182,6 +188,19 @@ final class IntegrityCheckController extends Controller
             }
 
             $suite = IntegrityCheckSuite::from($validated['suite']);
+
+            if ($service->mustQueue($suite)) {
+                $service->queue($suite, $context);
+
+                session()->flash('toast', [
+                    'type' => 'info',
+                    'title' => $suite->label(),
+                    'message' => 'Running on the queue worker — it measures screens, which a web request cannot do safely. The run appears here in a minute.',
+                ]);
+
+                return redirect()->route('admin.integrity-checks.index');
+            }
+
             $run = $service->run($suite, $context);
 
             $this->record($user, $run, $suite->value, $scope, 1);
