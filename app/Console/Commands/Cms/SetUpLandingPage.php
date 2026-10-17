@@ -219,7 +219,25 @@ final class SetUpLandingPage extends Command
     {
         $header = $this->header();
 
-        if ($header === null || filled(data_get($header->content, 'cta_button.url'))) {
+        if ($header === null) {
+            return false;
+        }
+
+        // `WebsiteCoursesSeeder` gives the header a "View courses" button, which only repeats the Courses
+        // menu link — and while it sat there this check found a button and left it, so the admission form
+        // had no way in from the header at all. That seeded default is replaced; a button an editor chose
+        // is still left alone.
+        $url = trim((string) data_get($header->content, 'cta_button.url', ''));
+        $seededDefault = $url === '/courses' && trim((string) data_get($header->content, 'cta_button.label', '')) === 'View courses';
+
+        if ($url !== '' && ! $seededDefault) {
+            return false;
+        }
+
+        // Publishing here would push an editor's unfinished header edits live along with the button.
+        if ($header->getAttribute(WebsiteSection::UNPUBLISHED_CHANGES_COLUMN)) {
+            $this->warn('  · header: it has unpublished edits, so no Apply now button was added — publish it in /admin/website first.');
+
             return false;
         }
 
@@ -229,7 +247,7 @@ final class SetUpLandingPage extends Command
         ]);
 
         $publisher->publish($header->fresh());
-        $this->line('  · header: added an Apply now button.');
+        $this->line($seededDefault ? '  · header: replaced the View courses button with Apply now.' : '  · header: added an Apply now button.');
 
         return true;
     }

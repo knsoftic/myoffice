@@ -15,6 +15,7 @@ use App\Enums\ThemePreference;
 use App\Enums\Weekday;
 use App\Models\Branch;
 use App\Models\User;
+use App\Support\Cms\SiteVerificationTags;
 use DateTime;
 use DateTimeZone;
 use InvalidArgumentException;
@@ -797,6 +798,11 @@ final class SettingsRegistry
 
         if ($group === 'backup') {
             $errors += self::backupCrossFieldErrors($effective, $submitted);
+        }
+
+        // A verification tag pasted wrong would otherwise be dropped from the page without a word.
+        if ($group === 'seo') {
+            $errors += SiteVerificationTags::settingErrors($effective, $submitted);
         }
 
         return $errors;
@@ -2240,15 +2246,71 @@ final class SettingsRegistry
                 'span' => 4,
                 'sort' => 100,
             ],
+            // Site-ownership tags (`SiteVerificationTags`): each takes the code or the whole pasted tag,
+            // and a value that is neither is refused on save by crossFieldErrors(), never dropped silently.
             'google_site_verification' => [
-                'label' => 'Google site verification',
+                'label' => 'Google Search Console verification',
                 'type' => self::TYPE_TEXT,
-                'rules' => ['nullable', 'string', 'max:190'],
+                'rules' => ['nullable', 'string', 'max:300'],
                 'default' => null,
-                'help' => 'The content value of the verification meta tag.',
+                'placeholder' => '<meta name="google-site-verification" content="…">',
+                'help' => 'Search Console → Add property → URL prefix → HTML tag. Paste the whole tag or just its code.',
                 'public' => true,
                 'span' => 6,
                 'sort' => 110,
+            ],
+            'bing_site_verification' => [
+                'label' => 'Bing Webmaster verification',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:300'],
+                'default' => null,
+                'placeholder' => '<meta name="msvalidate.01" content="…">',
+                'help' => 'Bing Webmaster Tools → Add site → HTML meta tag. Paste the whole tag or just its code.',
+                'public' => true,
+                'span' => 6,
+                'sort' => 111,
+            ],
+            'yandex_verification' => [
+                'label' => 'Yandex verification',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:300'],
+                'default' => null,
+                'placeholder' => '<meta name="yandex-verification" content="…">',
+                'public' => true,
+                'span' => 6,
+                'sort' => 112,
+            ],
+            'pinterest_verification' => [
+                'label' => 'Pinterest verification',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:300'],
+                'default' => null,
+                'placeholder' => '<meta name="p:domain_verify" content="…">',
+                'public' => true,
+                'span' => 6,
+                'sort' => 113,
+            ],
+            'facebook_domain_verification' => [
+                'label' => 'Meta (Facebook) domain verification',
+                'type' => self::TYPE_TEXT,
+                'rules' => ['nullable', 'string', 'max:300'],
+                'default' => null,
+                'placeholder' => '<meta name="facebook-domain-verification" content="…">',
+                'help' => 'Business settings → Brand safety → Domains → Meta-tag verification.',
+                'public' => true,
+                'span' => 6,
+                'sort' => 114,
+            ],
+            'custom_meta_tags' => [
+                'label' => 'Other verification meta tags',
+                'type' => self::TYPE_TEXTAREA,
+                'rules' => ['nullable', 'string', 'max:5000'],
+                'default' => null,
+                'placeholder' => '<meta name="ahrefs-site-verification" content="…">',
+                'help' => 'For any other service: paste its <meta> tags, one per line (up to 20). Only meta tags with a name or property are accepted; scripts and anything else are refused.',
+                'public' => true,
+                'span' => 12,
+                'sort' => 115,
             ],
 
             // phase-03 §5.2 — read server-side by SeoService, never by a public view (all non-public).

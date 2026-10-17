@@ -5,23 +5,31 @@ declare(strict_types=1);
 namespace App\Support\Cms\Sections;
 
 use App\Enums\Cms\ButtonStyle;
+use App\Enums\Cms\ImageProfile;
 use App\Enums\Cms\SectionPlacement;
 use App\Support\Cms\SectionRegistry;
 
 /**
- * Three section types for a product-style landing page, declared into the section registry the same way
+ * Five section types for a product-style landing page, declared into the section registry the same way
  * `MarketingSectionTypes` is (phase-03 §6.1 "Section types declared by later phases"): pure arrays,
  * registered from `AppServiceProvider::register()`, one Blade partial each under `site/sections/`.
  *
  *   solutions   — the two halves of the business side by side as tabs (software house / training
  *                 institute), each with its own feature cards;
  *   pricing     — plans with a monthly / yearly switch, one highlighted plan, a checklist per plan;
- *   signup_cta  — a closing banner with an email box that hands the address to the contact form.
+ *   signup_cta  — a closing banner with an email box that hands the address to the contact form;
+ *   leadership  — the chief executive: photo, name, designation, a message and up to four highlights;
+ *   office      — the office: a photo gallery with a lightbox, beside the address, hours and contact
+ *                 details read from settings, with a directions link.
  *
  * Every word on them is content: headings, tab names, plan names, prices, features and button labels are
  * fields an editor changes in /admin/website, so nothing here is website text in code (CLAUDE.md §1.8).
  * Prices are plain text fields rather than numbers, because "Custom", "Free" and "Rs 4,999" are all
  * prices an editor may need to type.
+ *
+ * `leadership` and `office` also feed the home page's Organization JSON-LD (`OrganizationSchema`): the
+ * chief executive becomes a `Person` that works for the company, and the office photos become the
+ * company's images, so search engines read the same facts a visitor sees.
  */
 final class LandingSectionTypes
 {
@@ -40,6 +48,8 @@ final class LandingSectionTypes
             'solutions' => self::solutions(),
             'pricing' => self::pricing(),
             'signup_cta' => self::signupCta(),
+            'leadership' => self::leadership(),
+            'office' => self::office(),
         ];
     }
 
@@ -274,6 +284,177 @@ final class LandingSectionTypes
                 ],
             ],
             'repeaters' => [],
+            'media' => [],
+        ];
+    }
+
+    /**
+     * The chief executive. The name is the one required field: without it the section has nobody to
+     * introduce, so it cannot be published.
+     *
+     * @return array<string, mixed>
+     */
+    private static function leadership(): array
+    {
+        return [
+            'label' => 'CEO message',
+            'description' => 'The chief executive: photo, name, designation, a short message and up to four highlights.',
+            'icon' => 'user-circle',
+            'group' => 'content',
+            'placements' => [
+                SectionPlacement::Home->value => 28,
+                SectionPlacement::Page->value => 28,
+            ],
+            'unique' => false,
+            'required' => false,
+            'requirement' => 'landing page',
+            'fields' => [
+                'eyebrow' => self::text('Small label above the heading', 10, 'Leadership', 60, 6),
+                'heading' => self::text('Heading', 20, 'A word from our CEO', 120),
+                'name' => [
+                    'label' => 'Name',
+                    'type' => SectionRegistry::TYPE_TEXT,
+                    'required' => true,
+                    'default' => null,
+                    'max_chars' => 80,
+                    'span' => 6,
+                    'sort' => 30,
+                ],
+                'designation' => self::text('Designation', 40, 'Chief Executive Officer', 80, 6),
+                'quote' => self::text('Pull quote', 50, null, 200, 12, 'One line shown large above the message. Optional.'),
+                'message' => [
+                    'label' => 'Message',
+                    'type' => SectionRegistry::TYPE_TEXTAREA,
+                    'default' => null,
+                    'max_chars' => 2000,
+                    'help' => 'Leave an empty line between paragraphs.',
+                    'sort' => 60,
+                ],
+                'linkedin_url' => [
+                    'label' => 'LinkedIn profile',
+                    'type' => SectionRegistry::TYPE_URL,
+                    'default' => null,
+                    'span' => 6,
+                    'help' => 'Optional. Also tells search engines which profile is this person.',
+                    'sort' => 70,
+                ],
+                'is_founder' => [
+                    'label' => 'Also the founder',
+                    'type' => SectionRegistry::TYPE_BOOLEAN,
+                    'default' => false,
+                    'span' => 6,
+                    'help' => 'Search engines are told this person founded the company.',
+                    'sort' => 80,
+                ],
+            ],
+            'repeaters' => [
+                'fact' => [
+                    'label' => 'Highlights',
+                    'item_label' => 'highlight',
+                    'min' => 0,
+                    'max' => 4,
+                    'item_label_field' => 'label',
+                    'fields' => [
+                        'value' => [
+                            'label' => 'Value',
+                            'type' => SectionRegistry::TYPE_TEXT,
+                            'required' => true,
+                            'default' => null,
+                            'max_chars' => 20,
+                            'span' => 4,
+                            'help' => 'e.g. 10+ years.',
+                            'sort' => 10,
+                        ],
+                        'label' => [
+                            'label' => 'Label',
+                            'type' => SectionRegistry::TYPE_TEXT,
+                            'required' => true,
+                            'default' => null,
+                            'max_chars' => 60,
+                            'span' => 8,
+                            'help' => 'e.g. in software development.',
+                            'sort' => 20,
+                        ],
+                    ],
+                ],
+            ],
+            'media' => [
+                // Hero keeps the photo's own shape; a 16:9 card crop would cut a portrait at the chin.
+                'photo' => [
+                    'label' => 'CEO photo',
+                    'profile' => ImageProfile::Hero,
+                    'help' => 'A portrait works best. Publishing needs alt text on the photo (media library), e.g. the person\'s name.',
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * The office: photos, and the address, hours and contact details already kept in settings — typed
+     * once in Settings › Contact and shown here, in the footer and in the JSON-LD alike.
+     *
+     * @return array<string, mixed>
+     */
+    private static function office(): array
+    {
+        return [
+            'label' => 'Office & gallery',
+            'description' => 'Office photos in a gallery with a lightbox, beside the address, hours and contact details from settings.',
+            'icon' => 'building-office-2',
+            'group' => 'content',
+            'placements' => [
+                SectionPlacement::Home->value => 110,
+                SectionPlacement::Page->value => 110,
+            ],
+            'unique' => false,
+            'required' => false,
+            'requirement' => 'landing page',
+            'fields' => [
+                'eyebrow' => self::text('Small label above the heading', 10, 'Our office', 60, 6),
+                'heading' => self::text('Heading', 20, 'Come and see where the work happens', 120),
+                'description' => self::textarea('Short introduction', 30, null, 300),
+                'show_details' => [
+                    'label' => 'Show the address, hours and contact details',
+                    'type' => SectionRegistry::TYPE_BOOLEAN,
+                    'default' => true,
+                    'span' => 6,
+                    'help' => 'Read from Settings › Contact.',
+                    'sort' => 40,
+                ],
+                'directions_label' => self::text('Directions button label', 50, 'Get directions', 40, 6, 'Leave empty for no button.'),
+            ],
+            'repeaters' => [
+                'photo' => [
+                    'label' => 'Photos',
+                    'item_label' => 'photo',
+                    'min' => 0,
+                    'max' => 24,
+                    'item_label_field' => 'caption',
+                    'fields' => [
+                        'image' => [
+                            'label' => 'Photo',
+                            'type' => SectionRegistry::TYPE_IMAGE,
+                            'column' => 'media_asset_id',
+                            // Uncropped, so the lightbox shows the whole photo; the grid crops with CSS.
+                            'profile' => ImageProfile::Hero,
+                            'required' => true,
+                            'default' => null,
+                            'span' => 6,
+                            'help' => 'Publishing needs alt text on the photo (media library).',
+                            'sort' => 10,
+                        ],
+                        'caption' => [
+                            'label' => 'Caption',
+                            'type' => SectionRegistry::TYPE_TEXT,
+                            'default' => null,
+                            'max_chars' => 120,
+                            'span' => 6,
+                            'help' => 'Shown over the photo and in the lightbox, e.g. The training lab.',
+                            'sort' => 20,
+                        ],
+                    ],
+                ],
+            ],
             'media' => [],
         ];
     }

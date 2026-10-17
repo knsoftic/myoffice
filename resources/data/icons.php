@@ -39,5 +39,5 @@ return [
     ],
     'Time' => ['clock', 'calendar', 'calendar-days'],
     'Theme & devices' => ['sun', 'moon', 'computer-desktop'],
-    'Places' => ['building-office', 'building-office-2', 'globe-alt'],
+    'Places' => ['building-office', 'building-office-2', 'globe-alt', 'map-pin'],
 ];

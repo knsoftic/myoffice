@@ -100,8 +100,8 @@
         };
     }
 
-    $verification = trim((string) ($siteSetting('seo.google_site_verification') ?? ''));
-    $verification = preg_match('/^[A-Za-z0-9_\-]{10,190}$/', $verification) === 1 ? $verification : null;
+    // Google, Bing, Yandex, Pinterest, Meta and the custom box — parsed and rebuilt, never printed as pasted.
+    $verificationTags = \App\Support\Cms\SiteVerificationTags::forHead($siteSetting);
 
     $gtmId = null;
     $gaId = null;
@@ -164,9 +164,13 @@
     <meta name="twitter:image" content="{{ $ogImage }}">
 @endif
 
-@if ($verification !== null)
-    <meta name="google-site-verification" content="{{ $verification }}">
-@endif
+@foreach ($verificationTags as $tag)
+    @if ($tag['attribute'] === 'property')
+        <meta property="{{ $tag['name'] }}" content="{{ $tag['content'] }}">
+    @else
+        <meta name="{{ $tag['name'] }}" content="{{ $tag['content'] }}">
+    @endif
+@endforeach
 
 @if ($faviconUrl !== null)
     <link rel="icon" href="{{ $faviconUrl }}" @if ($faviconType !== null) type="{{ $faviconType }}" @endif>

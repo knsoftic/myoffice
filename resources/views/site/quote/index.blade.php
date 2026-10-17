@@ -58,7 +58,7 @@
     $label = 'mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-200';
     $hint = 'mt-1.5 text-sm text-slate-500 dark:text-slate-400';
     $error = 'mt-1.5 text-sm text-rose-600 dark:text-rose-400';
-    $optional = '<span class="font-normal text-slate-400 dark:text-slate-500">(optional)</span>';
+    $optional = 'font-normal text-slate-400 dark:text-slate-500';
 @endphp
 
 @section('title', $title)
@@ -146,7 +146,7 @@
                                 <div class="grid gap-5 sm:grid-cols-2">
                                     @if ($budgetList !== [])
                                         <div>
-                                            <label for="quote-budget" class="{{ $label }}">Rough budget {!! $optional !!}</label>
+                                            <label for="quote-budget" class="{{ $label }}">Rough budget <span class="{{ $optional }}">(optional)</span></label>
                                             <select id="quote-budget" name="budget" class="{{ $field }} pr-10" @error('budget') aria-invalid="true" @enderror>
                                                 <option value="">Prefer not to say</option>
                                                 @foreach ($budgetList as $budgetOption)
@@ -159,7 +159,7 @@
 
                                     @if ($timelineList !== [])
                                         <div>
-                                            <label for="quote-timeline" class="{{ $label }}">When do you need it? {!! $optional !!}</label>
+                                            <label for="quote-timeline" class="{{ $label }}">When do you need it? <span class="{{ $optional }}">(optional)</span></label>
                                             <select id="quote-timeline" name="timeline" class="{{ $field }} pr-10" @error('timeline') aria-invalid="true" @enderror>
                                                 <option value="">Prefer not to say</option>
                                                 @foreach ($timelineList as $timelineOption)
@@ -183,7 +183,7 @@
                                     </div>
 
                                     <div>
-                                        <label for="quote-phone" class="{{ $label }}">Phone {!! $optional !!}</label>
+                                        <label for="quote-phone" class="{{ $label }}">Phone <span class="{{ $optional }}">(optional)</span></label>
                                         <input id="quote-phone" type="tel" name="phone" value="{{ old('phone') }}" maxlength="32" autocomplete="tel" class="{{ $field }}" @error('phone') aria-invalid="true" @enderror>
                                         @error('phone')<p class="{{ $error }}">{{ $message }}</p>@enderror
                                     </div>

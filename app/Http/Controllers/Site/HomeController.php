@@ -8,6 +8,7 @@ use App\Enums\Cms\SectionPlacement;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Site\Concerns\ComposesSite;
 use App\Services\Cms\SeoService;
+use App\Support\Cms\OrganizationSchema;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -18,6 +19,9 @@ use Symfony\Component\HttpFoundation\Response;
  * read from their published snapshots under the version-stamped cache (D22). No `module:` or `can:`
  * gate: disabling `website_sections` never takes the site down (INV-15). The `public_site` middleware
  * answers the holding / maintenance page before this runs, and `site.cache` stores the response.
+ *
+ * The page also carries the company's Organization JSON-LD, built from public settings and the published
+ * CEO and office sections (`OrganizationSchema`). A preview carries none: a draft is not a fact yet.
  */
 final class HomeController extends Controller
 {
@@ -39,6 +43,9 @@ final class HomeController extends Controller
 
         $site = $this->sitePayload($this->chrome($preview), $sections, $seo, null, $preview, 'site-home');
 
-        return $this->withSiteHeaders(response()->view('site.home', ['site' => $site]), $seo, $preview);
+        return $this->withSiteHeaders(response()->view('site.home', [
+            'site' => $site,
+            'jsonLd' => $preview ? null : OrganizationSchema::forHome($sections),
+        ]), $seo, $preview);
     }
 }

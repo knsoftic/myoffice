@@ -50,6 +50,15 @@
 
     $pageData = $page ?? data_get($site, 'page');
     $previewTarget = data_get($pageData, 'title') ?? (isset($previewSection) ? 'Section #'.$previewSection : null);
+
+    // A route with no SEO row of its own gets the bare company name from the pipeline, so /courses and
+    // /admission both had a browser tab reading just "KN Softic". When that is all the payload has, the
+    // page's own title ("Courses", "Apply for admission") is used. A title the view sets, or one an
+    // editor stored for the route, still wins.
+    $seoTitle = trim((string) data_get($seo, 'title', ''));
+    $fallbackTitle = $seoTitle === '' || $seoTitle === trim((string) site_setting('company.name', ''))
+        ? trim((string) data_get($pageData, 'title', ''))
+        : '';
     $pageSlug = data_get($pageData, 'slug');
     $exitUrl = filled($pageSlug) && Route::has('site.page')
         ? route('site.page', ['slug' => $pageSlug])
@@ -75,7 +84,7 @@
     <x-site.seo
         :seo="$seo"
         :preview="$isPreview"
-        :title="trim($__env->yieldContent('title'))"
+        :title="trim($__env->yieldContent('title')) ?: $fallbackTitle"
         :robots="trim($__env->yieldContent('robots')) ?: null"
     />
 

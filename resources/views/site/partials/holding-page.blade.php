@@ -71,6 +71,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex, nofollow">
+    {{-- Ownership can be proved while the site is closed. Not rescued: every key read is public (INV-10). --}}
+    @foreach (\App\Support\Cms\SiteVerificationTags::forHead(static fn (string $key): mixed => site_setting($key)) as $tag)
+        @if ($tag['attribute'] === 'property')
+            <meta property="{{ $tag['name'] }}" content="{{ $tag['content'] }}">
+        @else
+            <meta name="{{ $tag['name'] }}" content="{{ $tag['content'] }}">
+        @endif
+    @endforeach
     <meta name="theme-color" content="#f8fafc">
     <title>{{ $pageHeading }}@if ($companyName !== '') · {{ $companyName }}@endif</title>
 

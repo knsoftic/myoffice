@@ -14,9 +14,18 @@
     With no published section at all (a brand-new install before the seeder, or every section
     switched off) the page does not render blank: it shows the company name, the tagline and the real
     contact details from settings — honest, and still useful to a visitor.
+
+    $jsonLd (optional) is the company's Organization JSON-LD (HomeController, `OrganizationSchema`); a
+    preview passes null.
 --}}
 
 @extends('site.layouts.public')
+
+@if (! empty($jsonLd))
+    @push('head')
+        <script nonce="{{ csp_nonce() }}" type="application/ld+json">@json($jsonLd)</script>
+    @endpush
+@endif
 
 @section('content')
     @php

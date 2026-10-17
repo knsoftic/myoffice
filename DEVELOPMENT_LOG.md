@@ -790,6 +790,97 @@ policies, seven controllers, 25 routes, fourteen screens, four scheduler command
 
 ## 6. Change Log
 
+### 2026-10-17 — Site-verification meta tags from Settings (Search Console, Bing, Yandex, Pinterest, Meta, any other)
+
+Asked for: a way for an admin to add the ownership meta tags Google Search Console and other services ask for.
+- There was one field, `seo.google_site_verification`, taking only the tag's `content` value. Every service shows
+  the owner the **whole tag** to copy; pasted whole, it failed a regex in `x-site.seo` and the tag silently never
+  appeared, so verification failed with nothing on any screen saying why.
+- **`App\Support\Cms\SiteVerificationTags`** — five fields, each taking the code *or* the whole pasted tag:
+  `google_site_verification` (relabelled "Google Search Console verification"), `bing_site_verification`
+  (`msvalidate.01`), `yandex_verification`, `pinterest_verification` (`p:domain_verify`),
+  `facebook_domain_verification`; plus `custom_meta_tags`, a textarea for any other service's `<meta>` tags (up to
+  20). Settings › SEO & analytics, each field with a placeholder showing the tag and help saying where to find it.
+- **Refused on save, not dropped on render.** `SettingsRegistry::crossFieldErrors()` calls
+  `SiteVerificationTags::settingErrors()` for the `seo` group: a code that is not one, a tag pasted into the wrong
+  service's field (Bing's into Google's), a `<script>` or any non-meta markup, an `http-equiv` / `charset` tag
+  (redirects, security headers), or a name the SEO pipeline already writes (robots, description, og:*, …) is a
+  field error with the reason.
+- **Nothing pasted is printed.** Each tag is parsed into a name and a content value and rebuilt through the
+  escaping echo in `x-site.seo`, and in `site/partials/holding-page.blade.php` as well — ownership can be proved
+  while the site is in maintenance (not rescued: every key read is public, and `GatesAndAuditTest` forbids a
+  rescued `site_setting()` in a site view). A custom tag repeating a
+  dedicated field's name is dropped; the field wins. The `seo` group already bumps the public cache on save.
+- Browser-checked locally: Bing's tag in the Google field → "Please check the form" with the reason, nothing
+  stored; Google's whole tag → saved, and the home page head carries the clean tag. The sample value was then
+  cleared.
+- **To verify knsoftic.com:** Search Console → Add property → URL prefix `https://knsoftic.com` → HTML tag → copy
+  the tag → Admin › Settings › SEO & analytics → paste into "Google Search Console verification" → Save → Verify.
+- Tests: `tests/Feature/Settings/SiteVerificationTagsTest.php` — 5/5 through the real settings form (`InteractsWithSettingsForms`). `GatesAndAuditTest`, `PublicSiteHardeningTest` pass; `MaintenanceModeTest` 7/8 — the one failure is pre-existing (see §8: `/health`).
+
+### 2026-10-17 — Header menu: every link clicked through, four faults fixed
+
+Every header and footer link was clicked through in the browser (desktop 1366/1024, tablet 900/768, phone 375,
+light and dark, the mobile drawer included), locally and checked on knsoftic.com.
+- **"Fees" linked to a 404.** `/fee-structure` is a 404 until `website.fee_structure_page_enabled` is on, the
+  switch defaults to **off**, and `WebsiteNavigationSeeder` adds the Fees link whenever courses are published
+  without looking at it. Fix: `App\Support\Cms\PublicPageAvailability` — `x-site.menu` now asks, per request,
+  whether an internal link's page is open: the route's `site_module:` modules enabled, and its own website switch
+  on (`SWITCHES`: fees, quote, careers, events, reviews, team, timetable, trainers, portfolio detail). A dead link
+  loses its href and is dropped, exactly like the existing unpublished-page rule (FT-28). External links, anchors
+  and unmatched paths are left alone. Switches and module toggles already bump the public cache, so the header
+  follows within one request. Locally the fee page is now **on** (all 34 published courses carry a fee); on live
+  it was already on.
+- **`/courses` and `/admission` had a browser tab reading just "KN Softic".** Neither route has a `seo_meta`
+  row, the SEO pipeline then returns the bare company name, and the views set no title of their own. Fix in
+  `site/layouts/public.blade.php`: when the payload has nothing better than the company name, the page's own
+  title (`contentPage(... ['title' => ...])`) is used — "Courses | KN Softic", "Apply for admission | KN
+  Softic". A view's `@section('title')` or an editor's stored title still wins.
+- **The admission form had no way in from the header.** `cms:landing-page --menu` adds the "Apply now" button
+  only when the header has none, and `WebsiteCoursesSeeder` had already put "View courses" there — a button that
+  repeats the Courses menu link. The command now replaces exactly that seeded default (label and URL both match),
+  leaves a button an editor chose alone, and no longer publishes a header that has unpublished edits. The
+  2026-10-14 entry below said the button was "Apply now"; until this fix it was not. Run locally: the header now
+  ends in "Apply now" → /admission.
+- `site/quote/index.blade.php` printed its "(optional)" labels with `{!! $optional !!}` — a fixed string, so not
+  an injection, but the only raw echo in the public views and it failed FT-37 (`CmsScreensTest`). Now escaped.
+- Checked and fine: About / FAQs anchors land under the sticky header (96px scroll margin), every page link is
+  200 with its own title, the drawer closes on an anchor tap, the fee table scrolls inside its own box on a
+  phone, nothing wraps at 1024px and the bar becomes the drawer below `lg`. Team, Portfolio, Blog, Careers,
+  Events, Reviews, Timetable and Trainers all work but are **empty on live**, which is why none is in the menu.
+- Local data only: FAQ #7 "Do you offer weekend classes? (browser test)", left by the 2026-10-15 browser test,
+  deleted (soft).
+- **On live after the deploy:** `php artisan cms:landing-page --menu --force` swaps the header button.
+- Tests: `tests/Feature/Cms/HeaderMenuLinksTest.php` — 6/6 (a switched-off page and a disabled module both drop the link; every `SWITCHES` entry 404s with its switch off and opens with it on; the page title fallback; the command swaps the seeded button and keeps an editor's). `MenuBehaviourTest`, `SeoSitemapRobotsTest`, `CmsScreensTest`, `LandingPageTest` pass.
+
+### 2026-10-15 — Landing page: a CEO section, an office gallery, and the company in JSON-LD
+
+Asked for: the CEO and the office on the landing page, with photos, and the same facts reaching search engines.
+- **`leadership` section type** ("CEO message", `LandingSectionTypes`): eyebrow, heading, **name (required — the
+  section cannot be published without it)**, designation, pull quote, message (plain text, an empty line starts a
+  paragraph), LinkedIn URL, "also the founder", up to four highlights (value + label), and a `photo` media role on
+  the **hero** profile — uncropped, because the 16:9 card crop cuts a portrait at the chin. View
+  `site/sections/leadership.blade.php`: portrait with a name card, the message as a `<figure>`/`<blockquote>`, the
+  highlights as a `<dl>`. Publishing needs alt text on the photo (the CMS's existing rule).
+- **`office` section type** ("Office & gallery"): eyebrow, heading, introduction, "show the address, hours and
+  contact details", directions button label, and up to 24 `photo` items (image on `media_asset_id`, hero profile,
+  plus a caption; each photo needs alt text to publish). View `site/sections/office.blade.php`: a masonry grid at each
+  photo's own proportions (the first nine; the ninth says "+N"), a lightbox (arrow keys, Escape, focus trapped and
+  returned — the portfolio pattern), and an aside with the address, grouped hours, phone, email, WhatsApp and a
+  Google Maps directions link. Those details are **read from Settings › Contact, not typed again**.
+- **`App\Support\Cms\OrganizationSchema`**: `office()` gives the view its details; `forHome()` builds the home
+  page's JSON-LD `@graph` — `Organization` (+ `LocalBusiness` once there is an address) with name, legal and short
+  name, URL, logo, office photos as `image` (max 6), description, slogan, founding year, email, phone, address,
+  geo (skipped at the untouched 0,0), map link, `OpeningHoursSpecification` (days with the same hours share one),
+  and the social profiles as `sameAs`; a `Person` for the published CEO section (`jobTitle`, photo, LinkedIn,
+  `worksFor`), named as `founder` when ticked; and a `WebSite` node. Every value comes from public settings
+  (`site_setting()`, INV-10) or a published section; an empty fact is left out. `HomeController` passes it,
+  `site/home.blade.php` pushes it into `head` with the CSP nonce; a preview gets none.
+- `map-pin` added to the icon set and to the CMS icon picker (`resources/data/icons.php`).
+- **Nothing was invented.** Neither section is placed by `cms:landing-page`: the CEO's name, designation, message
+  and photo and the office photos have to come from KN Softic, then added in /admin/website → Home → Add section.
+- Tests: `tests/Feature/Cms/LeadershipAndOfficeTest.php` — 5/5; `LandingPageTest` 5/5; `CmsScreensTest` 15/15 (the FT-37 raw-output scan passes once the quote page fix above is in).
+
 ### 2026-10-15 — Three faults the full browser test found: support desks, form times, avatar columns
 
 The panel-by-panel browser test (report: claude.ai artifact "KN Softic ERP — Panel-wise Test Report") found three
@@ -4742,6 +4833,8 @@ The two HIGH findings are both real and are being fixed now:
 | 2026-09-30 | The eight reported screens, and the suites around them | new tests (`DemoClassScreenTest`, `TimetableScreenTest`, `AttendanceRegisterScreenTest`, `PublicTeacherSlugTest`, `Panels/PortalMessagingScreensTest`, amended `FeeAuthorizationTest`), then `php artisan test tests/Feature/Institute tests/Feature/Hr tests/Feature/Financial tests/Feature/Panels` on a private test database; every failing class re-run on a clean `HEAD` worktree | New and amended tests **PASS (23/23)**. Suite: 912 passed, 27 failed, 3 skipped — 8 failures were another process dropping the shared test database mid-run (`AdmissionAuthorizationTest` passes 8/8 alone); **the other 19 fail identically on unmodified `HEAD`** (phase 14/15/16 manifests, `DocumentScreenTest`, `PublicCatalogueTest`, `RegisterManifestTest`, `MaterialAccessTest`, two commission tests), so no regression. HTTP: all eight screens driven as their roles against seeded data. |
 | 2026-10-05 | Advanced Reports (D177), after the review round | `php artisan test tests/Feature/AdvancedReports`; then Rbac, `SidebarVisibilityTest`, `Modules/Phase2`, `NoHardcodedFormatsTest`, `PermissionRegistryTest`, `PaginationScanTest`, `QueryBudgetTest`, `Institute/Fees`, `AuthorizationTest`, `CsrfAndInjectionTest`, `EscapingAndUploadsTest`, one at a time; a render-and-numbers sweep through the HTTP kernel on a `demo:seed` database, rolled back; failing classes re-run on a clean `HEAD` worktree | `AdvancedReportTest` **PASS — 30 tests / 474 assertions**. Rbac 163/163, NoHardcodedFormats 29/29, ModuleDataSafety 3/3, ModuleDependency 15/15, Institute/Fees 66/67, and all five `admin.advanced-reports.*` SEC-21 datasets pass. Sweep: **2,500 requests, 0 issues** — every period, status, payment status, sort, course, batch and search; every admission's detail page; every export — and all 116 rows and 116 detail pages reconcile with the fee caches. `audit:manifest --check` unchanged at 29 drift / 325 warnings, none for this module. **The remaining failures are not this change:** `SidebarVisibilityTest` (its list lacks Guide, System Health, Integrity Checks, Register a Student, Events), `PermissionRegistryTest` (`system_health` not core), `PaginationScanTest`, `FeeManifestTest` and four `EscapingAndUploadsTest` cases fail identically on unmodified `HEAD`; the 41 `AuthorizationTest` and 14 `CsrfAndInjectionTest` failures name no route, file or permission of this module. |
 | 2026-10-06 | Expense Sheet & Analytics (D178) | `php artisan test tests/Feature/Financial/ExpenseSheetTest.php`; then `tests/Feature/Financial`, `SidebarVisibilityTest`, `PermissionStringConsistencyTest`, `NoHardcodedFormatsTest`, `PaginationScanTest`, `AuthorizationTest --filter expense`, `audit:manifest --check`, one at a time; every failing test re-run with the change stashed (clean `41d1347`); the page driven in a browser on a `demo:seed` database with 82 expenses; `npm run build` with and without the change, compiled-view cache empty | `ExpenseSheetTest` **PASS — 9 tests / 53 assertions** (month/week/day buckets, the week-start setting, the spend rule, every filter, counts without `view_financial`, the door, an empty register, junk input, the view switch). Financial 245 passed; PermissionStringConsistency 9/9; NoHardcodedFormats 29/29; the `admin.expense-sheet.index` SEC-21 dataset passes; manifest drift unchanged at 29. **The 7 failures left fail identically without the change:** `CommissionGovernanceTest` (bulk action), `StudentCommissionEngineTest` (partial refunds, lazy loading), `PaginationScanTest`, `SidebarVisibilityTest` (its list lacks five older labels), and the `expenses.export` / `income.export` rows of `AuthorizationTest`. Build: byte-identical CSS (`app-DuNd_5-Z.css`) with and without the change. Browser: cards and grand total agree with the database to the paisa; Day/Week/Month switch, `?period=`, remembered choice, charts redrawn at full size; only "Expense Sheet" highlighted; no horizontal scroll at 375 px; no console errors. |
+| 2026-10-15 | CEO + office sections, Organization JSON-LD | `php artisan test tests/Feature/Cms/LeadershipAndOfficeTest.php tests/Feature/Cms/LandingPageTest.php`; browser preview of both sections at 1366 / 375, light and dark, lightbox by keyboard | PASS — 10/10. First run 4/5: the CMS refuses to publish an image with no alt text, so the test fixture now gives its images alt text |
+| 2026-10-17 | Header menu links, page titles, Apply now, site-verification tags | `HeaderMenuLinksTest` 6/6, `SiteVerificationTagsTest` 5/5, `CmsScreensTest` 15/15, `MenuBehaviourTest`, `SeoSitemapRobotsTest`, `GatesAndAuditTest`, `PublicSiteHardeningTest`; every header and footer link clicked in the browser (desktop, tablet, phone, drawer) and fetched on knsoftic.com | PASS, except `MaintenanceModeTest` 7/8 — `/health` has no maintenance gate, which predates this work (§8 T-HEALTH). One earlier run showed 5 failures because the settings registry and the SEO view were edited while it ran; a clean re-run passed |
 
 ---
 
@@ -4751,6 +4844,7 @@ The two HIGH findings are both real and are being fixed now:
 |---|---|---|---|
 | T1 | `@tailwindcss/vite@4` is installed but unused (Breeze switched the project to Tailwind 3 via PostCSS). | low | Remove from `package.json` during Phase 1 UI work to avoid confusion. |
 | T2 | Project path contains a space (`my office`) — awkward as an Apache docroot URL. | low | Use `php artisan serve` in dev; document a vhost in Phase 25. |
+| T-HEALTH | `MaintenanceModeTest::every_public_page_route_carries_the_public_site_gate` fails on `/health` (`routes/web.php:337`, `HealthController`), which carries no `public_site` gate. Found 2026-10-17; predates that day's work. | low | A monitoring probe should answer during maintenance, so the likely fix is to name `/health` in the test's exclusions (like `/up`), not to gate it. Left as is. |
 | T3 | The DB root user has no password (XAMPP default). | med | Fine locally; Phase 25 must document a least-privilege production DB user. |
 | T4 | Breeze shipped public self-registration at `/register`. | — | **Resolved** in Phase 1: routes, view and controller removed; a test asserts 404 on GET and POST. |
 | T5 | Authentication activity entries are filed under module `users`, not `login_history`. | low | spatie applies the *subject* model's `tapActivity()` last, so `User::activityModule()` overwrites the logger's value. Cosmetic — only feeds the Activity Log screen's module filter; `Gate::before` never reads it. Fix needs working around vendor call ordering. |

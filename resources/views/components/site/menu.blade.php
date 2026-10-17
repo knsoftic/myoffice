@@ -26,6 +26,9 @@
         tree at publish time, so without this a policy page unpublished afterwards would stay in the
         header as a dead link until the header was republished. One `pluck('slug')` per request,
         memoised on the request, and only when the tree holds a page link at all;
+      · a link to a site page that is switched off (`website.fee_structure_page_enabled` and the other
+        page switches) or whose module is disabled loses its href (`PublicPageAvailability`), so the
+        header never offers a page that answers 404;
       · a label-only parent whose children were all filtered out is dropped with them.
 
     Variants:
@@ -42,6 +45,7 @@
 @php
     use App\Enums\Cms\MenuVisibility;
     use App\Models\Cms\Page;
+    use App\Support\Cms\PublicPageAvailability;
 
     $user = auth()->user();
     $request = request();
@@ -92,7 +96,7 @@
         return ($path === '' ? '/' : $path) === $here;
     };
 
-    $filter = static function (array $list) use (&$filter, $user, $publishedSlugs, $isCurrent): array {
+    $filter = static function (array $list) use (&$filter, $user, $publishedSlugs, $isCurrent, $request): array {
         $kept = [];
 
         foreach ($list as $node) {
@@ -118,6 +122,11 @@
                 if (! in_array($slug, $publishedSlugs, true)) {
                     continue;
                 }
+            }
+
+            // A switched-off page keeps no link; with no children left either, the item goes.
+            if ($url !== null && ! PublicPageAvailability::isOpen($url, $request)) {
+                $url = null;
             }
 
             $children = $filter((array) data_get($node, 'children', []));
